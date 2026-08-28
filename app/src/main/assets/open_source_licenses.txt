@@ -1,0 +1,93 @@
+Notice for packages
+
+
+Android App Startup Runtime (1.1.1) - The Apache Software License, Version 2.0
+Android App Startup Runtime
+https://developer.android.com/jetpack/androidx/releases/startup#1.1.1
+
+Android Emoji2 Compat (1.4.0-alpha01) - The Apache Software License, Version 2.0
+Core library to enable emoji compatibility in Kitkat and newer devices to avoid the empty emoji characters.
+https://developer.android.com/jetpack/androidx/releases/emoji2#1.4.0-alpha01
+
+Android Lifecycle Process (2.6.1) - The Apache Software License, Version 2.0
+Android Lifecycle Process
+https://developer.android.com/jetpack/androidx/releases/lifecycle#2.6.1
+
+Android Resources Library (1.6.1) - The Apache Software License, Version 2.0
+The Resources Library is a static library that you can add to your Android application in order to use resource APIs that backport the latest APIs to older versions of the platform. Compatible on devices running API 14 or later.
+https://developer.android.com/jetpack/androidx/releases/appcompat#1.6.1
+
+Android Support AnimatedVectorDrawable (1.1.0) - The Apache Software License, Version 2.0
+Android Support AnimatedVectorDrawable
+https://developer.android.com/jetpack/androidx
+
+Android Support ExifInterface (1.3.6) - The Apache Software License, Version 2.0
+Android Support ExifInterface
+https://developer.android.com/jetpack/androidx/releases/exifinterface#1.3.6
+
+Android Support Library Interpolators (1.0.0) - The Apache Software License, Version 2.0
+The Support Library is a static library that you can add to your Android application in order to use APIs that are either not available for older platform versions or utility APIs that aren't a part of the framework APIs. Compatible on devices running API 14 or later.
+http://developer.android.com/tools/extras/support-library.html
+
+Android Support VectorDrawable (1.1.0) - The Apache Software License, Version 2.0
+Android Support VectorDrawable
+https://developer.android.com/jetpack/androidx
+
+AndroidX Autofill (1.0.0) - The Apache Software License, Version 2.0
+AndroidX Autofill
+https://developer.android.com/jetpack/androidx
+
+androidx.customview:poolingcontainer (1.0.0) - The Apache Software License, Version 2.0
+Utilities for listening to the lifecycle of containers that manage their child Views' lifecycle, such as RecyclerView
+https://developer.android.com/jetpack/androidx/releases/customview#1.0.0
+
+androidx.profileinstaller:profileinstaller (1.3.0) - The Apache Software License, Version 2.0
+Allows libraries to prepopulate ahead of time compilation traces to be read by ART
+https://developer.android.com/jetpack/androidx/releases/profileinstaller#1.3.0
+
+Apache Commons Collections (3.2.2)
+Types that extend and augment the Java Collections Framework.
+http://commons.apache.org/collections/
+
+Collections Kotlin Extensions (1.1.0) - The Apache Software License, Version 2.0
+Kotlin extensions for 'collection' artifact
+http://developer.android.com/tools/extras/support-library.html
+
+Compose Material Components (1.5.0-alpha01) - The Apache Software License, Version 2.0
+Compose Material Design Components library
+https://developer.android.com/jetpack/androidx/releases/compose-material#1.5.0-alpha01
+
+Compose Util (1.5.0-alpha01) - The Apache Software License, Version 2.0
+Internal Compose utilities used by other modules
+https://developer.android.com/jetpack/androidx/releases/compose-ui#1.5.0-alpha01
+
+everit-json-schema (1.14.1) - Apache License, Version 2.0
+Implementation of the JSON Schema Core Draft v4 specification built with the org.json API
+https://github.com/erosb/everit-json-schema
+
+  Handy URI Templates (2.1.8) - The Apache Software License, Version 2.0
+  Handy URI Templates is a RFC6570 compliant URI template processor. The library allows clients to
+utilize templatized URIs and inject replacement variables to expand the template into a URI. The library sports
+a fluent API, ability to plugin custom object renderers, and supports all levels of URI templates.
+  https://github.com/damnhandy/Handy-URI-Templates
+
+Joda-Time (2.10.2) - Apache 2
+Date and time library to replace JDK date handling
+https://www.joda.org/joda-time/
+
+jParsec
+
+JSR107 API and SPI (1.1.1) - Apache License, Version 2.0
+https://github.com/jsr107/jsr107spec
+
+RE2/J (1.6) - Go License
+Linear time regular expressions for Java
+http://github.com/google/re2j
+
+ThreeTen-Extra (1.7.0) - BSD 3-clause
+Additional functionality that enhances JSR-310 dates and times in Java SE 8 and later
+https://www.threeten.org/threeten-extra
+
+Tink Cryptography API for Android (1.5.0) - Apache License, Version 2.0
+Tink is a small cryptographic library that provides a safe, simple, agile and fast way to accomplish some common cryptographic tasks.
+http://github.com/google/tink

@@ -1,0 +1,172 @@
+package cn.bit101.android.config.datastore
+
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import cn.bit101.android.config.datastore.basic.Preferences
+import cn.bit101.android.config.datastore.basic.PreferencesDataStoreItem
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * @author flwfdd
+ * @date 2023/4/4 19:53
+ * @description _(:з」∠)_
+ */
+@Singleton
+internal class SettingDataStore @Inject constructor(
+    preferences: Preferences
+) {
+    // 设置模块
+    // 是否开启旋转
+    private val SETTING_ROTATE = booleanPreferencesKey("setting_rotate")
+    val settingRotate = PreferencesDataStoreItem(SETTING_ROTATE, false, preferences.SETTING_DATASTORE)
+
+    // 是否自动适配系统主题
+    private val SETTING_DYNAMIC_THEME = booleanPreferencesKey("setting_dynamic_theme")
+    val settingDynamicTheme = PreferencesDataStoreItem(SETTING_DYNAMIC_THEME, true, preferences.SETTING_DATASTORE)
+
+    // 忽略更新版本
+    private val SETTING_IGNORE_VERSION = longPreferencesKey("setting_ignore_version")
+    val settingIgnoreVersion = PreferencesDataStoreItem(SETTING_IGNORE_VERSION, -1L, preferences.SETTING_DATASTORE)
+
+    // 是否禁用暗黑主题
+    private val SETTING_DARK_THEME = stringPreferencesKey("setting_dark_theme")
+    val settingDarkTheme = PreferencesDataStoreItem(SETTING_DARK_THEME, "system", preferences.SETTING_DATASTORE)
+
+    // 是否使用webVpn
+    private val SETTING_USE_WEB_VPN = booleanPreferencesKey("setting_use_web_vpn")
+    val settingUseWebVpn = PreferencesDataStoreItem(SETTING_USE_WEB_VPN, false, preferences.SETTING_DATASTORE)
+
+    // 课程表模块配置
+    // 学期
+    private val COURSE_SCHEDULE_TERM = stringPreferencesKey("course_schedule_term")
+    val courseScheduleTerm = PreferencesDataStoreItem(COURSE_SCHEDULE_TERM, "", preferences.SETTING_DATASTORE)
+
+    // 学期开始日期
+    private val COURSE_SCHEDULE_FIRST_DAY = stringPreferencesKey("course_schedule_first_day")
+    val courseScheduleFirstDay = PreferencesDataStoreItem(COURSE_SCHEDULE_FIRST_DAY, "", preferences.SETTING_DATASTORE)
+
+    // 是否显示周六
+    private val COURSE_SCHEDULE_SHOW_SATURDAY = booleanPreferencesKey("course_schedule_show_saturday")
+    val courseScheduleShowSaturday = PreferencesDataStoreItem(COURSE_SCHEDULE_SHOW_SATURDAY, true, preferences.SETTING_DATASTORE)
+
+    // 是否显示周日
+    private val COURSE_SCHEDULE_SHOW_SUNDAY = booleanPreferencesKey("course_schedule_show_sunday")
+    val courseScheduleShowSunday = PreferencesDataStoreItem(COURSE_SCHEDULE_SHOW_SUNDAY, true, preferences.SETTING_DATASTORE)
+
+    // 是否显示边框
+    private val COURSE_SCHEDULE_SHOW_BORDER = booleanPreferencesKey("course_schedule_show_border")
+    val courseScheduleShowBorder = PreferencesDataStoreItem(COURSE_SCHEDULE_SHOW_BORDER, false, preferences.SETTING_DATASTORE)
+
+    // 是否高亮今日
+    private val COURSE_SCHEDULE_SHOW_HIGHLIGHT_TODAY = booleanPreferencesKey("course_schedule_show_highlight_today")
+    val courseScheduleShowHighlightToday = PreferencesDataStoreItem(COURSE_SCHEDULE_SHOW_HIGHLIGHT_TODAY, true, preferences.SETTING_DATASTORE)
+
+    // 是否显示节次分割线
+    private val COURSE_SCHEDULE_SHOW_DIVIDER = booleanPreferencesKey("course_schedule_show_divider")
+    val courseScheduleShowDivider = PreferencesDataStoreItem(COURSE_SCHEDULE_SHOW_DIVIDER, true, preferences.SETTING_DATASTORE)
+
+    // 是否显示当前时间
+    private val COURSE_SCHEDULE_SHOW_CURRENT_TIME = booleanPreferencesKey("course_schedule_show_current_time")
+    val courseScheduleShowCurrentTime = PreferencesDataStoreItem(COURSE_SCHEDULE_SHOW_CURRENT_TIME, true, preferences.SETTING_DATASTORE)
+
+    // 是否显示考试信息
+    private val COURSE_SCHEDULE_SHOW_EXAM_INFO = booleanPreferencesKey("course_schedule_show_exam_info")
+    val courseScheduleShowExamInfo = PreferencesDataStoreItem(COURSE_SCHEDULE_SHOW_EXAM_INFO, true, preferences.SETTING_DATASTORE)
+
+    // 时间表
+    private val COURSE_SCHEDULE_TIME_TABLE = stringPreferencesKey("course_schedule_time_table")
+    val courseScheduleTimeTable = PreferencesDataStoreItem(
+        COURSE_SCHEDULE_TIME_TABLE,
+        "08:00,08:45\n" +
+                "08:50,09:35\n" +
+                "09:55,10:40\n" +
+                "10:45,11:30\n" +
+                "11:35,12:20\n" +
+                "13:20,14:05\n" +
+                "14:10,14:55\n" +
+                "15:15,16:00\n" +
+                "16:05,16:50\n" +
+                "16:55,17:40\n" +
+                "18:30,19:15\n" +
+                "19:20,20:05\n" +
+                "20:10,20:55",
+        preferences.SETTING_DATASTORE
+    )
+
+    // 地图缩放倍率
+    private val MAP_SCALE = floatPreferencesKey("map_scale")
+    val mapScale = PreferencesDataStoreItem(MAP_SCALE, 2f, preferences.SETTING_DATASTORE)
+
+    // 乐学日程订阅链接
+    private val LEXUE_CALENDAR_URL = stringPreferencesKey("lexue_calendar_url")
+    val lexueCalendarUrl = PreferencesDataStoreItem(LEXUE_CALENDAR_URL, "", preferences.SETTING_DATASTORE)
+
+    // 日程临近改变颜色天数
+    private val DDL_SCHEDULE_BEFORE_DAY = longPreferencesKey("ddl_schedule_before_day")
+    val ddlScheduleBeforeDay = PreferencesDataStoreItem(DDL_SCHEDULE_BEFORE_DAY, 7, preferences.SETTING_DATASTORE)
+
+    // 日程过期继续显示天数
+    private val DDL_SCHEDULE_AFTER_DAY = longPreferencesKey("ddl_schedule_after_day")
+    val ddlScheduleAfterDay = PreferencesDataStoreItem(DDL_SCHEDULE_AFTER_DAY, 3, preferences.SETTING_DATASTORE)
+
+    // 空教室检索设置
+    // 当前校区名
+    private val FREE_CLASSROOM_CURRENT_CAMPUS_NAME = stringPreferencesKey("free_classroom_campus_name")
+    val freeClassroomCurrentCampusName = PreferencesDataStoreItem(FREE_CLASSROOM_CURRENT_CAMPUS_NAME, "", preferences.SETTING_DATASTORE)
+
+    // 当前校区代码
+    private val FREE_CLASSROOM_CURRENT_CAMPUS_CODE = stringPreferencesKey("free_classroom_campus_code")
+    val freeClassroomCurrentCampusCode = PreferencesDataStoreItem(FREE_CLASSROOM_CURRENT_CAMPUS_CODE, "", preferences.SETTING_DATASTORE)
+
+    // 是否隐藏不空闲的教室
+    private val FREE_CLASSROOM_HIDE_BUSY_CLASSROOM = booleanPreferencesKey("free_classroom_hide_busy_classroom")
+    val freeClassroomHideBusyClassroom = PreferencesDataStoreItem(FREE_CLASSROOM_HIDE_BUSY_CLASSROOM, true, preferences.SETTING_DATASTORE)
+
+    // 最小空闲阈值
+    private val FREE_CLASSROOM_FREE_MINUTES_THRESHOLD = longPreferencesKey("free_classroom_free_minutes_threshold")
+    val freeClassroomFreeMinutesThreshold = PreferencesDataStoreItem(FREE_CLASSROOM_FREE_MINUTES_THRESHOLD, 5, preferences.SETTING_DATASTORE)
+
+    // 话廊设置
+    // 是否隐藏机器人 Poster
+    private val GALLERY_HIDE_BOT_POSTER = booleanPreferencesKey("gallery_hide_bot_poster")
+    val galleryHideBotPoster = PreferencesDataStoreItem(GALLERY_HIDE_BOT_POSTER, false, preferences.SETTING_DATASTORE)
+
+    // 是否包括搜索栏中的机器人 Poster
+    private val GALLERY_HIDE_BOT_POSTER_IN_SEARCH = booleanPreferencesKey("gallery_hide_bot_poster_in_search")
+    val galleryHideBotPosterInSearch = PreferencesDataStoreItem(GALLERY_HIDE_BOT_POSTER_IN_SEARCH, false, preferences.SETTING_DATASTORE)
+
+    // 要隐藏的用户 UID 列表
+    private val GALLERY_HIDE_USER_UID_LIST = stringPreferencesKey("gallery_hide_user_uid_list")
+    val galleryHideUserUidList = PreferencesDataStoreItem(GALLERY_HIDE_USER_UID_LIST, "", preferences.SETTING_DATASTORE)
+
+    // 隐藏用户 - 严格模式
+    private val GALLERY_HIDE_STRICT_MODE = booleanPreferencesKey("gallery_hide_strict_mode")
+    val galleryHideStrictMode = PreferencesDataStoreItem(GALLERY_HIDE_STRICT_MODE, false, preferences.SETTING_DATASTORE)
+
+    // 是否允许横向滚动
+    private val GALLERY_ALLOW_HORIZONAL_SCROLL = booleanPreferencesKey("gallery_allow_horizonal_scroll")
+    val galleryAllowHorizonalScroll = PreferencesDataStoreItem(GALLERY_ALLOW_HORIZONAL_SCROLL, false, preferences.SETTING_DATASTORE)
+
+    // 主页设置
+    private val HOME_PAGE = stringPreferencesKey("home_page")
+    val settingHomePage = PreferencesDataStoreItem(HOME_PAGE, "schedule", preferences.SETTING_DATASTORE)
+
+    // 页面的顺序
+    private val SETTING_PAGE_ORDER = stringPreferencesKey("setting_page_order")
+    val settingPageOrder = PreferencesDataStoreItem(SETTING_PAGE_ORDER, "schedule,map,bit101-web,gallery,mine", preferences.SETTING_DATASTORE)
+
+    // 页面是否可见，不可见的在字符串中
+    private val SETTING_PAGE_VISIBLE = stringPreferencesKey("setting_page_visible")
+    val settingPageVisible = PreferencesDataStoreItem(SETTING_PAGE_VISIBLE, "", preferences.SETTING_DATASTORE)
+
+    private val SETTING_AUTO_DETECT_UPGRADE = booleanPreferencesKey("setting_auto_detect_upgrade")
+    val settingAutoDetectUpgrade = PreferencesDataStoreItem(SETTING_AUTO_DETECT_UPGRADE, true, preferences.SETTING_DATASTORE)
+
+    // 上一次的版本，用来记录是不是第一次启动
+    private val SETTING_LAST_VERSION = longPreferencesKey("setting_last_version")
+    val settingLastVersion = PreferencesDataStoreItem(SETTING_LAST_VERSION, -1, preferences.SETTING_DATASTORE)
+}
+

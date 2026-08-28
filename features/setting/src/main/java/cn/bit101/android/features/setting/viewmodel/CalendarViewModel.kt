@@ -1,0 +1,240 @@
+package cn.bit101.android.features.setting.viewmodel
+
+import android.content.Context
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import cn.bit101.android.config.setting.base.CourseScheduleSettings
+import cn.bit101.android.config.setting.base.toTimeTable
+import cn.bit101.android.data.database.entity.CustomScheduleEntity
+import cn.bit101.android.data.repo.base.CoursesRepo
+import cn.bit101.android.data.repo.base.LoginRepo
+import cn.bit101.android.features.common.helper.SimpleDataState
+import cn.bit101.android.features.common.helper.SimpleState
+import cn.bit101.android.features.common.helper.withScope
+import cn.bit101.android.features.common.helper.withSimpleDataStateLiveData
+import cn.bit101.android.features.common.helper.withSimpleStateLiveData
+import cn.bit101.android.features.common.utils.ScheduleCreateInfo
+import cn.bit101.android.features.common.utils.addScheduleToSystemCalendar
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+internal data class SettingData(
+    val showDivider: Boolean,
+    val showSaturday: Boolean,
+    val showSunday: Boolean,
+    val showHighlightToday: Boolean,
+    val showBorder: Boolean,
+    val showCurrentTime: Boolean,
+    val showExamInfo: Boolean,
+) {
+    companion object {
+        val default = SettingData(
+            showDivider = false,
+            showSaturday = false,
+            showSunday = false,
+            showHighlightToday = false,
+            showBorder = false,
+            showCurrentTime = false,
+            showExamInfo = false,
+        )
+    }
+}
+
+@HiltViewModel
+internal class CalendarViewModel @Inject constructor(
+    private val coursesRepo: CoursesRepo,
+    private val loginRepo: LoginRepo,
+    private val courseScheduleSettings: CourseScheduleSettings
+) : ViewModel() {
+
+    // 设置的当前学期
+    val currentTermFlow = coursesRepo.getCurrentTermFromLocal()
+
+    // 当前学期的第一天
+    val firstDayFlow = courseScheduleSettings.firstDay.flow
+
+    val settingDataFlow = combine(
+        courseScheduleSettings.showSaturday.flow,
+        courseScheduleSettings.showSunday.flow,
+        courseScheduleSettings.showBorder.flow,
+        courseScheduleSettings.highlightToday.flow,
+        courseScheduleSettings.showDivider.flow,
+        courseScheduleSettings.showCurrentTime.flow,
+        courseScheduleSettings.showExamInfo.flow,
+    ) { settings ->
+        SettingData(
+            showSaturday = settings[0],
+            showSunday = settings[1],
+            showBorder = settings[2],
+            showHighlightToday = settings[3],
+            showDivider = settings[4],
+            showCurrentTime = settings[5],
+            showExamInfo = settings[6],
+        )
+    }
+
+    val timeTableFlow = courseScheduleSettings.timeTable.flow
+
+    // 学期列表获取状态
+    val getTermListStateLiveData = MutableLiveData<SimpleDataState<List<String>>?>(null)
+
+    // 学期起始日期获取状态
+    val getFirstDayStateLiveData = MutableLiveData<SimpleState?>(null)
+
+    // 课程获取状态
+    val getCoursesStateLiveData = MutableLiveData<SimpleState?>(null)
+
+    // 考试安排获取状态
+    // 数据表示更新的条数
+    val getExamsStateLiveData = MutableLiveData<SimpleDataState<Int>?>(null)
+
+    // 设置当前学期的状态
+    val setCurrentTermStateLiveData = MutableLiveData<SimpleState?>(null)
+
+    // 设置时间表的状态
+    val setTimeTableStateLiveData = MutableLiveData<SimpleState?>(null)
+
+    // 自定义日程获取状态
+    val getCustomScheduleStateLiveData = MutableLiveData<SimpleDataState<List<CustomScheduleEntity>>?>(null)
+    // 自定义日程删除状态
+    val deleteCustomScheduleStateLiveData = MutableLiveData<SimpleState?>(null)
+    // 自定义日程编辑状态
+    val editCustomScheduleStateLiveData = MutableLiveData<SimpleState?>(null)
+
+    val addScheduleToSysCalendarStateLiveData = MutableLiveData<SimpleState?>(null)
+
+    fun getTermList() = withSimpleDataStateLiveData(getTermListStateLiveData) {
+        loginRepo.doOperationRequiresLogin(coursesRepo::getTermListFromNet)
+    }
+
+    fun setCurrentTerm(term: String) {
+        setCurrentTermStateLiveData.value = SimpleState.Loading
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val oldTerm = currentTermFlow.first() ?: ""
+
+            try {
+                loginRepo.doOperationRequiresLogin {
+                    courseScheduleSettings.term.set(term)
+
+                    // 重新获取第一天
+                    getFirstDayWithoutState()
+
+                    // 重新获取课程
+                    getCoursesWithoutState()
+
+                    // 重新获取考试安排
+                    getExamsWithoutState()
+
+                    setCurrentTermStateLiveData.postValue(SimpleState.Success)
+                }
+            } catch (e: Exception) {
+                try {
+                    courseScheduleSettings.term.set(oldTerm)
+
+                    // 重新获取第一天
+                    getFirstDayWithoutState()
+
+                    // 重新获取课程
+                    getCoursesWithoutState()
+
+                    // 重新获取考试安排
+                    getExamsWithoutState()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                e.printStackTrace()
+                setCurrentTermStateLiveData.postValue(SimpleState.Fail)
+            }
+        }
+    }
+
+    fun getCustomSchedules() = withSimpleDataStateLiveData(getCustomScheduleStateLiveData) {
+        coursesRepo
+            .getCustomSchedules()
+            .first()
+            .sortedBy { it.date.atTime(it.beginTime) }
+    }
+
+    fun deleteCustomSchedule(scheduleEntity: CustomScheduleEntity) = withSimpleStateLiveData(deleteCustomScheduleStateLiveData) {
+        coursesRepo.deleteCustomSchedule(scheduleEntity)
+    }
+
+    fun addScheduleToSysCalendar(context: Context, schedule: CustomScheduleEntity) = withSimpleStateLiveData(addScheduleToSysCalendarStateLiveData) {
+        addScheduleToSystemCalendar(context, schedule)
+    }
+
+    fun updateCustomSchedule(
+        scheduleEntity: CustomScheduleEntity,
+        scheduleCreateInfo: ScheduleCreateInfo
+    ) = withSimpleStateLiveData(editCustomScheduleStateLiveData) {
+        coursesRepo.updateCustomSchedule(
+            scheduleCreateInfo.toEntity().copy(
+                id = scheduleEntity.id,
+            )
+        )
+    }
+
+    fun setSettingData(settingData: SettingData) = withScope {
+        courseScheduleSettings.showDivider.set(settingData.showDivider)
+        courseScheduleSettings.showSaturday.set(settingData.showSaturday)
+        courseScheduleSettings.showSunday.set(settingData.showSunday)
+        courseScheduleSettings.highlightToday.set(settingData.showHighlightToday)
+        courseScheduleSettings.showBorder.set(settingData.showBorder)
+        courseScheduleSettings.showCurrentTime.set(settingData.showCurrentTime)
+        courseScheduleSettings.showExamInfo.set(settingData.showExamInfo)
+    }
+
+    private suspend fun getFirstDayWithoutState() {
+        val term = currentTermFlow.first() ?: throw Exception("no term")
+        val firstDay = coursesRepo.getFirstDayFromNet(term)
+        courseScheduleSettings.firstDay.set(firstDay)
+    }
+
+    fun getFirstDay() = withSimpleStateLiveData(getFirstDayStateLiveData) {
+        loginRepo.doOperationRequiresLogin(this::getFirstDayWithoutState)
+    }
+
+    private suspend fun getCoursesWithoutState() {
+        val term = currentTermFlow.first() ?: throw Exception("no term")
+        val courses = coursesRepo.getCoursesFromNet(term)
+        coursesRepo.saveCourses(courses)
+    }
+
+    fun getCourses() = withSimpleStateLiveData(getCoursesStateLiveData) {
+        loginRepo.doOperationRequiresLogin(this::getCoursesWithoutState)
+    }
+
+    private suspend fun getExamsWithoutState() {
+        val term = currentTermFlow.first() ?: throw Exception("no term")
+
+        val exams = coursesRepo.getExamsFromNet(term)
+        coursesRepo.saveExams(exams)
+    }
+
+    fun getExams() = withSimpleDataStateLiveData(getExamsStateLiveData) {
+        // 额外统计这次更新实际更新了几条考试信息 (我是急急国王.jpg)
+        val previousExams = coursesRepo.getExamsFromLocal().first()
+
+        loginRepo.doOperationRequiresLogin(this::getExamsWithoutState)
+
+        val nowExams = coursesRepo.getExamsFromLocal().first()
+
+        val updateCount = nowExams.count { nowExam ->
+            previousExams.none { prevExam ->
+                nowExam.copy(id = prevExam.id) == prevExam
+            }
+        }
+
+        updateCount
+    }
+
+    fun setTimeTable(timeTableStr: String) = withSimpleStateLiveData(setTimeTableStateLiveData) {
+        courseScheduleSettings.timeTable.set(timeTableStr.toTimeTable())
+    }
+}

@@ -1,0 +1,36 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "https://jitpack.io" }
+    }
+}
+rootProject.name = "BIT101-S"
+include ':app'
+include ':api'
+include ':config'
+include ':data'
+include ':features'
+include ':features:common'
+include ':features:schedule'
+include ':features:web'
+include ':features:map'
+include ':features:setting'
+include ':features:gallery'
+include ':features:postedit'
+include ':features:poster'
+include ':features:report'
+include ':features:user'
+include ':features:message'
+include ':features:login'
+include ':features:versions'
+include ':features:theme'
+include ':features:seat'
