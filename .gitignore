@@ -11,3 +11,8 @@ local.properties
 
 /TODO.md
 /AGENTS.md
+/features/*/build/
+/api/build/
+/config/build/
+/data/build/
+/app/build/

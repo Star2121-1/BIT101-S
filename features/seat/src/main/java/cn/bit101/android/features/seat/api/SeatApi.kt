@@ -15,6 +15,7 @@ import org.json.JSONObject
 import java.net.CookieManager
 import java.net.HttpCookie
 import java.net.URI
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatDate

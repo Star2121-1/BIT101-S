@@ -20,6 +20,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -110,7 +111,7 @@ fun NewTaskScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
 
     if (showLoginDialog) {
         androidx.compose.material3.AlertDialog(onDismissRequest = { showLoginDialog = false }, title = { Text("需要登录") },
-            text = { Text("座位预约需要使用学校统一身份认证登录后才能使用。请在"卷"页面登录后，再回来使用座位预约功能。") },
+            text = { Text("座位预约需要使用学校统一身份认证登录后才能使用。请在卷页面登录后，再回来使用座位预约功能。") },
             confirmButton = { TextButton(onClick = { showLoginDialog = false }) { Text("知道了") } })
     }
 }
