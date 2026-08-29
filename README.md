@@ -102,3 +102,21 @@ cd F:\Agent_Work\BIT-102\BIT101-seat
 ./gradlew assembleDebug
 # APK 输出: app/build/outputs/apk/debug/app-debug.apk
 ```
+
+---
+
+## 测试状态
+
+| 项目 | 状态 |
+|------|------|
+| Gradle 编译 | ✅ 通过 |
+| Hilt 依赖注入 | ✅ 修复（`@HiltViewModel`） |
+| 座位页面 UI 渲染 | ✅ 正常（模拟器 Pixel_6_API_34） |
+| Seat 按钮点击响应 | ✅ 正常 |
+| 真实座位数据加载 | ⏳ 需网络连接到 seatlib.bit.edu.cn |
+| 登录态复用 | ⏳ 需先在全局登录页完成 BIT101 登录 |
+
+### 已知问题
+
+- 模拟器无 WiFi 时点击 Seat 按钮会触发网络请求超时，但不再崩溃（之前因 Hilt 工厂缺失崩溃）
+- 真实预约需在学校网络或通过 VPN 连接到 seatlib.bit.edu.cn

@@ -46,7 +46,7 @@ import cn.bit101.android.features.seat.model.TaskStatus
 @Composable
 fun TaskListScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
     val tasks by viewModel.tasks.collectAsState()
-    val isLoggedIn = viewModel.seatApi.token.isNotEmpty()
+    val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
 
     if (!isLoggedIn && tasks.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

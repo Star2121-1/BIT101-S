@@ -187,13 +187,12 @@ class SeatSession @JvmOverloads constructor(
             userRes.close()
 
             val json = JSONObject(userBody)
-            val memberArr = json.optJSONArray("member")
-            if (memberArr != null && memberArr.length() > 0) {
-                val m = memberArr.getJSONObject(0)
-                val token = m.optString("token", "")
+            val member = json.optJSONObject("member")
+            if (member != null && !member.isNull("token")) {
+                val token = member.optString("token", "")
                 if (token.isNotEmpty()) {
                     jwtToken = token
-                    return@withContext Result.success(LoginResult(token = token, name = m.optString("name", ""), studentId = m.optString("id", "")))
+                    return@withContext Result.success(LoginResult(token = token, name = member.optString("name", ""), studentId = member.optString("id", "")))
                 }
             }
 
@@ -216,13 +215,12 @@ class SeatSession @JvmOverloads constructor(
             res.close()
 
             val json = JSONObject(body)
-            val memberArr = json.optJSONArray("member")
-            if (memberArr != null && memberArr.length() > 0) {
-                val m = memberArr.getJSONObject(0)
-                val token = m.optString("token", "")
+            val member = json.optJSONObject("member")
+            if (member != null && !member.isNull("token")) {
+                val token = member.optString("token", "")
                 if (token.isNotEmpty()) {
                     jwtToken = token
-                    return@withContext Result.success(LoginResult(token = token, name = m.optString("name", ""), studentId = m.optString("id", "")))
+                    return@withContext Result.success(LoginResult(token = token, name = member.optString("name", ""), studentId = member.optString("id", "")))
                 }
             }
             Result.failure(Exception("Session expired"))

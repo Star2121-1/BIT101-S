@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -66,6 +67,8 @@ fun SeatMapScreen(
     val dates by viewModel.seatDates.collectAsState()
     var selectedSeat by remember { mutableStateOf<Seat?>(null) }
     var isReserving by remember { mutableStateOf(false) }
+    var showLoginDialog by remember { mutableStateOf(false) }
+    val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -151,6 +154,7 @@ fun SeatMapScreen(
                     }
                     if (selectedSeat?.status == SeatStatus.RESERVED) {
                         Button(onClick = {
+                            if (!isLoggedIn) { showLoginDialog = true; return@Button }
                             val seat = selectedSeat
                             if (seat != null) { scope.launch { viewModel.cancelReservation(seat.id); snackbarHostState.showSnackbar("已尝试取消座位 ${seat.no}"); selectedSeat = null } }
                         }, enabled = selectedSeat != null && !isReserving, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
@@ -159,6 +163,7 @@ fun SeatMapScreen(
                         }
                     }
                     Button(onClick = {
+                        if (!isLoggedIn) { showLoginDialog = true; return@Button }
                         val seat = selectedSeat
                         if (seat != null) {
                             isReserving = true
@@ -177,6 +182,12 @@ fun SeatMapScreen(
                 }
             }
         }
+    }
+
+    if (showLoginDialog) {
+        AlertDialog(onDismissRequest = { showLoginDialog = false }, title = { Text("需要登录") },
+            text = { Text("座位预约需要使用学校统一身份认证登录后才能使用。请在卷页面登录后，再回来使用座位预约功能。") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { showLoginDialog = false }) { Text("知道了") } })
     }
 }
 

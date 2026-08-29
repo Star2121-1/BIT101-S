@@ -56,7 +56,7 @@ fun NewTaskScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
     val seatlibReady by viewModel.seatlibReady.collectAsState()
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val treeLoading = treeNodes.isEmpty()
-    val isLoggedIn = viewModel.seatApi.token.isNotEmpty()
+    val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
 
     LaunchedEffect(reserveDate, seatlibReady) {
         if (seatlibReady) { viewModel.loadSeatTree(reserveDate.format(dateFormatter)); selectedCampus = null; selectedFloor = null; selectedArea = null }
@@ -111,7 +111,7 @@ fun NewTaskScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
 
     if (showLoginDialog) {
         androidx.compose.material3.AlertDialog(onDismissRequest = { showLoginDialog = false }, title = { Text("需要登录") },
-            text = { Text("座位预约需要使用学校统一身份认证登录后才能使用。请在卷页面登录后，再回来使用座位预约功能。") },
+            text = { Text("座位预约需要使用学校统一身份认证登录后才能使用。请在`卷`页面登录后，再回来使用座位预约功能。") },
             confirmButton = { TextButton(onClick = { showLoginDialog = false }) { Text("知道了") } })
     }
 }

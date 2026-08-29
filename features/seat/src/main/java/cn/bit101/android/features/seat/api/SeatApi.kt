@@ -1,5 +1,6 @@
 package cn.bit101.android.features.seat.api
 
+import android.util.Log
 import cn.bit101.android.config.user.base.LoginStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,6 +14,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.CookieManager
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.HttpCookie
 import java.net.URI
 import java.io.IOException
@@ -97,7 +100,8 @@ class SeatApi(private val loginStatus: LoginStatus) {
             val body = jsonBody(JSONObject().put("date", date))
             val res = client.newCall(Request.Builder().url("$BASE/api/Seat/tree").post(body).build()).execute()
             val bodyStr = res.body?.string() ?: ""
-            if (res.code != 200 || bodyStr.isEmpty()) throw IOException("HTTP ${res.code}")
+            Log.d("SeatApi", "getSeatTree: code=${res.code}, body=$bodyStr")
+            if (res.code != 200 || bodyStr.isEmpty()) throw IOException("HTTP ${res.code}: $bodyStr")
             val json = JSONObject(bodyStr)
             val data = json.optJSONArray("data") ?: throw Exception("No data")
             val nodes = mutableListOf<SeatTreeNode>()

@@ -1,5 +1,6 @@
 package cn.bit101.android.features.seat
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.user.base.LoginStatus
@@ -12,12 +13,13 @@ import cn.bit101.android.features.seat.model.SeatStatus
 import cn.bit101.android.features.seat.model.SeatTreeNode
 import cn.bit101.android.features.seat.model.TaskMode
 import cn.bit101.android.features.seat.model.TaskStatus
-import dagger.hilt.android.scopes.ViewModelScoped
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -28,7 +30,7 @@ data class SeatMapState(
     val error: String? = null
 )
 
-@ViewModelScoped
+@HiltViewModel
 class SeatViewModel @Inject constructor(
     private val loginStatus: LoginStatus
 ) : ViewModel() {
@@ -39,14 +41,64 @@ class SeatViewModel @Inject constructor(
     private var _seatlibReady = MutableStateFlow(false)
     val seatlibReady: StateFlow<Boolean> = _seatlibReady.asStateFlow()
 
+    private val _isLoggedIn = MutableStateFlow(false)
+    val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
+
+    private fun updateLoginState() {
+        _isLoggedIn.value = seatApi.token.isNotEmpty()
+    }
+
+    private suspend fun tryAutoLogin() {
+        if (seatApi.token.isNotEmpty()) return
+        val sid = loginStatus.sid.get()
+        val password = loginStatus.password.get()
+        if (sid.isEmpty() || password.isEmpty()) return
+        Log.d("SeatViewModel", "auto-login with stored credentials: $sid")
+        val result = seatSession.login(sid, password)
+        if (result.isSuccess) {
+            seatApi.token = result.getOrThrow().token
+            updateLoginState()
+            Log.d("SeatViewModel", "auto-login success: token=${seatApi.token.take(8)}...")
+        } else {
+            Log.d("SeatViewModel", "auto-login failed: ${result.exceptionOrNull()?.message}")
+        }
+    }
+
     init {
         viewModelScope.launch {
-            // Try to authenticate with seatlib using existing school cookies
+            // Try silent auth first (cookie-based)
             val result = seatSession.authenticateSeatlib()
             if (result.isSuccess) {
                 seatApi.token = result.getOrThrow().token
+                updateLoginState()
+                Log.d("SeatViewModel", "authenticateSeatlib success: token=${seatApi.token.take(8)}...")
+            } else {
+                Log.d("SeatViewModel", "authenticateSeatlib failed: ${result.exceptionOrNull()?.message}")
+            }
+            // If silent auth fails but user has stored BIT101 credentials, try full CAS login
+            if (seatApi.token.isEmpty()) {
+                tryAutoLogin()
             }
             _seatlibReady.value = true
+        }
+        // Listen to BIT101 login status changes; re-authenticate when user logs in
+        viewModelScope.launch {
+            loginStatus.status.flow.collect { loggedIn ->
+                Log.d("SeatViewModel", "loginStatus changed: $loggedIn, current token=${seatApi.token.take(8)}...")
+                if (loggedIn && seatApi.token.isEmpty()) {
+                    // First try cookie-based auth
+                    val result = seatSession.authenticateSeatlib()
+                    if (result.isSuccess) {
+                        seatApi.token = result.getOrThrow().token
+                        updateLoginState()
+                        Log.d("SeatViewModel", "re-authenticateSeatlib success: token=${seatApi.token.take(8)}...")
+                    } else {
+                        Log.d("SeatViewModel", "re-authenticateSeatlib failed, trying auto-login")
+                        // Fallback: try full CAS login with stored credentials
+                        tryAutoLogin()
+                    }
+                }
+            }
         }
     }
 
@@ -70,8 +122,6 @@ class SeatViewModel @Inject constructor(
     private val _navigateToSeatMap = MutableStateFlow<Pair<String, String>?>(null)
     val navigateToSeatMap: StateFlow<Pair<String, String>?> = _navigateToSeatMap.asStateFlow()
 
-    val isLoggedIn: Boolean get() = seatApi.token.isNotEmpty()
-
     val loginResultFlow = MutableStateFlow<Result<cn.bit101.android.features.seat.api.LoginResult>?>(null)
 
     fun clearNavigation() { _navigateToSeatMap.value = null }
@@ -86,6 +136,7 @@ class SeatViewModel @Inject constructor(
             val result = seatSession.login(username, password)
             if (result.isSuccess) {
                 seatApi.token = result.getOrThrow().token
+                updateLoginState()
                 loginResultFlow.value = Result.success(result.getOrThrow())
             } else {
                 loginResultFlow.value = Result.failure(result.exceptionOrNull() ?: Exception("Unknown error"))
@@ -96,12 +147,15 @@ class SeatViewModel @Inject constructor(
     fun logout() {
         seatApi.token = ""
         seatSession.jwtToken = ""
+        updateLoginState()
         loginResultFlow.value = null
     }
 
     fun loadSeatTree(date: String = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))) {
         viewModelScope.launch {
+            Log.d("SeatViewModel", "loadSeatTree: date=$date, token=${seatApi.token}")
             val treeResult = seatApi.getSeatTree(date)
+            Log.d("SeatViewModel", "getSeatTree result: ${treeResult.isSuccess}, error=${treeResult.exceptionOrNull()?.message}, size=${treeResult.getOrNull()?.size}")
             if (treeResult.isSuccess) {
                 _seatTree.value = treeResult.getOrThrow()
                 _seatTreeError.value = null
@@ -180,7 +234,8 @@ class SeatViewModel @Inject constructor(
         if (e?.message == "TOKEN_EXPIRED" || e?.cause?.message == "TOKEN_EXPIRED") {
             viewModelScope.launch {
                 seatApi.token = ""
-                logout()
+                seatSession.jwtToken = ""
+                updateLoginState()
             }
         }
     }
