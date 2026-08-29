@@ -15,6 +15,21 @@
 
 ---
 
+## 2026-08-29 登录状态快速响应
+
+**问题**：用户已登录 BIT101 后进入"座"页面，会先显示"登录"按钮，约 2 秒后才跳转回正常预约界面。
+
+**根因**：`_isLoggedIn` 初始硬编码为 `false`，需等待异步 seatlib token 获取完成后才变为 `true`。UI 实时收集 `isLoggedIn` StateFlow 时在此期间显示登录按钮。
+
+**修改**：
+- `SeatViewModel.kt`：`init` 块内先同步读取 `loginStatus.status.get()` 设置 `_isLoggedIn`，无需等待 seatlib token；异步流程保留用于获取真实 seatlib JWT token
+- `updateLoginState()` 直接操作 `_isLoggedIn.value`（移除 helper 函数冗余）
+- 所有 token 设置处统一改为 `_isLoggedIn.value = true`
+
+**效果**：BIT101 已登录 → 进入 Seat 页面无闪烁，立即显示预约界面。
+
+---
+
 ## 2026-08-29 风格统一：Seat 页登录按钮
 
 **问题**：Seat 三个子页面（NewTask/TaskList/SeatMap）在未登录时显示自定义 AlertDialog，与其他页面（Schedule/Gallery）的居中"登录"按钮风格不一致。
