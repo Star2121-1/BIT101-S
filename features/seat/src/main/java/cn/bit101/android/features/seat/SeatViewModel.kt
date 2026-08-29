@@ -57,7 +57,7 @@ class SeatViewModel @Inject constructor(
         val result = seatSession.login(sid, password)
         if (result.isSuccess) {
             seatApi.token = result.getOrThrow().token
-            updateLoginState()
+            _isLoggedIn.value = true
             Log.d("SeatViewModel", "auto-login success: token=${seatApi.token.take(8)}...")
         } else {
             Log.d("SeatViewModel", "auto-login failed: ${result.exceptionOrNull()?.message}")
@@ -66,11 +66,15 @@ class SeatViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
+            // Quick sync check: if BIT101 account is logged in, show login badge immediately
+            val bit101LoggedIn = loginStatus.status.get()
+            _isLoggedIn.value = bit101LoggedIn || seatApi.token.isNotEmpty()
+
             // Try silent auth first (cookie-based)
             val result = seatSession.authenticateSeatlib()
             if (result.isSuccess) {
                 seatApi.token = result.getOrThrow().token
-                updateLoginState()
+                _isLoggedIn.value = true
                 Log.d("SeatViewModel", "authenticateSeatlib success: token=${seatApi.token.take(8)}...")
             } else {
                 Log.d("SeatViewModel", "authenticateSeatlib failed: ${result.exceptionOrNull()?.message}")
@@ -90,7 +94,7 @@ class SeatViewModel @Inject constructor(
                     val result = seatSession.authenticateSeatlib()
                     if (result.isSuccess) {
                         seatApi.token = result.getOrThrow().token
-                        updateLoginState()
+                        _isLoggedIn.value = true
                         Log.d("SeatViewModel", "re-authenticateSeatlib success: token=${seatApi.token.take(8)}...")
                     } else {
                         Log.d("SeatViewModel", "re-authenticateSeatlib failed, trying auto-login")
