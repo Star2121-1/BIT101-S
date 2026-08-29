@@ -30,6 +30,29 @@
 
 ---
 
+## 2026-08-29 修复并发登录导致 token 丢失
+
+**问题**：预约座位时返回"该空间当前时段不可预约"（实际可预约），token 为空导致服务端返回"您尚未登录"。
+
+**根因**：`SeatViewModel.init` 块中的 `tryAutoLogin()` 和 `loginStatus.status.flow` 监听器中的 `tryAutoLogin()` 两个协程同时执行 CAS 登录。第一个成功设置 token，但第二个同时失败后覆盖了 token，导致后续请求无认证信息。
+
+**日志证据**：
+```
+00:20:30 auto-login with stored credentials
+00:20:31 authenticateSeatlib failed → tryAutoLogin() (second call)
+00:20:32 auto-login failed: ③ CAS fail HTTP 200  ← 覆盖了第一个的成功结果
+00:20:33 loadSeatTree: token=  ← token 已被清空
+00:20:34 interceptor: auth=NONE, tokenLen=0  ← confirmSeat 无 token
+```
+
+**修改**：
+- `SeatViewModel.kt`：添加 `@Volatile autoLoginInProgress` 标志，防止并发执行 `tryAutoLogin()`
+- `SeatApi.kt`：添加 interceptor 请求/响应日志，便于调试
+
+**效果**：并发登录竞争消除，token 不再被意外覆盖。
+
+---
+
 ## 2026-08-29 风格统一：Seat 页登录按钮
 
 **问题**：Seat 三个子页面（NewTask/TaskList/SeatMap）在未登录时显示自定义 AlertDialog，与其他页面（Schedule/Gallery）的居中"登录"按钮风格不一致。
