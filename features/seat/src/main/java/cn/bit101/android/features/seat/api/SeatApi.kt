@@ -34,6 +34,10 @@ class SeatApi(private val loginStatus: LoginStatus) {
     @Volatile
     var token: String = ""
 
+    init {
+        Log.d("SeatApi", "instance created, id=${System.identityHashCode(this)}, token='$token'")
+    }
+
     private val cookieManager: CookieManager get() = loginStatus.cookieManager
     private val cookieStore get() = cookieManager.cookieStore
 
@@ -44,6 +48,8 @@ class SeatApi(private val loginStatus: LoginStatus) {
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
             .addInterceptor { chain ->
                 val original = chain.request()
+                val authHeader = if (token.isNotEmpty()) "bearer$token" else "NONE"
+                Log.d("SeatApi", "interceptor: url=${original.url}, auth=$authHeader, tokenLen=${token.length}")
                 val req = original.newBuilder()
                     .header("lang", "zh")
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -53,6 +59,7 @@ class SeatApi(private val loginStatus: LoginStatus) {
                     }
                     .build()
                 val response = chain.proceed(req)
+                Log.d("SeatApi", "interceptor response: code=${response.code}, url=${response.request.url}")
                 if (response.code == 401 && token.isNotEmpty()) {
                     response.close()
                     throw java.io.IOException("TOKEN_EXPIRED")
@@ -180,9 +187,11 @@ class SeatApi(private val loginStatus: LoginStatus) {
         withContext(Dispatchers.IO) {
             runCatching {
                 val body = jsonBody(JSONObject().apply { put("seat_id", seatId); put("segment", segment) })
+                Log.d("SeatApi", "confirmSeat: seatId=$seatId, segment=$segment")
                 val res = client.newCall(Request.Builder().url("$BASE/api/Seat/confirm").post(body).build()).execute()
                 val bodyStr = res.body?.string() ?: "{}"
-                if (bodyStr.isEmpty()) throw IOException("Empty response")
+                Log.d("SeatApi", "confirmSeat response: code=${res.code}, body=$bodyStr")
+                if (res.code != 200 || bodyStr.isEmpty()) throw IOException("HTTP ${res.code}: $bodyStr")
                 val json = JSONObject(bodyStr)
                 if (json.optInt("code", -1) != 1) {
                     throw IOException("预约失败: ${json.optString("msg", "未知错误")}")

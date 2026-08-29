@@ -41,8 +41,11 @@ class SeatViewModel @Inject constructor(
     private var _seatlibReady = MutableStateFlow(false)
     val seatlibReady: StateFlow<Boolean> = _seatlibReady.asStateFlow()
 
-    private val _isLoggedIn = MutableStateFlow(false)
+    private var _isLoggedIn = MutableStateFlow(false)
     val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
+
+    @Volatile
+    private var autoLoginInProgress = false
 
     private fun updateLoginState() {
         _isLoggedIn.value = seatApi.token.isNotEmpty()
@@ -50,11 +53,17 @@ class SeatViewModel @Inject constructor(
 
     private suspend fun tryAutoLogin() {
         if (seatApi.token.isNotEmpty()) return
+        if (autoLoginInProgress) return
+        autoLoginInProgress = true
         val sid = loginStatus.sid.get()
         val password = loginStatus.password.get()
-        if (sid.isEmpty() || password.isEmpty()) return
+        if (sid.isEmpty() || password.isEmpty()) {
+            autoLoginInProgress = false
+            return
+        }
         Log.d("SeatViewModel", "auto-login with stored credentials: $sid")
         val result = seatSession.login(sid, password)
+        autoLoginInProgress = false
         if (result.isSuccess) {
             seatApi.token = result.getOrThrow().token
             _isLoggedIn.value = true
