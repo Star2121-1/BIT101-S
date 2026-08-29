@@ -1,6 +1,7 @@
 package cn.bit101.android.features.seat.ui.screen
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,7 +21,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -32,6 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.nav.NavDest
 import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.model.SeatTreeNode
 import cn.bit101.android.features.seat.model.TaskMode
@@ -42,7 +44,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 @Composable
-fun NewTaskScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
+fun NewTaskScreen(mainController: MainController, viewModel: SeatViewModel, modifier: Modifier = Modifier) {
     val treeNodes by viewModel.seatTree.collectAsState()
     val seatTreeError by viewModel.seatTreeError.collectAsState()
     var selectedMode by remember { mutableStateOf(TaskMode.SINGLE) }
@@ -51,7 +53,6 @@ fun NewTaskScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
     var selectedArea by remember { mutableStateOf<SeatTreeNode?>(null) }
     var reserveDate by remember { mutableStateOf(LocalDate.now()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var showLoginDialog by remember { mutableStateOf(false) }
 
     val seatlibReady by viewModel.seatlibReady.collectAsState()
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
@@ -60,6 +61,17 @@ fun NewTaskScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
 
     LaunchedEffect(reserveDate, seatlibReady) {
         if (seatlibReady) { viewModel.loadSeatTree(reserveDate.format(dateFormatter)); selectedCampus = null; selectedFloor = null; selectedArea = null }
+    }
+
+    if (!isLoggedIn) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Button(onClick = { mainController.navigate(NavDest.Login) }) {
+                    Text("登录")
+                }
+            }
+        }
+        return
     }
 
     Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -99,7 +111,6 @@ fun NewTaskScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
         if (errorMessage != null) { ErrorCard(title = "错误", errorText = errorMessage!!, onDismiss = { errorMessage = null }, modifier = Modifier.padding(top = 4.dp)) }
         Spacer(modifier = Modifier.height(8.dp))
         Button(onClick = {
-            if (!isLoggedIn) { showLoginDialog = true; return@Button }
             if (selectedArea == null) { errorMessage = "请完整选择校区、楼层和区域"; return@Button }
             errorMessage = null
             viewModel.navigateToSeatMap(areaId = selectedArea!!.id, day = reserveDate.format(dateFormatter))
@@ -107,11 +118,5 @@ fun NewTaskScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
             Text("选择座位", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         }
-    }
-
-    if (showLoginDialog) {
-        androidx.compose.material3.AlertDialog(onDismissRequest = { showLoginDialog = false }, title = { Text("需要登录") },
-            text = { Text("座位预约需要使用学校统一身份认证登录后才能使用。请在`卷`页面登录后，再回来使用座位预约功能。") },
-            confirmButton = { TextButton(onClick = { showLoginDialog = false }) { Text("知道了") } })
     }
 }

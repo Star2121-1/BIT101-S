@@ -39,26 +39,29 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.nav.NavDest
 import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.TaskStatus
 
 @Composable
-fun TaskListScreen(viewModel: SeatViewModel, modifier: Modifier = Modifier) {
+fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, modifier: Modifier = Modifier) {
     val tasks by viewModel.tasks.collectAsState()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
 
-    if (!isLoggedIn && tasks.isEmpty()) {
+    if (!isLoggedIn) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.padding(32.dp)) {
-                Icon(Icons.Default.EventSeat, null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.outlineVariant)
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("未登录", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("预约功能需要登录后才能使用", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center)
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Button(onClick = { mainController.navigate(NavDest.Login) }) {
+                    Text("登录")
+                }
             }
         }
-    } else if (tasks.isEmpty()) {
+        return
+    }
+
+    if (tasks.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.padding(32.dp)) {
                 Icon(Icons.Default.EventSeat, null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.outlineVariant)

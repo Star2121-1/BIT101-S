@@ -18,12 +18,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.seat.ui.screen.NewTaskScreen
 import cn.bit101.android.features.seat.ui.screen.SeatMapScreen
 import cn.bit101.android.features.seat.ui.screen.TaskListScreen
 
 @Composable
-fun SeatScreen(viewModel: SeatViewModel = hiltViewModel()) {
+fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltViewModel()) {
     val navController = rememberNavController()
     val navigateToMap by viewModel.navigateToSeatMap.collectAsState()
 
@@ -58,12 +59,13 @@ fun SeatScreen(viewModel: SeatViewModel = hiltViewModel()) {
             navController = navController,
             startDestination = "new_task"
         ) {
-            composable("new_task") { NewTaskScreen(viewModel = viewModel) }
-            composable("tasks") { TaskListScreen(viewModel = viewModel) }
+            composable("new_task") { NewTaskScreen(mainController = mainController, viewModel = viewModel) }
+            composable("tasks") { TaskListScreen(mainController = mainController, viewModel = viewModel) }
             composable("seat_map/{areaId}/{day}") { backStackEntry ->
                 val areaId = backStackEntry.arguments?.getString("areaId") ?: ""
                 val day = backStackEntry.arguments?.getString("day") ?: ""
                 SeatMapScreen(
+                    mainController = mainController,
                     areaId = areaId, day = day, viewModel = viewModel,
                     onBack = { navController.popBackStack() },
                     onNavigateToTasks = { navController.navigate("tasks") { popUpTo("seat_map") } }

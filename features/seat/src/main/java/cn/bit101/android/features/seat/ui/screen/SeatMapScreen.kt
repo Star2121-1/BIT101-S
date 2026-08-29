@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -46,6 +45,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.nav.NavDest
 import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatStatus
@@ -56,6 +57,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SeatMapScreen(
+    mainController: MainController,
     areaId: String,
     day: String,
     viewModel: SeatViewModel,
@@ -67,7 +69,6 @@ fun SeatMapScreen(
     val dates by viewModel.seatDates.collectAsState()
     var selectedSeat by remember { mutableStateOf<Seat?>(null) }
     var isReserving by remember { mutableStateOf(false) }
-    var showLoginDialog by remember { mutableStateOf(false) }
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -96,98 +97,100 @@ fun SeatMapScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = modifier
     ) { innerPadding ->
-        Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            Card(modifier = Modifier.fillMaxWidth().padding(12.dp), shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = seatState.areaName.ifBlank { areaId }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Schedule, null, modifier = Modifier.padding(end = 4.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("$day  ${startTime}-${endTime}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LegendItem(color = Color(0xFF4CAF50), label = "空闲")
-                        LegendItem(color = Color(0xFFF44336), label = "占用")
-                        LegendItem(color = Color(0xFFFF9800), label = "已预约")
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(if (selectedSeat != null) "已选: ${selectedSeat!!.no}" else "未选择座位",
-                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
-                            color = if (selectedSeat != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("剩余: $availableCount / $totalCount", style = MaterialTheme.typography.bodyMedium,
-                            color = if (availableCount > 0) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error)
+        if (!isLoggedIn) {
+            Box(modifier = Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Button(onClick = { mainController.navigate(NavDest.Login) }) {
+                        Text("登录")
                     }
                 }
             }
-
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                when {
-                    seatState.isLoading -> {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) { CircularProgressIndicator(); Spacer(modifier = Modifier.height(8.dp))
-                                Text("加载座位图…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        }
-                    }
-                    seatState.error != null -> ErrorCard(title = "加载失败", errorText = seatState.error!!, modifier = Modifier.fillMaxWidth().padding(16.dp))
-                    seatState.seats.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("该区域暂无座位数据", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    else -> SeatGrid(seats = seatState.seats, selectedSeatId = selectedSeat?.id, onSeatClick = { selectedSeat = it })
-                }
-            }
-
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = onNavigateToTasks, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)) {
-                        Icon(Icons.Default.List, null, modifier = Modifier.padding(end = 4.dp))
-                        Text("任务列表")
-                    }
-                    if (selectedSeat?.status == SeatStatus.RESERVED) {
-                        Button(onClick = {
-                            if (!isLoggedIn) { showLoginDialog = true; return@Button }
-                            val seat = selectedSeat
-                            if (seat != null) { scope.launch { viewModel.cancelReservation(seat.id); snackbarHostState.showSnackbar("已尝试取消座位 ${seat.no}"); selectedSeat = null } }
-                        }, enabled = selectedSeat != null && !isReserving, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)) {
-                            Text("取消预约", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                    Button(onClick = {
-                        if (!isLoggedIn) { showLoginDialog = true; return@Button }
-                        val seat = selectedSeat
-                        if (seat != null) {
-                            isReserving = true
-                            scope.launch {
-                                val result = viewModel.reserveSeat(seat.id, segId)
-                                isReserving = false
-                                if (result == null) { snackbarHostState.showSnackbar("预约座位 ${seat.no} 成功！"); selectedSeat = null; onNavigateToTasks() }
-                                else snackbarHostState.showSnackbar("预约失败: $result")
+        } else {
+            Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                Card(modifier = Modifier.fillMaxWidth().padding(12.dp), shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(text = seatState.areaName.ifBlank { areaId }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Schedule, null, modifier = Modifier.padding(end = 4.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("$day  ${startTime}-${endTime}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                    }, enabled = selectedSeat != null && !isReserving, modifier = Modifier.weight(1.5f), shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                        if (isReserving) CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(end = 8.dp))
-                        Text("立即预约", fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            LegendItem(color = Color(0xFF4CAF50), label = "空闲")
+                            LegendItem(color = Color(0xFFF44336), label = "占用")
+                            LegendItem(color = Color(0xFFFF9800), label = "已预约")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(if (selectedSeat != null) "已选: ${selectedSeat!!.no}" else "未选择座位",
+                                style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+                                color = if (selectedSeat != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("剩余: $availableCount / $totalCount", style = MaterialTheme.typography.bodyMedium,
+                                color = if (availableCount > 0) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    when {
+                        seatState.isLoading -> {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) { CircularProgressIndicator(); Spacer(modifier = Modifier.height(8.dp))
+                                    Text("加载座位图…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                        }
+                        seatState.error != null -> ErrorCard(title = "加载失败", errorText = seatState.error!!, modifier = Modifier.fillMaxWidth().padding(16.dp))
+                        seatState.seats.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("该区域暂无座位数据", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        else -> SeatGrid(seats = seatState.seats, selectedSeatId = selectedSeat?.id, onSeatClick = { selectedSeat = it })
+                    }
+                }
+
+                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = onNavigateToTasks, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)) {
+                            Icon(Icons.Default.List, null, modifier = Modifier.padding(end = 4.dp))
+                            Text("任务列表")
+                        }
+                        if (selectedSeat?.status == SeatStatus.RESERVED) {
+                            Button(onClick = {
+                                val seat = selectedSeat
+                                if (seat != null) { scope.launch { viewModel.cancelReservation(seat.id); snackbarHostState.showSnackbar("已尝试取消座位 ${seat.no}"); selectedSeat = null } }
+                            }, enabled = selectedSeat != null && !isReserving, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)) {
+                                Text("取消预约", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Button(onClick = {
+                            val seat = selectedSeat
+                            if (seat != null) {
+                                isReserving = true
+                                scope.launch {
+                                    val result = viewModel.reserveSeat(seat.id, segId)
+                                    isReserving = false
+                                    if (result == null) { snackbarHostState.showSnackbar("预约座位 ${seat.no} 成功！"); selectedSeat = null; onNavigateToTasks() }
+                                    else snackbarHostState.showSnackbar("预约失败: $result")
+                                }
+                            }
+                        }, enabled = selectedSeat != null && !isReserving, modifier = Modifier.weight(1.5f), shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                            if (isReserving) CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(end = 8.dp))
+                            Text("立即预约", fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
         }
-    }
-
-    if (showLoginDialog) {
-        AlertDialog(onDismissRequest = { showLoginDialog = false }, title = { Text("需要登录") },
-            text = { Text("座位预约需要使用学校统一身份认证登录后才能使用。请在卷页面登录后，再回来使用座位预约功能。") },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { showLoginDialog = false }) { Text("知道了") } })
     }
 }
 
