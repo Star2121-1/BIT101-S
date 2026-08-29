@@ -194,3 +194,41 @@ class SeatViewModel @Inject constructor(
 - Node.js HTTPS 代理（port 8443）：握手失败（TLS alert）
 
 **结论**：模拟器无法用于 seat 功能调试，必须使用真机 + school WiFi。
+
+---
+
+## 自动登录修复（2026-08-29）
+
+### 问题：登录后 Seat 显示"需要登录"
+
+**现象**：用户已在 BIT101 登录（有学号密码），进入 Seat 页面点击"选择座位"或"列表"时弹出"需要登录"提示。
+
+**根因分析**：
+1. `seatApi.token` 判断登录状态 — 但 seatlib 是独立的 phpCAS 系统，BIT101 的学校 Cookie 无法自动建立 seatlib session
+2. `authenticateSeatlib()` 静默认证失败（cookie 不互通）
+3. 登录判断用 `seatApi.token.isNotEmpty()` 为 false，UI 显示"需要登录"
+
+**解决方案**：
+1. **监听 `LoginStatus.status`**：BIT101 登录后自动触发 seatlib 认证
+2. **三级认证策略**：
+   - 先尝试 `authenticateSeatlib()`（cookie 静默认证，成功则无需密码）
+   - 失败则尝试 `seatSession.login(sid, password)`（完整 CAS 登录，使用 BIT101 存储的学号密码）
+3. **修复 `SeatSession.kt` 的 JSON 解析**：API 返回 `member` 是单个对象而非数组，原代码用 `optJSONArray` 始终为 null
+4. **`isLoggedIn` 改为 `StateFlow`**：通过 `seatApi.token.isNotEmpty()` 驱动 UI 响应
+
+```kotlin
+// SeatSession.kt — 修复前（错误）
+val memberArr = json.optJSONArray("member")  // → null，member 是对象不是数组
+
+// SeatSession.kt — 修复后（正确）
+val member = json.optJSONObject("member")    // → 正确获取 token
+if (member != null && !member.isNull("token")) {
+    val token = member.optString("token", "")
+    ...
+}
+```
+
+**结果**：
+- 用户首次登录 BIT101 后进入 Seat 页面，自动完成 seatlib CAS 认证，无需手动输入密码
+- `isLoggedIn` 在 token 设置后立即更新，所有 UI 正确响应
+- 已推送至 GitHub: `9a741f4`
