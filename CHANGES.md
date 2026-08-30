@@ -1,6 +1,26 @@
 # CHANGES
 
-## 2026-08-30 seatlib phpCAS 浏览器登录方案
+## 2026-08-30 seatlib phpCAS WebView 登录方案（修复浏览器 cookie 隔离问题）
+
+**问题**：外部浏览器登录后，App 的 OkHttp 无法读取浏览器 cookie（Android 沙箱隔离），导致始终拿不到 JWT token。
+
+**根因**：CAS 流程需要执行 JavaScript 重定向链（JS SPA → phpCAS → seatlib），OkHttp 无法完成；WebView 与 OkHttp 共享同一 `SharedPreferencesCookieStore`，可以桥接。
+
+**方案**：用 Accompanist WebView 替代系统浏览器，在 App 内部完成 CAS 流程
+- CAS 登录页面在 WebView 中加载 → SSO 自动认证 → phpCAS 回调带 `cas=TICKET`
+- `shouldOverrideUrlLoading` 拦截含 `cas=` 参数的 URL → 提取 ticket → 调 `api/cas/user` 换 JWT
+- WebView 与 OkHttp 共享 CookieManager，登录后 token 立即可用
+
+**修改**：
+- 新增 `CasLoginScreen.kt`：Accompanist WebView 实现 CAS 登录页面
+- `SeatViewModel`：新增 `casLoginFlow`、`openCasLoginScreen()`、`trySeatlibAuth()`、`exchangeTicket(ticket)`
+- `SeatScreen`：`casLoginFlow=true` 时显示 WebView 登录页
+- `SeatMapScreen`：预约/取消时检测 BIT101 登录状态，未登录则打开 CAS 登录页
+- `build.gradle`：seat 模块增加 `accompanist-webview` 依赖
+
+---
+
+## 2026-08-30 seatlib phpCAS 浏览器登录方案（已废弃，见上）
 
 **问题**：OkHttp 无法完成 seatlib 的 phpCAS 认证（CAS 是 JS SPA，返回 HTTP 200 而非 302）。`authenticateSeatlib()` 和 `login()` 均失败。
 
