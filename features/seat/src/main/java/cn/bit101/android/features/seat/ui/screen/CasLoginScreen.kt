@@ -5,7 +5,6 @@ import android.util.Log
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -23,12 +22,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.seat.SeatViewModel
-import cn.bit101.android.features.theme.LocalThemeIsDark
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,7 +37,6 @@ import android.webkit.WebViewClient
 
 private const val TAG = "CasLoginScreen"
 private const val SEATLIB_BASE = "https://seatlib.bit.edu.cn"
-private const val CAS_LOGIN_URL = "$SEATLIB_BASE/"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,8 +46,6 @@ fun CasLoginScreen(
     onBack: () -> Unit,
 ) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    val context = LocalContext.current
-    val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     Scaffold(
         topBar = {
@@ -82,46 +77,47 @@ fun CasLoginScreen(
                             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
                                 Log.d(TAG, "pageStarted: $url")
+                                errorMessage = null
                             }
 
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
                                 Log.d(TAG, "pageFinished: $url")
-                                // Sync WebView cookies → OkHttp CookieManager, then try silent auth
-                                scope.launch {
-                                    viewModel.syncAndAuth()
-                                }
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                                 val url = request.url.toString()
                                 Log.d(TAG, "shouldOverrideUrlLoading: $url")
 
-                                // Extract cas=TICKET from URL (phpCAS callback)
+                                // Extract cas=TICKET from URL (phpCAS callback or session URL)
                                 val ticketRegex = Regex("""cas=([a-f0-9]{32})""")
                                 val ticket = ticketRegex.find(url)?.groupValues?.getOrNull(1)
+
                                 if (ticket != null) {
                                     Log.d(TAG, "extracted cas ticket: ${ticket.take(8)}...")
-                                    scope.launch { viewModel.exchangeTicket(ticket) }
+                                    // Single entry point: sync cookies + exchange ticket
+                                    CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+                                        viewModel.syncAndExchange(ticket)
+                                    }
                                     return true
                                 }
 
-                                // Let other seatlib URLs load normally
+                                // All other seatlib URLs load normally, then sync+auth on finish
                                 if (url.startsWith(SEATLIB_BASE)) {
                                     return false
                                 }
 
-                                // Open external URLs in browser
-                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                ctx.startActivity(intent)
+                                // External URLs open in browser
+                                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                    .also { it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                    .let { ctx.startActivity(it) }
                                 return true
                             }
                         }
                     }
                 },
                 update = { view ->
-                    view.loadUrl(CAS_LOGIN_URL)
+                    view.loadUrl("$SEATLIB_BASE/")
                 }
             )
         }

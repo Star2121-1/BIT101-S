@@ -50,18 +50,23 @@ class SeatCasLogin @Inject constructor(
         urls.forEach { url ->
             val cookies = webCookieMgr.getCookie(url) ?: return@forEach
             if (cookies.isEmpty()) return@forEach
-            Log.d(TAG, "syncing cookies from $url: ${cookies.take(100)}")
+            Log.d(TAG, "syncing ${cookies.count { it == ';' } + 1} cookies from $url")
+            val uri = URI.create(url)
             val parts = cookies.split(";".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
             parts.forEach { part ->
                 val eqIdx = part.indexOf('=')
                 if (eqIdx < 0) return@forEach
                 val name = part.substring(0, eqIdx).trim()
                 val value = if (eqIdx < part.length - 1) part.substring(eqIdx + 1).trim() else ""
+                // Remove existing cookie with same name to avoid duplicates
+                loginStatus.cookieManager.cookieStore.get(uri)
+                    .filter { it.name == name }
+                    .forEach { loginStatus.cookieManager.cookieStore.remove(uri, it) }
                 val hc = HttpCookie(name, value)
-                hc.domain = URI.create(url).host
+                hc.domain = uri.host
                 hc.path = "/"
-                loginStatus.cookieManager.cookieStore.add(URI.create(url), hc)
-                Log.d(TAG, "  synced: $name=${value.take(10)}...")
+                loginStatus.cookieManager.cookieStore.add(uri, hc)
+                Log.d(TAG, "  synced: $name")
             }
         }
     }

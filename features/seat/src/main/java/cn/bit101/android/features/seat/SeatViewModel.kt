@@ -156,69 +156,68 @@ class SeatViewModel @Inject constructor(
     /** Checks seatlib session; opens WebView login if needed. Returns true if session is active. */
     suspend fun ensureSeatlibSession(context: Context): Boolean {
         if (seatApi.token.isNotEmpty()) return true
-        if (seatCasLogin.hasActiveSession()) {
-            val token = seatCasLogin.trySilentAuth()
-            if (token.isNotEmpty()) {
-                seatApi.token = token
-                updateLoginState()
-                return true
-            }
+        // Try silent auth directly — no need for separate hasActiveSession() call
+        val token = seatCasLogin.trySilentAuth()
+        if (token.isNotEmpty()) {
+            seatApi.token = token
+            updateLoginState()
+            return true
         }
         openCasLoginScreen()
         return false
     }
 
-    /** Called from CasLoginScreen after browser login completes. Syncs WebView cookies, then tries auth. */
-    suspend fun syncAndAuth() {
-        Log.d("SeatViewModel", "syncAndAuth: syncing WebView cookies...")
+    /** Single entry point from CasLoginScreen: sync cookies → silent auth → optional ticket exchange. */
+    suspend fun syncAndExchange(ticket: String? = null) {
+        Log.d("SeatViewModel", "syncAndExchange: ticket=${ticket?.take(8)}..., currentTokenLen=${seatApi.token.length}")
+        // 1. Sync WebView cookies to OkHttp CookieManager
         seatCasLogin.syncWebViewCookies()
+        // 2. If already have token, done
         if (seatApi.token.isNotEmpty()) return
-        val token = seatCasLogin.trySilentAuth()
-        if (token.isNotEmpty()) {
-            seatApi.token = token
+        // 3. Try silent auth first (may succeed if phpCAS session established)
+        val silentToken = seatCasLogin.trySilentAuth()
+        if (silentToken.isNotEmpty()) {
+            seatApi.token = silentToken
             updateLoginState()
             _casLoginFlow.value = false
-            Log.d("SeatViewModel", "syncAndAuth success: token=${token.take(8)}...")
+            Log.d("SeatViewModel", "syncAndExchange success (silent): token=${silentToken.take(8)}...")
+            return
         }
-    }
-
-    /** Called from CasLoginScreen after ticket extraction. Syncs cookies then exchanges ticket. */
-    suspend fun exchangeTicket(ticket: String) {
-        Log.d("SeatViewModel", "exchangeTicket: syncing cookies first...")
-        seatCasLogin.syncWebViewCookies()
-        Log.d("SeatViewModel", "exchangeTicket: ticket=${ticket.take(8)}...")
-        try {
-            val client = OkHttpClient.Builder()
-                .cookieJar(seatCasLogin.createCookieJar())
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .build()
-            val res = client.newCall(
-                Request.Builder()
-                    .url("$SEATLIB_BASE/api/cas/user")
-                    .header("Content-Type", "application/json")
-                    .header("X-Requested-With", "XMLHttpRequest")
-                    .post(JSONObject().put("cas", ticket).toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-            ).execute()
-            val body = res.body?.string() ?: "{}"
-            res.close()
-            val json = JSONObject(body)
-            val member = json.optJSONObject("member")
-            if (member != null && !member.isNull("token")) {
-                val token = member.optString("token", "")
-                if (token.isNotEmpty()) {
-                    seatApi.token = token
-                    updateLoginState()
-                    _casLoginFlow.value = false
-                    Log.d("SeatViewModel", "exchangeTicket success: token=${token.take(8)}...")
-                    return
+        // 4. If we have a ticket, exchange it
+        if (!ticket.isNullOrEmpty()) {
+            Log.d("SeatViewModel", "syncAndExchange: exchanging ticket=${ticket.take(8)}...")
+            try {
+                val res = OkHttpClient.Builder()
+                    .cookieJar(seatCasLogin.createCookieJar())
+                    .followRedirects(true).followSslRedirects(true).build()
+                    .newCall(
+                        Request.Builder()
+                            .url("$SEATLIB_BASE/api/cas/user")
+                            .header("Content-Type", "application/json")
+                            .header("X-Requested-With", "XMLHttpRequest")
+                            .post(JSONObject().put("cas", ticket).toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                    ).execute()
+                val body = res.body?.string() ?: "{}"
+                res.close()
+                val json = JSONObject(body)
+                val member = json.optJSONObject("member")
+                if (member != null && !member.isNull("token")) {
+                    val t = member.optString("token", "")
+                    if (t.isNotEmpty()) {
+                        seatApi.token = t
+                        updateLoginState()
+                        _casLoginFlow.value = false
+                        Log.d("SeatViewModel", "syncAndExchange success (ticket): token=${t.take(8)}...")
+                        return
+                    }
                 }
+                Log.d("SeatViewModel", "syncAndExchange: ticket failed: $body")
+            } catch (e: Exception) {
+                Log.d("SeatViewModel", "syncAndExchange error: ${e.message}")
             }
-            Log.d("SeatViewModel", "exchangeTicket failed: $body")
-        } catch (e: Exception) {
-            Log.d("SeatViewModel", "exchangeTicket error: ${e.message}")
         }
+        Log.d("SeatViewModel", "syncAndExchange: still no token, keep login open")
     }
     fun loadSeatTree(date: String = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))) {
         viewModelScope.launch {
