@@ -168,9 +168,8 @@ fun SeatMapScreen(
                             Button(onClick = {
                                 val seat = selectedSeat
                                 if (seat != null) { scope.launch {
-                                    if (!viewModel.isLoggedIn.value) {
-                                        viewModel.openCasLoginScreen()
-                                        return@launch
+                                    if (!viewModel.ensureSeatlibSession(context)) {
+                                        snackbarHostState.showSnackbar("请在弹出的 WebView 中完成 seatlib 登录，然后重试"); return@launch
                                     }
                                     viewModel.cancelReservation(seat.id); snackbarHostState.showSnackbar("已尝试取消座位 ${seat.no}"); selectedSeat = null
                                 } }
@@ -184,10 +183,9 @@ fun SeatMapScreen(
                             if (seat != null) {
                                 isReserving = true
                                 scope.launch {
-                                    if (!viewModel.isLoggedIn.value) {
+                                    if (!viewModel.ensureSeatlibSession(context)) {
                                         isReserving = false
-                                        viewModel.openCasLoginScreen()
-                                        return@launch
+                                        snackbarHostState.showSnackbar("请在弹出的 WebView 中完成 seatlib 登录，然后重试"); return@launch
                                     }
                                     val result = viewModel.reserveSeat(seat.id, segId)
                                     isReserving = false

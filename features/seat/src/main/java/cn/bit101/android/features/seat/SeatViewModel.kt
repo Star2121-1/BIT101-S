@@ -153,6 +153,21 @@ class SeatViewModel @Inject constructor(
         _casLoginFlow.value = true
     }
 
+    /** Checks seatlib session; opens WebView login if needed. Returns true if session is active. */
+    suspend fun ensureSeatlibSession(context: Context): Boolean {
+        if (seatApi.token.isNotEmpty()) return true
+        if (seatCasLogin.hasActiveSession()) {
+            val token = seatCasLogin.trySilentAuth()
+            if (token.isNotEmpty()) {
+                seatApi.token = token
+                updateLoginState()
+                return true
+            }
+        }
+        openCasLoginScreen()
+        return false
+    }
+
     /** Called from CasLoginScreen after browser login completes. Tries silent auth + exchange ticket. */
     suspend fun trySeatlibAuth() {
         Log.d("SeatViewModel", "trySeatlibAuth: checking session...")
