@@ -1,5 +1,27 @@
 # CHANGES
 
+## 2026-08-30 seatlib phpCAS 浏览器登录方案
+
+**问题**：OkHttp 无法完成 seatlib 的 phpCAS 认证（CAS 是 JS SPA，返回 HTTP 200 而非 302）。`authenticateSeatlib()` 和 `login()` 均失败。
+
+**根因**：学校防火墙阻止模拟器 TCP 443 → 10.0.0.0/8，seatlib 只能通过真机直连访问。CAS 认证流程需要浏览器执行 JavaScript 重定向链（JS→PHP→CAS→seatlib），OkHttp 无法模拟。
+
+**方案**：改为"按需引导浏览器登录"模式
+- `isLoggedIn` 基于 BIT101 登录状态，进入座位页面无闪烁
+- 点击"预约"/"取消预约"时调用 `ensureSeatlibSession(context)`：
+  - 有 cookie session → 刷新 token，直接操作
+  - 无 session → 打开 seatlib 主页（已有 SSO cookie 自动完成 phpCAS 认证）
+  - 引导用户："请在弹出的浏览器中完成 seatlib 登录，然后重试"
+- 浏览器登录后 phpCAS session 建立，App 后续 API 调用即可正常认证
+
+**修改**：
+- 新增 `SeatCasLogin.kt`：`openCasLogin(context)` 打开浏览器；`trySilentAuth()` / `hasActiveSession()` 检查现有 session
+- `SeatViewModel`：移除 `tryAutoLogin()`，改为 `ensureSeatlibSession(context)` suspend 函数
+- `SeatMapScreen`：预约/取消按钮增加 session 检查，未认证时打开浏览器并提示
+- `SeatSession`：增加 CAS SPA HTTP 200 响应处理（检测 cas= 参数并调用 api/cas/user）
+
+---
+
 ## 2026-08-29 登录状态快速响应（第二次提交）
 
 **问题**：用户已登录 BIT101 后进入"座"页面，会先显示"登录"按钮，约 2 秒后才跳转回正常预约界面。
