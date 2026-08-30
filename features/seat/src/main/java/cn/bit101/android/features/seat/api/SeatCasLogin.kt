@@ -72,9 +72,8 @@ class SeatCasLogin @Inject constructor(
         }.getOrNull() ?: ""
     }
 
-    private fun createCookieJar(): CookieJar {
-        val cm = loginStatus.cookieManager
-        return object : CookieJar {
+    fun createCookieJar() = loginStatus.cookieManager.let { cm ->
+        object : CookieJar {
             override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
                 cookies.forEach { c ->
                     val hc = HttpCookie(c.name, c.value)

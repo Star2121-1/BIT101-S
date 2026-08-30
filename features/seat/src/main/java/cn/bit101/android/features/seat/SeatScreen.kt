@@ -19,6 +19,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.seat.ui.screen.CasLoginScreen
 import cn.bit101.android.features.seat.ui.screen.NewTaskScreen
 import cn.bit101.android.features.seat.ui.screen.SeatMapScreen
 import cn.bit101.android.features.seat.ui.screen.TaskListScreen
@@ -27,10 +28,20 @@ import cn.bit101.android.features.seat.ui.screen.TaskListScreen
 fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltViewModel()) {
     val navController = rememberNavController()
     val navigateToMap by viewModel.navigateToSeatMap.collectAsState()
+    val showCasLogin by viewModel.casLoginFlow.collectAsState()
 
     navigateToMap?.let { (areaId, day) ->
         viewModel.clearNavigation()
         navController.navigate("seat_map/$areaId/$day")
+    }
+
+    if (showCasLogin) {
+        CasLoginScreen(
+            mainController = mainController,
+            viewModel = viewModel,
+            onBack = { viewModel.setCasLoginFlow(false) }
+        )
+        return
     }
 
     val navEntry by navController.currentBackStackEntryAsState()

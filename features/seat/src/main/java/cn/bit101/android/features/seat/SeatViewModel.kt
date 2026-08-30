@@ -23,6 +23,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import javax.inject.Inject
 
 data class SeatMapState(
@@ -36,6 +41,10 @@ data class SeatMapState(
 class SeatViewModel @Inject constructor(
     private val loginStatus: LoginStatus,
 ) : ViewModel() {
+
+    companion object {
+        private const val SEATLIB_BASE = "https://seatlib.bit.edu.cn"
+    }
 
     private val seatSession = SeatSession(loginStatus)
     private val seatCasLogin = SeatCasLogin(loginStatus)
@@ -135,28 +144,64 @@ class SeatViewModel @Inject constructor(
         loginResultFlow.value = null
     }
 
-    /** Opens seatlib in browser so user can establish phpCAS session. */
-    fun openSeatlibLogin(context: Context) {
-        seatCasLogin.openCasLogin(context)
+    private val _casLoginFlow = MutableStateFlow(false)
+    val casLoginFlow: StateFlow<Boolean> = _casLoginFlow.asStateFlow()
+    internal fun setCasLoginFlow(value: Boolean) { _casLoginFlow.value = value }
+
+    /** Opens CAS login WebView. */
+    fun openCasLoginScreen() {
+        _casLoginFlow.value = true
     }
 
-    /** Checks seatlib session; opens browser login if needed. Returns true if session is active. */
-    suspend fun ensureSeatlibSession(context: Context): Boolean {
-        if (seatApi.token.isNotEmpty()) return true
-        if (seatCasLogin.hasActiveSession()) {
-            // Refresh token from existing session
-            val token = seatCasLogin.trySilentAuth()
-            if (token.isNotEmpty()) {
-                seatApi.token = token
-                updateLoginState()
-                return true
-            }
+    /** Called from CasLoginScreen after browser login completes. Tries silent auth + exchange ticket. */
+    suspend fun trySeatlibAuth() {
+        Log.d("SeatViewModel", "trySeatlibAuth: checking session...")
+        if (seatApi.token.isNotEmpty()) return
+        val token = seatCasLogin.trySilentAuth()
+        if (token.isNotEmpty()) {
+            seatApi.token = token
+            updateLoginState()
+            _casLoginFlow.value = false
+            Log.d("SeatViewModel", "trySeatlibAuth success: token=${token.take(8)}...")
         }
-        // No session — open browser for phpCAS login
-        openSeatlibLogin(context)
-        return false
     }
 
+    /** Exchange a CAS ticket for JWT token. */
+    suspend fun exchangeTicket(ticket: String) {
+        Log.d("SeatViewModel", "exchangeTicket: ticket=${ticket.take(8)}...")
+        try {
+            val client = OkHttpClient.Builder()
+                .cookieJar(seatCasLogin.createCookieJar())
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .build()
+            val res = client.newCall(
+                Request.Builder()
+                    .url("$SEATLIB_BASE/api/cas/user")
+                    .header("Content-Type", "application/json")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .post(JSONObject().put("cas", ticket).toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute()
+            val body = res.body?.string() ?: "{}"
+            res.close()
+            val json = JSONObject(body)
+            val member = json.optJSONObject("member")
+            if (member != null && !member.isNull("token")) {
+                val token = member.optString("token", "")
+                if (token.isNotEmpty()) {
+                    seatApi.token = token
+                    updateLoginState()
+                    _casLoginFlow.value = false
+                    Log.d("SeatViewModel", "exchangeTicket success: token=${token.take(8)}...")
+                    return
+                }
+            }
+            Log.d("SeatViewModel", "exchangeTicket failed: $body")
+        } catch (e: Exception) {
+            Log.d("SeatViewModel", "exchangeTicket error: ${e.message}")
+        }
+    }
     fun loadSeatTree(date: String = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))) {
         viewModelScope.launch {
             Log.d("SeatViewModel", "loadSeatTree: date=$date, token=${seatApi.token}")
