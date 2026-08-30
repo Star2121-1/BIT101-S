@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import android.webkit.CookieManager
 import cn.bit101.android.config.user.base.LoginStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,7 +16,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.net.CookieManager
 import java.net.HttpCookie
 import java.net.URI
 import javax.inject.Inject
@@ -37,6 +37,32 @@ class SeatCasLogin @Inject constructor(
             Log.d(TAG, "opened seatlib in browser")
         } catch (e: Exception) {
             Log.d(TAG, "failed to open browser: ${e.message}")
+        }
+    }
+
+    /**
+     * Syncs WebView cookies to OkHttp's java.net.CookieManager.
+     * Android WebView and OkHttp use separate cookie stores — this bridges them.
+     */
+    fun syncWebViewCookies() {
+        val webCookieMgr = CookieManager.getInstance()
+        val urls = listOf(SEATLIB_BASE, "https://sso.bit.edu.cn")
+        urls.forEach { url ->
+            val cookies = webCookieMgr.getCookie(url) ?: return@forEach
+            if (cookies.isEmpty()) return@forEach
+            Log.d(TAG, "syncing cookies from $url: ${cookies.take(100)}")
+            val parts = cookies.split(";".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
+            parts.forEach { part ->
+                val eqIdx = part.indexOf('=')
+                if (eqIdx < 0) return@forEach
+                val name = part.substring(0, eqIdx).trim()
+                val value = if (eqIdx < part.length - 1) part.substring(eqIdx + 1).trim() else ""
+                val hc = HttpCookie(name, value)
+                hc.domain = URI.create(url).host
+                hc.path = "/"
+                loginStatus.cookieManager.cookieStore.add(URI.create(url), hc)
+                Log.d(TAG, "  synced: $name=${value.take(10)}...")
+            }
         }
     }
 

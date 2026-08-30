@@ -168,21 +168,24 @@ class SeatViewModel @Inject constructor(
         return false
     }
 
-    /** Called from CasLoginScreen after browser login completes. Tries silent auth + exchange ticket. */
-    suspend fun trySeatlibAuth() {
-        Log.d("SeatViewModel", "trySeatlibAuth: checking session...")
+    /** Called from CasLoginScreen after browser login completes. Syncs WebView cookies, then tries auth. */
+    suspend fun syncAndAuth() {
+        Log.d("SeatViewModel", "syncAndAuth: syncing WebView cookies...")
+        seatCasLogin.syncWebViewCookies()
         if (seatApi.token.isNotEmpty()) return
         val token = seatCasLogin.trySilentAuth()
         if (token.isNotEmpty()) {
             seatApi.token = token
             updateLoginState()
             _casLoginFlow.value = false
-            Log.d("SeatViewModel", "trySeatlibAuth success: token=${token.take(8)}...")
+            Log.d("SeatViewModel", "syncAndAuth success: token=${token.take(8)}...")
         }
     }
 
-    /** Exchange a CAS ticket for JWT token. */
+    /** Called from CasLoginScreen after ticket extraction. Syncs cookies then exchanges ticket. */
     suspend fun exchangeTicket(ticket: String) {
+        Log.d("SeatViewModel", "exchangeTicket: syncing cookies first...")
+        seatCasLogin.syncWebViewCookies()
         Log.d("SeatViewModel", "exchangeTicket: ticket=${ticket.take(8)}...")
         try {
             val client = OkHttpClient.Builder()

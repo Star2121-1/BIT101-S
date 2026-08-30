@@ -87,7 +87,10 @@ fun CasLoginScreen(
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
                                 Log.d(TAG, "pageFinished: $url")
-                                scope.launch { viewModel.trySeatlibAuth() }
+                                // Sync WebView cookies → OkHttp CookieManager, then try silent auth
+                                scope.launch {
+                                    viewModel.syncAndAuth()
+                                }
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
