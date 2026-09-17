@@ -53,6 +53,15 @@ class SeatViewModel @Inject constructor(
 
     companion object {
         private const val SEATLIB_BASE = "https://seatlib.bit.edu.cn"
+
+        /** 单个任务的最长运行时长：超过后自动停止，避免忘记取消导致无限轮询。 */
+        private const val MAX_TASK_DURATION_MS = 2 * 60 * 60 * 1000L
+        /** 轮询退避上限（5 分钟）。 */
+        private const val MAX_POLL_INTERVAL_MS = 5 * 60 * 1000L
+        /** 监控预约的基准轮询间隔。 */
+        private const val MONITOR_INTERVAL_MS = 10_000L
+        /** 优先预约的基准轮询间隔。 */
+        private const val PREFER_INTERVAL_MS = 5_000L
     }
 
     private val seatSession = SeatSession(loginStatus)
@@ -291,6 +300,8 @@ class SeatViewModel @Inject constructor(
     }
 
     fun addTask(mode: TaskMode, campusName: String, floorName: String, areaName: String, areaId: String, seatNo: String, reserveDate: String) {
+        // 单次预约不走任务流：它由 SeatMapScreen.reserveSeat() 直接完成，可以在座位图上精确挑座
+        if (mode == TaskMode.SINGLE) return
         val task = ReservationTask(
             mode = mode, status = TaskStatus.RUNNING, areaId = areaId, seatNo = seatNo,
             reserveDate = reserveDate, campusName = campusName, floorName = floorName, areaName = areaName
@@ -298,9 +309,10 @@ class SeatViewModel @Inject constructor(
         _tasks.value = _tasks.value + task
         val job = viewModelScope.launch {
             when (mode) {
-                TaskMode.SINGLE -> executeSingleReserve(task)
                 TaskMode.MONITOR -> executeMonitor(task)
                 TaskMode.PREFER -> executePreferReserve(task)
+                // 已在函数入口拦截，不会走到这里
+                TaskMode.SINGLE -> Unit
             }
         }
         taskJobs[task.id] = job
@@ -339,93 +351,102 @@ class SeatViewModel @Inject constructor(
         }
     }
 
-    private suspend fun executeSingleReserve(task: ReservationTask) {
-        updateTaskStatus(task.id, TaskStatus.IDLE, "正在查询座位树…")
-        val treeResult = seatApi.getSeatTree(task.reserveDate)
-        if (treeResult.isFailure) { handleApiError(treeResult.exceptionOrNull()); updateTaskStatus(task.id, TaskStatus.FAILED, "查询失败"); return }
-
-        val datesResult = seatApi.getSeatDates(buildId = task.areaId)
-        if (datesResult.isFailure) { handleApiError(datesResult.exceptionOrNull()); updateTaskStatus(task.id, TaskStatus.FAILED, "获取时段失败"); return }
-
-        val dates = datesResult.getOrThrow()
-        val todayDates = dates.filter { it.day == task.reserveDate }
-        val segment = if (todayDates.isNotEmpty()) todayDates.first() else dates.first()
-        val segId = segment.segmentId.takeIf { it.isNotBlank() } ?: "1"
-        val startTime = segment.start.takeIf { it.isNotBlank() } ?: "08:00"
-        val endTime = segment.end.takeIf { it.isNotBlank() } ?: "22:30"
-
-        updateTaskStatus(task.id, TaskStatus.RUNNING, "正在查询座位 ${task.seatNo}…")
-        val seatsResult = seatApi.getSeats(task.areaId, segId, task.reserveDate, startTime, endTime)
-        if (seatsResult.isFailure) { handleApiError(seatsResult.exceptionOrNull()); updateTaskStatus(task.id, TaskStatus.FAILED, "查询座位失败"); return }
-
-        val targetSeat = seatsResult.getOrThrow().find { it.no == task.seatNo }
-        if (targetSeat == null) { updateTaskStatus(task.id, TaskStatus.FAILED, "未找到座位号 ${task.seatNo}"); return }
-
-        updateTaskStatus(task.id, TaskStatus.RUNNING, "正在预约座位 ${task.seatNo}…")
-        val result = seatApi.confirmSeat(targetSeat.id, segId)
-        if (result.isSuccess && result.getOrNull() == true) {
-            updateTaskStatus(task.id, TaskStatus.SUCCESS, "预约成功")
-        } else {
-            handleApiError(result.exceptionOrNull())
-            updateTaskStatus(task.id, TaskStatus.FAILED, result.exceptionOrNull()?.message ?: "预约失败")
-        }
+    /** 解析任务对应日期的时段参数；拉取失败返回 null，由调用方决定如何处理。 */
+    private suspend fun resolveTaskSegment(areaId: String, day: String): SegmentParams? {
+        val r = seatApi.getSeatDates(buildId = areaId)
+        if (r.isFailure) { handleApiError(r.exceptionOrNull()); return null }
+        val dates = r.getOrThrow()
+        val seg = dates.firstOrNull { it.day == day } ?: dates.firstOrNull() ?: return null
+        fun String.usable() = takeIf { it.isNotBlank() && it != "null" }
+        return SegmentParams(
+            segmentId = seg.segmentId.usable() ?: "1",
+            startTime = seg.start.usable() ?: "08:00",
+            endTime = seg.end.usable() ?: "22:30"
+        )
     }
 
-    private suspend fun executeMonitor(task: ReservationTask) {
-        val datesResult = seatApi.getSeatDates(buildId = task.areaId)
-        if (datesResult.isFailure) { handleApiError(datesResult.exceptionOrNull()); updateTaskStatus(task.id, TaskStatus.FAILED, "获取时段失败"); return }
-        val dates = datesResult.getOrThrow()
-        val todayDates = dates.filter { it.day == task.reserveDate }
-        val segment = if (todayDates.isNotEmpty()) todayDates.first() else dates.first()
-        val segId = segment.segmentId.takeIf { it.isNotBlank() } ?: "1"
-        val startTime = segment.start.takeIf { it.isNotBlank() } ?: "08:00"
-        val endTime = segment.end.takeIf { it.isNotBlank() } ?: "22:30"
+    /** 指数退避：连续失败时每次翻倍，封顶 MAX_POLL_INTERVAL_MS。 */
+    private fun backoff(current: Long): Long = minOf(current * 2, MAX_POLL_INTERVAL_MS)
 
-        while (true) {
-            val seatsResult = seatApi.getSeats(task.areaId, segId, task.reserveDate, startTime, endTime)
-            if (seatsResult.isFailure) { handleApiError(seatsResult.exceptionOrNull()); updateTaskStatus(task.id, TaskStatus.RUNNING, "查询失败，重试中"); delay(10000); continue }
+    /** 监控预约：轮询指定座位，空出后立即预约。 */
+    private suspend fun executeMonitor(task: ReservationTask) {
+        val params = resolveTaskSegment(task.areaId, task.reserveDate)
+            ?: run { updateTaskStatus(task.id, TaskStatus.FAILED, "获取时段失败"); return }
+
+        val deadline = System.currentTimeMillis() + MAX_TASK_DURATION_MS
+        var interval = MONITOR_INTERVAL_MS
+
+        while (System.currentTimeMillis() < deadline) {
+            val seatsResult = seatApi.getSeats(task.areaId, params.segmentId, task.reserveDate, params.startTime, params.endTime)
+            if (seatsResult.isFailure) {
+                handleApiError(seatsResult.exceptionOrNull())
+                interval = backoff(interval)
+                updateTaskStatus(task.id, TaskStatus.RUNNING, "查询失败，${interval / 1000}s 后重试")
+                delay(interval)
+                continue
+            }
+            interval = MONITOR_INTERVAL_MS
 
             val targetSeat = seatsResult.getOrNull()?.find { it.no == task.seatNo }
-            if (targetSeat == null) { updateTaskStatus(task.id, TaskStatus.RUNNING, "未找到座位，继续监控…"); delay(10000); continue }
+            if (targetSeat == null) {
+                updateTaskStatus(task.id, TaskStatus.RUNNING, "未找到座位，继续监控…")
+                delay(interval)
+                continue
+            }
 
             if (targetSeat.status == SeatStatus.AVAILABLE) {
                 updateTaskStatus(task.id, TaskStatus.RUNNING, "座位可用！正在预约…")
-                val result = seatApi.confirmSeat(targetSeat.id, segId)
-                if (result.isSuccess && result.getOrNull() == true) { updateTaskStatus(task.id, TaskStatus.SUCCESS, "预约成功"); return }
-                else { handleApiError(result.exceptionOrNull()); updateTaskStatus(task.id, TaskStatus.RUNNING, "预约失败，继续监控") }
+                val result = seatApi.confirmSeat(targetSeat.id, params.segmentId)
+                if (result.isSuccess && result.getOrNull() == true) {
+                    updateTaskStatus(task.id, TaskStatus.SUCCESS, "预约成功")
+                    return
+                }
+                handleApiError(result.exceptionOrNull())
+                updateTaskStatus(task.id, TaskStatus.RUNNING, "预约失败，继续监控")
             } else {
                 updateTaskStatus(task.id, TaskStatus.RUNNING, "座位被占，继续监控…")
             }
-            delay(10000)
+            delay(interval)
         }
+        updateTaskStatus(task.id, TaskStatus.FAILED, "已超过最长监控时长（2 小时），任务自动停止")
     }
 
+    /** 优先预约：轮询区域内所有空闲座位，优先取指定座位号，否则取最早可用的。 */
     private suspend fun executePreferReserve(task: ReservationTask) {
-        val datesResult = seatApi.getSeatDates(buildId = task.areaId)
-        if (datesResult.isFailure) { handleApiError(datesResult.exceptionOrNull()); updateTaskStatus(task.id, TaskStatus.FAILED, "获取时段失败"); return }
-        val dates = datesResult.getOrThrow()
-        val todayDates = dates.filter { it.day == task.reserveDate }
-        val segment = if (todayDates.isNotEmpty()) todayDates.first() else dates.first()
-        val segId = segment.segmentId.takeIf { it.isNotBlank() } ?: "1"
-        val startTime = segment.start.takeIf { it.isNotBlank() } ?: "08:00"
-        val endTime = segment.end.takeIf { it.isNotBlank() } ?: "22:30"
+        val params = resolveTaskSegment(task.areaId, task.reserveDate)
+            ?: run { updateTaskStatus(task.id, TaskStatus.FAILED, "获取时段失败"); return }
 
-        while (true) {
-            val seatsResult = seatApi.getSeats(task.areaId, segId, task.reserveDate, startTime, endTime)
-            if (seatsResult.isFailure) { handleApiError(seatsResult.exceptionOrNull()); updateTaskStatus(task.id, TaskStatus.RUNNING, "查询失败，重试中"); delay(5000); continue }
+        val deadline = System.currentTimeMillis() + MAX_TASK_DURATION_MS
+        var interval = PREFER_INTERVAL_MS
+
+        while (System.currentTimeMillis() < deadline) {
+            val seatsResult = seatApi.getSeats(task.areaId, params.segmentId, task.reserveDate, params.startTime, params.endTime)
+            if (seatsResult.isFailure) {
+                handleApiError(seatsResult.exceptionOrNull())
+                interval = backoff(interval)
+                updateTaskStatus(task.id, TaskStatus.RUNNING, "查询失败，${interval / 1000}s 后重试")
+                delay(interval)
+                continue
+            }
+            interval = PREFER_INTERVAL_MS
 
             val availableSeats = seatsResult.getOrNull()?.filter { it.status == SeatStatus.AVAILABLE }?.sortedBy { it.no }
             if (!availableSeats.isNullOrEmpty()) {
                 val targetSeat = availableSeats.find { it.no == task.seatNo } ?: availableSeats.first()
                 updateTaskStatus(task.id, TaskStatus.RUNNING, "发现空闲座位 ${targetSeat.no}，正在预约…")
-                val result = seatApi.confirmSeat(targetSeat.id, segId)
-                if (result.isSuccess && result.getOrNull() == true) { updateTaskStatus(task.id, TaskStatus.SUCCESS, "预约成功，座位 ${targetSeat.no}"); return }
-                else { handleApiError(result.exceptionOrNull()); updateTaskStatus(task.id, TaskStatus.RUNNING, "预约失败，继续尝试") }
+                val result = seatApi.confirmSeat(targetSeat.id, params.segmentId)
+                if (result.isSuccess && result.getOrNull() == true) {
+                    updateTaskStatus(task.id, TaskStatus.SUCCESS, "预约成功，座位 ${targetSeat.no}")
+                    return
+                }
+                handleApiError(result.exceptionOrNull())
+                updateTaskStatus(task.id, TaskStatus.RUNNING, "预约失败，继续尝试")
             } else {
                 updateTaskStatus(task.id, TaskStatus.RUNNING, "暂无空闲座位，等待中…")
             }
-            delay(5000)
+            delay(interval)
         }
+        updateTaskStatus(task.id, TaskStatus.FAILED, "已超过最长优先预约时长（2 小时），任务自动停止")
     }
 
     private fun updateTaskStatus(taskId: String, status: TaskStatus, message: String) {

@@ -1,5 +1,30 @@
 # CHANGES
 
+## 2026-09-17 M1.2 统一单次预约 + M2.4 轮询退避与时长上限
+
+### M1.2 统一单次预约实现（保留座位图路径）
+
+此前单次预约存在**两套并行实现**：`SeatMapScreen.reserveSeat()` 直连 `confirmSeat`（实际在用的），以及 `executeSingleReserve()`（`addTask` 那条）。经确认**保留座位图路径**——它可以在座位图上精确挑座，体验更好、代码更少。
+
+- 删除 `executeSingleReserve()`
+- `addTask()` 入口拦截 `TaskMode.SINGLE` 并直接返回
+- `TaskMode.SINGLE` **保留**，仅用于 `NewTaskScreen` 的模式选择（决定显示「选择座位」还是「创建任务」）
+
+### M2.4 轮询退避与最长运行时长
+
+此前 `executeMonitor` / `executePreferReserve` 是**固定 10s / 5s 的无上限 `while(true)` 轮询**，任务创建后会一直轮询到成功或手动取消，容易触发服务端限流。
+
+- 新增可调常量：`MAX_TASK_DURATION_MS`(2 小时)、`MAX_POLL_INTERVAL_MS`(5 分钟)、`MONITOR_INTERVAL_MS`(10s)、`PREFER_INTERVAL_MS`(5s)
+- **指数退避**：连续查询失败时轮询间隔每次翻倍，封顶 5 分钟；查询成功后立即重置为基准间隔
+- **时长上限**：单任务运行超过 2 小时自动停止，状态置为 `FAILED` 并提示「已超过最长…时长，任务自动停止」
+- 任务消息中显示下次重试倒计时（便于真机观察退避是否生效）
+- 顺带抽取 `resolveTaskSegment()`，消除 `executeMonitor`/`executePreferReserve` 中重复的时段解析块；并修掉原代码 `dates.first()` 在时段列表为空时会抛异常的隐患（现返回 null 由调用方置为失败）
+
+**验证**：`:features:seat:compileDebugKotlin` BUILD SUCCESSFUL。
+**待真机验证**：监控/优先的实际轮询表现、退避是否按预期生效、2 小时上限。
+
+---
+
 ## 2026-09-17 M1 补齐核心功能：接线三种预约模式 + 修两个座位图缺陷
 
 **背景**：`SeatViewModel.addTask()` 此前在全仓库无任何调用点，导致「监控预约 / 优先预约」两种模式点了没反应、任务列表恒为空。实现代码（`executeSingleReserve`/`executeMonitor`/`executePreferReserve`）本身是完整的，只是从未被接线。
