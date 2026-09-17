@@ -24,3 +24,6 @@ bin/
 # 本地临时文件
 /TODO.md
 /AGENTS.md
+
+# 构建诊断日志
+*.log
