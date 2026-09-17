@@ -4,7 +4,6 @@ import cn.bit101.android.config.user.base.SeatLoginStatus
 import cn.bit101.android.features.seat.SeatLog
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatDate
-import cn.bit101.android.features.seat.model.SeatStatus
 import cn.bit101.android.features.seat.model.SeatTreeNode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,12 +17,18 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * 座位业务接口。
+ *
+ * 认证语义（2026-09-18 实测）：只有 `confirm` 与 `cancel` 需要认证，
+ * `tree` / `date` / `seat` 无需任何凭据即可返回数据；认证失败由
+ * **HTTP 200 + 业务码 10001** 表达，不是 401（见 [seatAuthFailure]）。
+ */
 @Singleton
 class SeatApi @Inject constructor(
     seatHttp: SeatHttp,
@@ -33,10 +38,7 @@ class SeatApi @Inject constructor(
     companion object {
         private const val TAG = "SeatApi"
 
-        /**
-         * 认证失效的统一信号：拦截器遇到 401 时抛出，
-         * ViewModel 与前台服务据此清理会话。避免这个字符串散落多处。
-         */
+        /** 认证失效的统一信号。ViewModel 与前台服务据此清理会话。 */
         const val TOKEN_EXPIRED = "TOKEN_EXPIRED"
     }
 
@@ -46,7 +48,7 @@ class SeatApi @Inject constructor(
     private val _token = MutableStateFlow("")
 
     /**
-     * token 的变化必须可被观察：前台服务侧遇到 401 也会清空它，
+     * token 的变化必须可被观察：前台服务侧遇到认证失效也会清空它，
      * 若 UI 不订阅这个流，就会继续显示「已登录」而实际已经没有会话。
      */
     val tokenFlow: StateFlow<String> = _token.asStateFlow()
@@ -81,9 +83,8 @@ class SeatApi @Inject constructor(
                     .build()
 
                 val response = chain.proceed(request)
-                // 这个 client 只用于座位业务接口，出现 401 必然意味着会话失效。
-                // 早期只在「本地 token 非空」时才抛 TOKEN_EXPIRED，本地 token 被清空后
-                // 服务端返回的 401 会被当成普通 HTTP 错误，401 自愈链路就断了。
+                // 兜底：实测量 seatlib 用 HTTP 200 + 业务码表达未登录，
+                // 但无法排除网关或未来改版确实返回 401。
                 if (response.code == 401) {
                     response.close()
                     throw IOException(TOKEN_EXPIRED)
@@ -100,115 +101,73 @@ class SeatApi @Inject constructor(
         return root.toString().toRequestBody("application/json".toMediaType())
     }
 
+    /** 发送 POST 并返回响应体；非 200 或空体直接抛错。 */
+    private fun post(path: String, body: okhttp3.RequestBody): String {
+        val res = client.newCall(Request.Builder().url(SeatHttp.BASE + path).post(body).build()).execute()
+        val text = res.body?.string() ?: ""
+        res.close()
+        if (res.code != 200 || text.isEmpty()) throw IOException("HTTP ${res.code}: $text")
+        return text
+    }
+
     suspend fun getSeatTree(date: String): Result<List<SeatTreeNode>> = withContext(Dispatchers.IO) {
         runCatching {
-            val body = jsonBody(JSONObject().put("date", date))
-            val res = client.newCall(Request.Builder().url("${SeatHttp.BASE}/api/Seat/tree").post(body).build()).execute()
-            val bodyStr = res.body?.string() ?: ""
-            if (res.code != 200 || bodyStr.isEmpty()) throw IOException("HTTP ${res.code}: $bodyStr")
-            val json = JSONObject(bodyStr)
-            val data = json.optJSONArray("data") ?: throw Exception("No data")
-            val nodes = mutableListOf<SeatTreeNode>()
-            fun parse(arr: JSONArray, parentId: String?) {
-                for (i in 0 until arr.length()) {
-                    val item = arr.getJSONObject(i)
-                    val id = item.getString("id")
-                    val name = item.getString("name")
-                    val type = item.optInt("type", 0)
-                    nodes.add(SeatTreeNode(id = id, name = name, type = type, parentId = parentId))
-                    item.optJSONArray("children")?.let { parse(it, id) }
-                }
-            }
-            parse(data, null)
-            SeatLog.d(TAG) { "getSeatTree ok: date=$date, ${nodes.size} node(s)" }
-            nodes
+            val json = JSONObject(post("/api/Seat/tree", jsonBody(JSONObject().put("date", date))))
+            val data = json.optJSONArray("data") ?: throw IOException("响应缺少 data")
+            parseSeatTree(data).also { SeatLog.d(TAG) { "getSeatTree ok: date=$date, ${it.size} node(s)" } }
         }
     }
 
     suspend fun getSeatDates(buildId: String? = null): Result<List<SeatDate>> = withContext(Dispatchers.IO) {
         runCatching {
             val extra = if (buildId != null) JSONObject().put("build_id", buildId) else JSONObject()
-            val res = client.newCall(Request.Builder().url("${SeatHttp.BASE}/api/Seat/date").post(jsonBody(extra)).build()).execute()
-            val bodyStr = res.body?.string() ?: ""
-            if (res.code != 200 || bodyStr.isEmpty()) throw IOException("HTTP ${res.code}")
-            val json = JSONObject(bodyStr)
-            val data = json.optJSONArray("data") ?: throw Exception("No data")
-            val dates = mutableListOf<SeatDate>()
-            for (i in 0 until data.length()) {
-                val day = data.getJSONObject(i)
-                val timesArr = day.getJSONArray("times")
-                for (j in 0 until timesArr.length()) {
-                    val t = timesArr.getJSONObject(j)
-                    dates.add(
-                        SeatDate(
-                            day = day.getString("day"),
-                            segmentId = if (t.isNull("id")) "" else t.optString("id", ""),
-                            start = if (t.isNull("start")) "" else t.optString("start", ""),
-                            end = if (t.isNull("end")) "" else t.optString("end", "")
-                        )
-                    )
-                }
-            }
-            dates
+            val json = JSONObject(post("/api/Seat/date", jsonBody(extra)))
+            val data = json.optJSONArray("data") ?: throw IOException("响应缺少 data")
+            parseSeatDates(data)
         }
     }
 
-    suspend fun getSeats(area: String, segment: String, day: String, startTime: String, endTime: String): Result<List<Seat>> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val body = jsonBody(JSONObject().apply {
+    suspend fun getSeats(
+        area: String,
+        segment: String,
+        day: String,
+        startTime: String,
+        endTime: String,
+    ): Result<List<Seat>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = jsonBody(
+                JSONObject().apply {
                     put("area", area); put("segment", segment)
                     put("day", day); put("startTime", startTime); put("endTime", endTime)
-                })
-                val res = client.newCall(Request.Builder().url("${SeatHttp.BASE}/api/Seat/seat").post(body).build()).execute()
-                val bodyStr = res.body?.string() ?: ""
-                if (res.code != 200 || bodyStr.isEmpty()) throw IOException("HTTP ${res.code}")
-                val json = JSONObject(bodyStr)
-                val data = json.optJSONArray("data") ?: throw Exception("No data")
-                val seats = mutableListOf<Seat>()
-                for (i in 0 until data.length()) {
-                    val s = data.getJSONObject(i)
-                    seats.add(
-                        Seat(
-                            id = s.getString("id"),
-                            no = s.getString("no"),
-                            status = when (s.getString("status")) {
-                                "1" -> SeatStatus.AVAILABLE
-                                "2" -> SeatStatus.RESERVED
-                                else -> SeatStatus.OCCUPIED
-                            },
-                            areaId = area
-                        )
-                    )
                 }
-                seats
-            }
+            )
+            val json = JSONObject(post("/api/Seat/seat", body))
+            val data = json.optJSONArray("data") ?: throw IOException("响应缺少 data")
+            parseSeats(data, area)
         }
+    }
 
-    suspend fun confirmSeat(seatId: String, segment: String): Result<Boolean> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val body = jsonBody(JSONObject().apply { put("seat_id", seatId); put("segment", segment) })
-                val res = client.newCall(Request.Builder().url("${SeatHttp.BASE}/api/Seat/confirm").post(body).build()).execute()
-                val bodyStr = res.body?.string() ?: "{}"
-                if (res.code != 200 || bodyStr.isEmpty()) throw IOException("HTTP ${res.code}: $bodyStr")
-                val json = JSONObject(bodyStr)
-                if (json.optInt("code", -1) != 1) {
-                    throw IOException("预约失败: ${json.optString("msg", "未知错误")}")
-                }
-                true
+    suspend fun confirmSeat(seatId: String, segment: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = jsonBody(JSONObject().apply { put("seat_id", seatId); put("segment", segment) })
+            val json = JSONObject(post("/api/Seat/confirm", body))
+            val code = json.intOrZero("code")
+            if (code != 1) {
+                seatAuthFailure(code, json.errorText())?.let { throw it }
+                throw IOException("预约失败: ${json.errorText()}")
             }
+            true
         }
+    }
 
     suspend fun cancelSeat(seatId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         runCatching {
             val body = jsonBody(JSONObject().put("seat_id", seatId))
-            val res = client.newCall(Request.Builder().url("${SeatHttp.BASE}/api/Space/cancel").post(body).build()).execute()
-            val bodyStr = res.body?.string() ?: "{}"
-            if (bodyStr.isEmpty()) throw IOException("Empty response")
-            val json = JSONObject(bodyStr)
-            if (json.optInt("code", -1) != 1) {
-                throw IOException("取消失败: ${json.optString("msg", "未知错误")}")
+            val json = JSONObject(post("/api/Space/cancel", body))
+            val code = json.intOrZero("code")
+            if (code != 1) {
+                seatAuthFailure(code, json.errorText())?.let { throw it }
+                throw IOException("取消失败: ${json.errorText()}")
             }
             true
         }

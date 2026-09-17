@@ -13,9 +13,11 @@ import androidx.core.app.NotificationCompat
 import cn.bit101.android.features.seat.api.SeatApi
 import cn.bit101.android.features.seat.api.SeatTaskRepository
 import cn.bit101.android.features.seat.model.ReservationTask
+import cn.bit101.android.features.seat.model.SeatNumberComparator
 import cn.bit101.android.features.seat.model.SeatStatus
 import cn.bit101.android.features.seat.model.TaskMode
 import cn.bit101.android.features.seat.model.TaskStatus
+import cn.bit101.android.features.seat.model.seatNumberEquals
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -172,11 +174,13 @@ class SeatMonitorService : Service() {
 
             val target = if (mode == TaskMode.PREFER) {
                 // 优先预约：区域内最早可用的座位；若指定座位号恰好可用则优先它
-                val available = seats.filter { it.status == SeatStatus.AVAILABLE }.sortedBy { it.no }
-                available.find { it.no == task.seatNo } ?: available.firstOrNull()
+                val available = seats.filter { it.status == SeatStatus.AVAILABLE }
+                    .sortedWith(compareBy(SeatNumberComparator) { it.no })
+                available.firstOrNull { seatNumberEquals(it.no, task.seatNo) } ?: available.firstOrNull()
             } else {
-                // 监控预约：只盯指定座位
-                seats.find { it.no == task.seatNo }
+                // 监控预约：只盯指定座位。座位号做补零容错 ——
+                // 服务端返回 "001" 而用户常填 "1"，直接比较会永远匹配不上
+                seats.firstOrNull { seatNumberEquals(it.no, task.seatNo) }
             }
 
             if (target == null) {
