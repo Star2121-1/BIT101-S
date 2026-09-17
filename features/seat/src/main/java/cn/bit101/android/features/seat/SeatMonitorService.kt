@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import cn.bit101.android.features.seat.api.SeatApi
 import cn.bit101.android.features.seat.api.SeatTaskRepository
@@ -69,7 +68,7 @@ class SeatMonitorService : Service() {
                 // Android 12+ 限制应用在后台启动前台服务，超限时抛
                 // ForegroundServiceStartNotAllowedException。这里不让它冒泡成崩溃：
                 // 任务本身仍在仓储里，用户回到前台时会再次尝试拉起。
-                Log.w(TAG, "startForegroundService rejected: ${e.javaClass.simpleName} ${e.message}")
+                SeatLog.w(TAG, "startForegroundService rejected: ${e.javaClass.simpleName} ${e.message}")
             }
         }
     }
@@ -123,7 +122,7 @@ class SeatMonitorService : Service() {
 
         refreshNotification(active.size)
         if (active.isEmpty()) {
-            Log.d(TAG, "no active task left, stopping service")
+            SeatLog.d(TAG, "no active task left, stopping service")
             stopSelf()
         }
     }
@@ -209,7 +208,7 @@ class SeatMonitorService : Service() {
 
     /** 认证失效：清空会话并终止所有任务。返回 true 表示调用方应立即返回。 */
     private fun handleAuthError(e: Throwable?): Boolean {
-        if (e?.message != "TOKEN_EXPIRED" && e?.cause?.message != "TOKEN_EXPIRED") return false
+        if (e?.message != SeatApi.TOKEN_EXPIRED && e?.cause?.message != SeatApi.TOKEN_EXPIRED) return false
         seatApi.token = ""
         repository.stopAll("登录已失效，请重新登录")
         return true

@@ -1,0 +1,40 @@
+# 统一行尾，避免不同机器 / core.autocrlf 设置导致的行尾漂移。
+#
+# 背景：本机 core.autocrlf=true，gradlew 会被检出为 CRLF，
+# 而 gradlew 是 shell 脚本 —— Git Bash 下 `exec "$JAVACMD"` 会拿到带 \r 的路径而失败。
+# 显式声明 eol=lf 后，无论本机 autocrlf 如何，gradlew 都以 LF 检出。
+#
+# 注意：后面的规则覆盖前面的，因此特例（*.bat/*.cmd）必须写在通配规则之后。
+
+* text=auto eol=lf
+
+# Gradle wrapper 与 shell 脚本必须 LF
+gradlew text eol=lf
+*.sh    text eol=lf
+
+# Windows 批处理必须 CRLF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# 源码与配置（显式声明，便于阅读者确认意图）
+*.kt    text eol=lf
+*.kts   text eol=lf
+*.java  text eol=lf
+*.gradle text eol=lf
+*.pro   text eol=lf
+*.xml   text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+
+# 二进制文件不参与行尾转换（否则会损坏文件）
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.jar   binary
+*.apk   binary
+*.aab   binary
+*.keystore binary
+*.jks   binary

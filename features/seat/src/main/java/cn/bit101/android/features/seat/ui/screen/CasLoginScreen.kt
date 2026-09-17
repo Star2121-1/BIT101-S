@@ -1,7 +1,7 @@
 package cn.bit101.android.features.seat.ui.screen
 
 import android.graphics.Bitmap
-import android.util.Log
+import cn.bit101.android.features.seat.SeatLog
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -76,25 +76,25 @@ fun CasLoginScreen(
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
-                                Log.d(TAG, "pageStarted: $url")
+                                SeatLog.d(TAG, "pageStarted: $url")
                                 errorMessage = null
                             }
 
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
-                                Log.d(TAG, "pageFinished: $url")
+                                SeatLog.d(TAG, "pageFinished: $url")
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                                 val url = request.url.toString()
-                                Log.d(TAG, "shouldOverrideUrlLoading: $url")
+                                SeatLog.d(TAG, "shouldOverrideUrlLoading: $url")
 
                                 // Extract cas=TICKET from URL (phpCAS callback or session URL)
                                 val ticketRegex = Regex("""cas=([a-f0-9]{32})""")
                                 val ticket = ticketRegex.find(url)?.groupValues?.getOrNull(1)
 
                                 if (ticket != null) {
-                                    Log.d(TAG, "extracted cas ticket: ${ticket.take(8)}...")
+                                    SeatLog.d(TAG, "extracted cas ticket: ${SeatLog.mask(ticket)}")
                                     // Single entry point: sync cookies + exchange ticket
                                     CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
                                         viewModel.syncAndExchange(ticket)

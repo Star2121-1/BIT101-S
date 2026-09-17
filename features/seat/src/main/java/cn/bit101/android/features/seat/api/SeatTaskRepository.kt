@@ -4,6 +4,7 @@ import cn.bit101.android.config.seat.base.SeatTaskStore
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.TaskStatus
 import cn.bit101.android.features.seat.model.deserializeTasks
+import cn.bit101.android.features.seat.model.isTerminal
 import cn.bit101.android.features.seat.model.serializeTasks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,9 +20,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
-
-private val TaskStatus.isTerminal: Boolean
-    get() = this == TaskStatus.SUCCESS || this == TaskStatus.FAILED || this == TaskStatus.CANCELLED
 
 /**
  * 座位预约任务的唯一状态持有者。

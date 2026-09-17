@@ -20,18 +20,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatStatus
-
-private val AvailableGreen = Color(0xFF4CAF50)
-private val OccupiedRed = Color(0xFFF44336)
-private val ReservedOrange = Color(0xFFFF9800)
-private val SelectedBlue = Color(0xFF1565C0)
 
 @Composable
 fun SeatGrid(
@@ -55,29 +49,11 @@ fun SeatGrid(
 
 @Composable
 private fun SeatCell(seat: Seat, isSelected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val bgColor = when (seat.status) {
-        SeatStatus.AVAILABLE -> AvailableGreen.copy(alpha = 0.15f)
-        SeatStatus.OCCUPIED -> OccupiedRed.copy(alpha = 0.15f)
-        SeatStatus.RESERVED -> ReservedOrange.copy(alpha = 0.15f)
-    }
-    val borderColor = when {
-        isSelected -> SelectedBlue
-        seat.status == SeatStatus.AVAILABLE -> AvailableGreen.copy(alpha = 0.4f)
-        seat.status == SeatStatus.OCCUPIED -> OccupiedRed.copy(alpha = 0.4f)
-        seat.status == SeatStatus.RESERVED -> ReservedOrange.copy(alpha = 0.4f)
-        else -> Color.Transparent
-    }
-    val statusColor = when (seat.status) {
-        SeatStatus.AVAILABLE -> AvailableGreen
-        SeatStatus.OCCUPIED -> OccupiedRed
-        SeatStatus.RESERVED -> ReservedOrange
-    }
-    val statusLabel = when (seat.status) {
-        SeatStatus.AVAILABLE -> "可约"
-        SeatStatus.OCCUPIED -> "占用"
-        SeatStatus.RESERVED -> "预约"
-    }
+    val statusColor = SeatColors.of(seat.status)
+    val bgColor = statusColor.copy(alpha = 0.15f)
+    val borderColor = if (isSelected) SeatColors.selected else statusColor.copy(alpha = 0.4f)
     val shape = RoundedCornerShape(10.dp)
+
     Box(
         modifier = modifier
             .aspectRatio(1f)
@@ -88,11 +64,21 @@ private fun SeatCell(seat: Seat, isSelected: Boolean, onClick: () -> Unit, modif
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Text(text = seat.no, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold,
-                color = if (isSelected) SelectedBlue else MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center, fontSize = 13.sp)
-            Text(text = statusLabel, style = MaterialTheme.typography.labelSmall, color = statusColor,
-                textAlign = TextAlign.Center, fontSize = 11.sp)
+            Text(
+                text = seat.no,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isSelected) SeatColors.selected else MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+                fontSize = 13.sp
+            )
+            Text(
+                text = SeatColors.shortLabel(seat.status),
+                style = MaterialTheme.typography.labelSmall,
+                color = statusColor,
+                textAlign = TextAlign.Center,
+                fontSize = 11.sp
+            )
         }
     }
 }

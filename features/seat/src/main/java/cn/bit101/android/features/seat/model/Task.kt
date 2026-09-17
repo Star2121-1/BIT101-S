@@ -18,6 +18,16 @@ enum class TaskStatus {
     CANCELLED
 }
 
+/**
+ * 终态：不会再发生变化的任务状态。
+ *
+ * 存在意义是防止「已结束的任务被改回运行中」：认证失效时仓储会把在跑的任务一次性置为
+ * [TaskStatus.FAILED]，而那个刚被取消的协程还可能再执行一次状态更新 ——
+ * 没有这个判断就会把 FAILED 改回 RUNNING，UI 上表现为任务「运行中」但实际已经死了。
+ */
+val TaskStatus.isTerminal: Boolean
+    get() = this == TaskStatus.SUCCESS || this == TaskStatus.FAILED || this == TaskStatus.CANCELLED
+
 data class ReservationTask(
     val id: String = UUID.randomUUID().toString(),
     val mode: TaskMode,

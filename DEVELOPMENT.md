@@ -132,9 +132,18 @@ Unresolved reference '鍗?'   （中文字符乱码导致编译失败）
 
 ## 待解决（不在本次范围）
 
-- 登录流程：SeatSession 复用 BIT101 学校会话 Cookie，需先在全局登录页完成统一身份认证
+> 本节的原始条目多数已在 2026-09-17 的 M1–M3 中处理，保留原文以便对照，处理结果见行内标注。
+
+- 登录流程：`SeatSession` 复用 BIT101 学校会话 Cookie，需先在全局登录页完成统一身份认证
+  - ✅ 已修正认知：学校 Cookie 与 seatlib 的 phpCAS 是**两套独立会话**，Cookie 不互通。
+    实际方案是 App 内 WebView 完成 CAS 后取 ticket 换 JWT，见 `README.md` 的登录流程一节
 - MonitorWorker 后台保活：当前任务在进程被杀后丢失，后续可用 WorkManager 替代
+  - ✅ 已用**前台服务**（`SeatMonitorService`）替代，未采用 WorkManager ——
+    WorkManager 是为可延迟任务设计的，Doze / App Standby 会把执行推迟到分钟级，秒级抢座会失效
 - Token 过期自动登出：已实现 401 → 清除 session 逻辑，需联调验证
+  - ✅ 代码路径已加固（401 一律识别为 `TOKEN_EXPIRED`、token 变化可被 UI 观察、
+    服务侧失效时终止在跑任务并提示重新登录），**真机联调仍待做**
+- ⏳ 全部功能仅经过编译与单元测试验证，**尚未真机联调**（模拟器到不了 seatlib，需真机 + 校园网）
 
 ---
 

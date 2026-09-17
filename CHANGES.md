@@ -1,5 +1,119 @@
 # CHANGES
 
+## 2026-09-17 M2.5 加固 + M3 工程质量 + M4 体验
+
+### M2.5 401 自动登出加固（真机联调仍待做）
+
+原实现有三个会导致「失效了但看不出来 / 自愈不了」的缝隙：
+
+1. **拦截器只在「本地 token 非空」时才抛 `TOKEN_EXPIRED`**。本地 token 一旦被清空，
+   服务端返回的 401 会被当成普通 HTTP 错误，401 自愈链路就断了。改为**所有 401 一律抛**——
+   这个 client 只用于座位业务接口，出现 401 必然意味着会话失效。
+2. **前台服务清空 token 时 UI 不知道**。`isLoggedIn` 只在 ViewModel 自己改动时更新，
+   服务侧遇到 401 清空 token 后，界面仍显示「已登录」。新增 `SeatApi.tokenFlow`，
+   ViewModel 订阅它，在「曾有 token → 变空」时同步状态（用「曾有过」做判据，
+   避免启动初期误报）。
+3. **`isLoggedIn` 的判据是 BIT101 登录状态**，不是 seatlib 会话。这两者是独立会话，
+   会出现「UI 显示已登录、token 为空、接口实际无认证」的假象。改为以 seatlib token 为准，
+   并新增 `bit101LoggedIn` 供 UI 区分两种引导：
+   - 学校账号未登录 → 「登录」→ 跳全局登录页
+   - 学校账号已登录但座位未授权 → 「授权座位系统」→ 直接换取会话 / 弹出 CAS WebView
+
+同时新增会话失效提示（`authNotice`），在预约页与任务列表页展示，不再只是静默回到登录按钮。
+
+`SeatApi.TOKEN_EXPIRED` 提为常量，替换散落三处的魔法字符串。
+
+### M3.1 `.gitattributes`
+
+新增，统一行尾：`gradlew` / `*.sh` 强制 LF，`*.bat` / `*.cmd` 强制 CRLF，
+源码与配置显式声明 LF，二进制文件标记 `binary`（避免被行尾转换损坏）。
+
+工作区里的 `gradlew` 原本是 CRLF（`core.autocrlf=true` 的检出结果），已修为 LF。
+
+**注意一个环境限制**：本机 Git Bash（PortableGit 1.2.0）**即使行尾正确也无法执行 `./gradlew`** ——
+它不会为无扩展名的 `java` 自动补 `.exe`，报 `No such file or directory`（而 `java.exe` 确实存在）。
+这与行尾无关，属该 bash 的限制；本环境继续用 `./gradlew.bat`。
+
+### M3.2 proguard 文件
+
+`features/seat/build.gradle` 一直在引用 `proguard-rules.pro` 与 `consumer-rules.pro`，
+但两个文件根本不存在。`minifyEnabled false` 时不会报错，一旦开 release 混淆就会踩坑。
+已补齐；`consumer-rules.pro` 刻意留空并注明了原因（模块内没有依赖反射的入口）。
+
+### M3.3 调试日志收敛
+
+新增 `SeatLog`：按 `BuildConfig.DEBUG` 开关，并提供接受 lambda 的重载
+（release 下连字符串拼接都不会发生）。需要在 `build.gradle` 显式启用 `buildConfig true`——
+**AGP 8 起 library 模块默认关闭**，直接用 `BuildConfig.DEBUG` 会解析失败。
+
+44 处 `Log.*` 全部改经此出口，并顺带处理了敏感信息：
+- 原先的认证拦截器会把**完整 bearer token** 打进日志，改为不记录 token 本体
+- `getSeatTree` / `confirmSeat` 原先打印完整响应体，已移除
+- CAS ticket 改用 `SeatLog.mask()` 只留前 6 位与长度
+
+### M3.4 + M3.5 抽取 CookieJar、复用 OkHttpClient
+
+新增两个基础设施类：
+
+- **`SeatCookieJar`**：`okhttp3.CookieJar` ↔ `java.net.CookieManager` 的转换。
+  原先在 `SeatApi` / `SeatSession` / `SeatCasLogin` **三处各写一遍**，细节还有分歧
+  （`maxAge` 类型、`domain`/`path` 兜底、是否设 `version`），现统一并补齐兜底。
+- **`SeatHttp`**：共享客户端。`trySilentAuth()` 原先**每次调用**都新建 `OkHttpClient`，
+  连接池与线程池全部白建；现在登录类请求共用 `session`，业务客户端从 `base()` 派生
+  再追加认证拦截器。超时、协议、UA 三处原本不一致，现集中在 `base()`。
+
+### 删除 `SeatCasLogin`
+
+重构后它只剩两个纯转发的方法，没有存在价值：
+`syncWebViewCookies()` → `SeatHttp`（cookie 桥的自然归属），
+`trySilentAuth()` → `SeatSession`（会话管理的自然归属）。
+同时移除 `SeatSession.jwtToken` —— 它是 `SeatApi.token` 的冗余副本，从未被读取过。
+`SeatSession` 新增 `exchangeTicket()`，把原先内联在 ViewModel 里的 ticket 换取逻辑收敛回来。
+
+### M3.6 单元测试（31 条，全部通过）
+
+```
+CasResponseTest           7 条
+SeatTaskRepositoryTest   13 条
+TaskSerializationTest     8 条
+TaskStatusTest            3 条
+```
+
+- **任务 JSON 序列化**：往返一致性、未知枚举回落、脏数据不崩溃、字段缺失用默认值
+- **任务状态机**：终态保护（SUCCESS 不能被改回 RUNNING）、`stopAll` 只影响在跑任务、
+  `loadOnce` 的合并语义与「只执行一次」
+- **CAS 响应解析**：回归 `member` 是对象而非数组的历史坑，
+  并把「member 是数组时必须返回 null 而不是崩溃」固化下来
+
+为支持测试：`TaskStatus.isTerminal` 从仓储的私有扩展提升到 `model/Task.kt`；
+`parseCasUser` 抽为顶层函数。测试依赖显式加了 `org.json:json` ——
+Android SDK 里的 `org.json` 在单元测试中是空壳，不替换会让所有解析类测试失效。
+
+### M4.1 多日预约
+
+日期 chip 原先固定为「今天 / 明天」两个，`/api/Seat/date` 返回的多日数据不可达。
+改为读取服务端返回的可约日期（横向滚动，今天/明天显示为「今天」「明天」，其余显示日期），
+接口未返回时回落到「今天/明天」避免空列表。
+
+### M4.2 座位图信息与配色
+
+- 抽出 **`SeatColors`** 作为配色与文案的**唯一来源**。此前图例与座位格各硬编码一份颜色，
+  文案还不一致（图例「空闲」/ 格子「可约」）——图例存在的意义就是解释格子，
+  两处独立演化迟早对不上，比没有图例更糟
+- 图例补「已选中」（此前选中态的蓝色没有任何说明），改用 `FlowRow` 自动换行
+- 加载失败增加「重试」按钮（原先只能退出去重进）
+- 标题栏增加「换区域」直达入口（原先必须靠返回键）
+
+### 顺带修复
+
+`NewTaskScreen` 加载座位树时未检查登录态，未登录也会发请求并必然 401，现改为登录后才加载。
+
+**验证**：`:features:seat:compileDebugKotlin` BUILD SUCCESSFUL；
+`:features:seat:testDebugUnitTest` 31/31 通过。
+**待真机验证**：401 自愈链路、后台保活、退避与结果通知、多日预约。
+
+---
+
 ## 2026-09-17 M2.3 收尾：通知权限请求与预约结果通知
 
 ### 通知权限的运行时请求

@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +32,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -51,10 +54,11 @@ import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatStatus
 import cn.bit101.android.features.seat.ui.component.ErrorCard
+import cn.bit101.android.features.seat.ui.component.SeatColors
 import cn.bit101.android.features.seat.ui.component.SeatGrid
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SeatMapScreen(
     mainController: MainController,
@@ -69,6 +73,8 @@ fun SeatMapScreen(
     var selectedSeat by remember { mutableStateOf<Seat?>(null) }
     var isReserving by remember { mutableStateOf(false) }
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
+    val bit101LoggedIn by viewModel.bit101LoggedIn.collectAsState(initial = false)
+    val authNotice by viewModel.authNotice.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -97,9 +103,24 @@ fun SeatMapScreen(
     ) { innerPadding ->
         if (!isLoggedIn) {
             Box(modifier = Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Button(onClick = { mainController.navigate(NavDest.Login) }) {
-                        Text("登录")
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(24.dp)) {
+                    if (authNotice != null) {
+                        Text(authNotice!!, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                    }
+                    Text(
+                        if (bit101LoggedIn) "学校账号已登录，但座位系统尚未授权" else "尚未登录学校账号",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(onClick = {
+                        if (!bit101LoggedIn) {
+                            mainController.navigate(NavDest.Login)
+                        } else {
+                            // 学校账号已登录 → 直接尝试换取座位会话，必要时弹出 CAS WebView
+                            scope.launch { viewModel.ensureSeatlibSession() }
+                        }
+                    }) {
+                        Text(if (bit101LoggedIn) "授权座位系统" else "登录")
                     }
                 }
             }
@@ -109,7 +130,11 @@ fun SeatMapScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text(text = seatState.areaName.ifBlank { areaId }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = seatState.areaName.ifBlank { areaId }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            // 换区域需要回到上一步重选，这里给个直达入口，省得先猜返回键的用途
+                            TextButton(onClick = onBack) { Text("换区域", style = MaterialTheme.typography.labelMedium) }
+                        }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -118,10 +143,12 @@ fun SeatMapScreen(
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            LegendItem(color = Color(0xFF4CAF50), label = "空闲")
-                            LegendItem(color = Color(0xFFF44336), label = "占用")
-                            LegendItem(color = Color(0xFFFF9800), label = "已预约")
+                        // 配色与文案来自 SeatColors，与座位格共用同一来源，避免图例和格子对不上
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            LegendItem(color = SeatColors.available, label = SeatColors.legendLabel(SeatStatus.AVAILABLE))
+                            LegendItem(color = SeatColors.occupied, label = SeatColors.legendLabel(SeatStatus.OCCUPIED))
+                            LegendItem(color = SeatColors.reserved, label = SeatColors.legendLabel(SeatStatus.RESERVED))
+                            LegendItem(color = SeatColors.selected, label = "已选中")
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -129,7 +156,7 @@ fun SeatMapScreen(
                                 style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
                                 color = if (selectedSeat != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("剩余: $availableCount / $totalCount", style = MaterialTheme.typography.bodyMedium,
-                                color = if (availableCount > 0) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error)
+                                color = if (availableCount > 0) SeatColors.available else MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -142,7 +169,14 @@ fun SeatMapScreen(
                                     Text("加载座位图…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             }
                         }
-                        seatState.error != null -> ErrorCard(title = "加载失败", errorText = seatState.error!!, modifier = Modifier.fillMaxWidth().padding(16.dp))
+                        seatState.error != null -> Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                            ErrorCard(title = "加载失败", errorText = seatState.error!!, modifier = Modifier.fillMaxWidth())
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(onClick = { viewModel.openSeatMap(areaId = areaId, day = day) },
+                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
+                                Text("重试")
+                            }
+                        }
                         seatState.seats.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("该区域暂无座位数据", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

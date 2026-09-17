@@ -10,8 +10,9 @@
 |------|---------------|-------------------|
 | 新增 Tab | 5个：卷、图、网、话、我 | +1个：**座**（座位预约） |
 | 登录方式 | BIT-Login SDK 登录后自动持有学校 Cookie | **复用同一份学校 Cookie**，无需再次输入密码 |
-| 座位 API 认证 | 无 | OkHttp + Bearer JWT，JWT 来自 seatlib CAS 认证 |
-| 独立登录 | 无 | `SeatSession` 提供备用登录路径（CAS → JWT），用于测试或离线场景 |
+| 座位 API 认证 | 无 | OkHttp + Bearer JWT，JWT 来自 seatlib 的 phpCAS 会话 |
+| 会话持久化 | — | JWT 加密落盘，冷启动免重登 |
+| 后台抢座 | — | 前台服务（`dataSync`）轮询，锁屏 / 退后台 / 进程重启均可续跑 |
 
 ---
 
@@ -54,14 +55,27 @@ POST /api/cas/user 换取 JWT → Authorization: bearer{token}
 
 座位 API 不需要独立登录，BIT101 登录成功后学校会话已存在，直接复用即可。
 
-### CAS 备用登录（SeatSession）
+### 登录与换 JWT
 
-当学校 Cookie 不存在或失效时，`SeatSession` 提供完整 CAS 登录流程：
-1. GET `sso.bit.edu.cn/cas/login` → 解析 HTML 提取 `salt` 和 `execution`
-2. AES/ECB 加密密码（key = Base64(salt)）
-3. POST 表单完成认证，CAS 返回 ticket URL
-4. 跟随重定向获取 phpCAS 内部 code
-5. POST `seatlib.bit.edu.cn/api/cas/user` 换取 JWT
+BIT101 的学校会话与 seatlib 的 phpCAS 会话是**两套彼此独立的会话**，Cookie 不互通，
+因此不能只靠「复用学校 Cookie」拿到 JWT。实际流程：
+
+```
+BIT101 登录（学校统一身份认证）
+    ↓
+尝试静默换取：POST seatlib.bit.edu.cn/api/cas/user
+    ├─ 成功 → 拿到 JWT，Authorization: bearer{token}
+    └─ 失败 → 打开 App 内 WebView 完成 phpCAS 登录
+                 ↓ 拦截含 cas= 的 URL 取 ticket
+                 ↓ 同步 WebView cookie 到 OkHttp 的 cookie store
+                 ↓ POST /api/cas/user（带 ticket）换 JWT
+```
+
+要点：
+- **必须在 App 内 WebView 完成 CAS**。曾尝试引导外部浏览器登录，但 Android 沙箱下
+  OkHttp 读不到浏览器的 cookie，方案不可行。
+- `api/cas/user` 返回的 `member` 是 **JSON 对象而非数组**，用 `optJSONArray` 取恒为 null。
+- JWT 加密落盘；token 过期时首次 401 会清空会话并提示重新登录。
 
 ### 座位数据结构
 
@@ -80,18 +94,26 @@ API: seatlib.bit.edu.cn/api/Space/cancel → 取消预约
 ```
 features/seat/
 ├── api/
-│   ├── SeatApi.kt        # OkHttp 封装，共享 school cookies
-│   └── SeatSession.kt    # CAS 登录流程（备用）
+│   ├── SeatHttp.kt            # 共享 OkHttpClient 与 cookie 桥（WebView ↔ OkHttp）
+│   ├── SeatCookieJar.kt       # okhttp3.CookieJar ↔ java.net.CookieManager 转换
+│   ├── SeatApi.kt             # 座位业务接口封装；token 的读写、持久化与 401 识别
+│   ├── SeatSession.kt         # CAS 换 JWT（静默认证 / ticket 换取）
+│   └── SeatTaskRepository.kt  # 任务状态的唯一持有者（ViewModel 与服务共享）
 ├── model/
-│   ├── Seat.kt           # 座位、时段数据
-│   ├── Task.kt           # 预约任务（模式/状态）
-│   └── Area.kt           # 座位树节点
+│   ├── Seat.kt                # 座位、时段数据
+│   ├── Task.kt                # 预约任务（模式/状态）+ JSON 序列化
+│   └── Area.kt                # 座位树节点
 ├── ui/
-│   ├── component/        # SeatGrid、CascadingDropdown、ModeSelector、ErrorCard
-│   └── screen/           # SeatMapScreen、NewTaskScreen、TaskListScreen
-├── SeatViewModel.kt      # MVVM 状态管理（Hilt 注入）
-└── SeatScreen.kt         # 入口，内部 NavHost 管理三页导航
+│   ├── component/             # SeatGrid、SeatColors、CascadingDropdown、ModeSelector、ErrorCard、NotificationPermission
+│   └── screen/                # SeatMapScreen、NewTaskScreen、TaskListScreen、CasLoginScreen
+├── SeatViewModel.kt           # MVVM 状态管理（Hilt 注入），不执行轮询
+├── SeatMonitorService.kt      # 前台服务：实际轮询与结果通知
+├── SeatLog.kt                 # 统一日志出口（按 BuildConfig.DEBUG 开关）
+└── SeatScreen.kt              # 入口，内部 NavHost 管理三页导航
 ```
+
+任务执行链路：`SeatViewModel`（加/取消任务）→ `SeatTaskRepository`（状态 + 落盘）
+→ `SeatMonitorService`（由任务流驱动，实际轮询）→ 结果通知。
 
 ---
 
@@ -109,14 +131,19 @@ cd F:\Agent_Work\BIT-102\BIT101-seat
 
 | 项目 | 状态 |
 |------|------|
-| Gradle 编译 | ✅ 通过 |
-| Hilt 依赖注入 | ✅ 修复（`@HiltViewModel`） |
+| Gradle 编译 | ✅ 通过（`:features:seat:compileDebugKotlin`） |
+| 单元测试 | ✅ 31 条通过（`./gradlew :features:seat:testDebugUnitTest`） |
+| Hilt 依赖注入 | ✅ 正常 |
 | 座位页面 UI 渲染 | ✅ 正常（模拟器 Pixel_6_API_34） |
-| Seat 按钮点击响应 | ✅ 正常 |
-| 真实座位数据加载 | ⏳ 需网络连接到 seatlib.bit.edu.cn |
-| 登录态复用 | ⏳ 需先在全局登录页完成 BIT101 登录 |
+| 真实座位数据加载 | ⏳ 需连接 seatlib.bit.edu.cn |
+| 三种模式实际预约行为 | ⏳ 需真机 + 校园网 |
+| 后台保活 / 结果通知 | ⏳ 需真机验证 |
+
+单元测试覆盖纯逻辑部分：任务 JSON 序列化与容错、任务状态机（终态保护）、
+CAS 响应解析（含 `member` 为对象/数组两种形态）。
 
 ### 已知问题
 
-- 模拟器无 WiFi 时点击 Seat 按钮会触发网络请求超时，但不再崩溃（之前因 Hilt 工厂缺失崩溃）
-- 真实预约需在学校网络或通过 VPN 连接到 seatlib.bit.edu.cn
+- **模拟器无法联调 seat**：学校防火墙封锁到 `10.0.0.0/8` 的 TCP 443，必须真机 + 校园网
+- Android 15 对 `dataSync` 前台服务有 6 小时/天上限（单任务最长 2 小时，在限内）
+- 5-10 秒持续轮询 2 小时，耗电会比较明显

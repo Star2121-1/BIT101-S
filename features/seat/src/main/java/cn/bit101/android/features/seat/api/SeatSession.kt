@@ -1,20 +1,13 @@
 package cn.bit101.android.features.seat.api
 
-import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.features.seat.SeatLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.Cookie
-import okhttp3.CookieJar
-import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.net.CookieManager
-import java.net.HttpCookie
-import java.net.URI
-import java.util.concurrent.TimeUnit
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,98 +17,72 @@ data class LoginResult(
     val studentId: String = ""
 )
 
+/**
+ * 解析 `/api/cas/user` 的响应体，返回 null 表示会话不存在或响应中没有 token。
+ *
+ * ⚠️ `member` 是 **JSON 对象而非数组**。早期版本用 `optJSONArray("member")` 取，
+ * 恒为 null，表现为「登录成功但拿不到 token」。这里固定用 `optJSONObject`。
+ *
+ * 抽成顶层函数是为了能直接做单元测试（见 `src/test/.../CasResponseTest.kt`）。
+ */
+internal fun parseCasUser(body: String): LoginResult? {
+    val member = runCatching { JSONObject(body).optJSONObject("member") }.getOrNull() ?: return null
+    if (member.isNull("token")) return null
+    val token = member.optString("token", "")
+    if (token.isEmpty()) return null
+    return LoginResult(
+        token = token,
+        name = member.optString("name", ""),
+        studentId = member.optString("id", "")
+    )
+}
+
+/**
+ * seatlib 的会话管理：把 CAS 登录结果换成 JWT。
+ *
+ * 两条路径共用同一套处理：
+ * - [authenticateSeatlib] 静默认证 —— seatlib 侧已有有效 phpCAS 会话时无需任何交互；
+ * - [exchangeTicket] 用 WebView 拦截到的 `cas=` ticket 显式换取。
+ *
+ * token 的权威副本在 [SeatApi.token]（负责持久化），这里不再另存一份。
+ */
 @Singleton
 class SeatSession @Inject constructor(
-    private val loginStatus: LoginStatus
+    private val seatHttp: SeatHttp,
 ) {
+
     companion object {
-        private const val SEATLIB_BASE = "https://seatlib.bit.edu.cn"
+        private const val TAG = "SeatSession"
+        private const val CAS_USER_PATH = "/api/cas/user"
     }
 
-    private val cookieManager: CookieManager get() = loginStatus.cookieManager
-    private val cookieStore get() = cookieManager.cookieStore
+    /** 静默认证。失败返回 failure，由调用方引导走 WebView 登录。 */
+    suspend fun authenticateSeatlib(): Result<LoginResult> = exchange(ticket = null)
 
-    @Volatile
-    var jwtToken: String = ""
+    /** 用 CAS ticket 换取 JWT。 */
+    suspend fun exchangeTicket(ticket: String): Result<LoginResult> = exchange(ticket)
 
-    private val client by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .addInterceptor { chain ->
-                val req = chain.request().newBuilder()
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                    .header("Accept-Language", "zh-CN,zh;q=0.9")
-                    .build()
-                chain.proceed(req)
+    private suspend fun exchange(ticket: String?): Result<LoginResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = if (ticket != null) JSONObject().put("cas", ticket) else JSONObject()
+            val request = Request.Builder()
+                .url(SeatHttp.BASE + CAS_USER_PATH)
+                .header("Content-Type", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = seatHttp.session.newCall(request).execute()
+            val body = response.body?.string() ?: "{}"
+            response.close()
+            if (response.code != 200) throw IOException("HTTP ${response.code}")
+
+            val result = parseCasUser(body) ?: throw IOException("会话已过期或未登录")
+            SeatLog.d(TAG) {
+                "cas exchange ok (${if (ticket != null) "ticket" else "silent"}), " +
+                    "token=${SeatLog.mask(result.token)}"
             }
-            .cookieJar(object : CookieJar {
-                override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-                    cookies.forEach { cookie ->
-                        val httpCookie = HttpCookie(cookie.name, cookie.value)
-                        httpCookie.domain = cookie.domain ?: url.host
-                        httpCookie.path = cookie.path
-                        httpCookie.secure = cookie.secure
-                        httpCookie.version = 0
-                        if (cookie.expiresAt != Long.MAX_VALUE) {
-                            httpCookie.maxAge = maxOf(0, (cookie.expiresAt - System.currentTimeMillis()) / 1000)
-                        }
-                        val uri = URI.create("${url.scheme}://${url.host}")
-                        cookieStore.add(uri, httpCookie)
-                    }
-                }
-                override fun loadForRequest(url: HttpUrl): List<Cookie> {
-                    val uri = URI.create("${url.scheme}://${url.host}")
-                    return cookieStore.get(uri).map { hc ->
-                        Cookie.Builder()
-                            .name(hc.name)
-                            .value(hc.value)
-                            .domain(hc.domain)
-                            .path(hc.path)
-                            .apply { if (hc.secure) secure() }
-                            .build()
-                    }
-                }
-            })
-            .build()
-    }
-
-    /**
-     * 静默认证：seatlib 侧已有有效 phpCAS 会话时，直接换取 JWT。
-     * 无会话（或会话失效）时返回 failure，由调用方引导走 WebView CAS 登录。
-     */
-    suspend fun authenticateSeatlib(): Result<LoginResult> = withContext(Dispatchers.IO) {
-        try {
-            val req = "{}".toRequestBody("application/json".toMediaType())
-            val res = client.newCall(
-                Request.Builder().url("$SEATLIB_BASE/api/cas/user")
-                    .header("Content-Type", "application/json")
-                    .header("X-Requested-With", "XMLHttpRequest")
-                    .post(req).build()
-            ).execute()
-            val body = res.body?.string() ?: "{}"
-            res.close()
-
-            val json = JSONObject(body)
-            val member = json.optJSONObject("member")
-            if (member != null && !member.isNull("token")) {
-                val token = member.optString("token", "")
-                if (token.isNotEmpty()) {
-                    jwtToken = token
-                    return@withContext Result.success(
-                        LoginResult(
-                            token = token,
-                            name = member.optString("name", ""),
-                            studentId = member.optString("id", "")
-                        )
-                    )
-                }
-            }
-            Result.failure(Exception("Session expired"))
-        } catch (e: Exception) {
-            Result.failure(e)
+            result
         }
     }
 }

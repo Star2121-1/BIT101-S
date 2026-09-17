@@ -33,6 +33,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,18 +47,41 @@ import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.TaskStatus
 import cn.bit101.android.features.seat.ui.component.rememberNotificationPermissionState
+import kotlinx.coroutines.launch
 
 @Composable
 fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, modifier: Modifier = Modifier) {
     val tasks by viewModel.tasks.collectAsState()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
+    val bit101LoggedIn by viewModel.bit101LoggedIn.collectAsState(initial = false)
+    val authNotice by viewModel.authNotice.collectAsState()
     val notificationPermission = rememberNotificationPermissionState()
+    val scope = rememberCoroutineScope()
 
     if (!isLoggedIn) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Button(onClick = { mainController.navigate(NavDest.Login) }) {
-                    Text("登录")
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(24.dp)
+            ) {
+                if (authNotice != null) {
+                    Text(authNotice!!, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                }
+                Text(
+                    if (bit101LoggedIn) "学校账号已登录，但座位系统尚未授权" else "尚未登录学校账号",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(onClick = {
+                    if (!bit101LoggedIn) {
+                        mainController.navigate(NavDest.Login)
+                    } else {
+                        // 学校账号已登录 → 直接尝试换取座位会话，必要时弹出 CAS WebView
+                        scope.launch { viewModel.ensureSeatlibSession() }
+                    }
+                }) {
+                    Text(if (bit101LoggedIn) "授权座位系统" else "登录")
                 }
             }
         }

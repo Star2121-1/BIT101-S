@@ -1,5 +1,6 @@
 package cn.bit101.android.features.seat.ui.screen
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +46,7 @@ import cn.bit101.android.features.seat.ui.component.CascadingDropdown
 import cn.bit101.android.features.seat.ui.component.ErrorCard
 import cn.bit101.android.features.seat.ui.component.ModeSelector
 import cn.bit101.android.features.seat.ui.component.rememberNotificationPermissionState
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -60,25 +63,62 @@ fun NewTaskScreen(
     var selectedCampus by remember { mutableStateOf<SeatTreeNode?>(null) }
     var selectedFloor by remember { mutableStateOf<SeatTreeNode?>(null) }
     var selectedArea by remember { mutableStateOf<SeatTreeNode?>(null) }
-    var reserveDate by remember { mutableStateOf(LocalDate.now()) }
+    var reserveDate by remember { mutableStateOf(LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var seatNoInput by remember { mutableStateOf("") }
 
     val seatlibReady by viewModel.seatlibReady.collectAsState()
+    val availableDays by viewModel.availableDays.collectAsState()
     val notificationPermission = rememberNotificationPermissionState()
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val treeLoading = treeNodes.isEmpty()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
+    val bit101LoggedIn by viewModel.bit101LoggedIn.collectAsState(initial = false)
+    val authNotice by viewModel.authNotice.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    // 日期选项优先用服务端返回的可约日期；接口未返回时回落到「今天 / 明天」，避免出现空列表。
+    val today = remember { LocalDate.now().format(dateFormatter) }
+    val tomorrow = remember { LocalDate.now().plusDays(1).format(dateFormatter) }
+    val dateOptions = availableDays.ifEmpty { listOf(today, tomorrow) }
+    val dateLabel = { day: String ->
+        when (day) {
+            today -> "今天"
+            tomorrow -> "明天"
+            else -> day
+        }
+    }
 
     LaunchedEffect(reserveDate, seatlibReady) {
-        if (seatlibReady) { viewModel.loadSeatTree(reserveDate.format(dateFormatter)); selectedCampus = null; selectedFloor = null; selectedArea = null }
+        if (seatlibReady && isLoggedIn) {
+            viewModel.loadSeatTree(reserveDate)
+            selectedCampus = null; selectedFloor = null; selectedArea = null
+        }
     }
 
     if (!isLoggedIn) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Button(onClick = { mainController.navigate(NavDest.Login) }) {
-                    Text("登录")
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(24.dp)
+            ) {
+                if (authNotice != null) {
+                    Text(authNotice!!, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                }
+                Text(
+                    if (bit101LoggedIn) "学校账号已登录，但座位系统尚未授权" else "尚未登录学校账号",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(onClick = {
+                    if (!bit101LoggedIn) {
+                        mainController.navigate(NavDest.Login)
+                    } else {
+                        scope.launch { viewModel.ensureSeatlibSession() }
+                    }
+                }) {
+                    Text(if (bit101LoggedIn) "授权座位系统" else "登录")
                 }
             }
         }
@@ -91,22 +131,36 @@ fun NewTaskScreen(
         ModeSelector(selectedMode = selectedMode, onModeSelected = { selectedMode = it })
         Spacer(modifier = Modifier.height(4.dp))
         Text("选择日期", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = reserveDate == LocalDate.now(), onClick = { reserveDate = LocalDate.now() },
-                label = { Text("今天") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer))
-            FilterChip(selected = reserveDate == LocalDate.now().plusDays(1), onClick = { reserveDate = LocalDate.now().plusDays(1) },
-                label = { Text("明天") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            dateOptions.forEach { day ->
+                FilterChip(
+                    selected = reserveDate == day,
+                    onClick = { reserveDate = day },
+                    label = { Text(dateLabel(day)) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                )
+            }
         }
-        Text("预约日期: ${reserveDate.format(dateFormatter)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+        Text("预约日期: $reserveDate", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
         Spacer(modifier = Modifier.height(4.dp))
-        if (treeLoading && seatTreeError == null) { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator() } }
-        else if (seatTreeError != null) { ErrorCard(title = "加载校区信息失败", errorText = seatTreeError!!, onDismiss = { viewModel.clearSeatTreeError() }, modifier = Modifier.fillMaxWidth()) }
-        else { CascadingDropdown(nodes = treeNodes, selectedCampus = selectedCampus, selectedFloor = selectedFloor, selectedArea = selectedArea,
-            onSelectionChanged = { campusId, floorId, areaId, areaName ->
-                if (areaId.isNotEmpty()) selectedArea = treeNodes.find { it.id == areaId }
-                else if (floorId.isNotEmpty()) { selectedFloor = treeNodes.find { it.id == floorId }; selectedArea = null }
-                else { selectedCampus = treeNodes.find { it.id == campusId }; selectedFloor = null; selectedArea = null }
-            }, modifier = Modifier.fillMaxWidth()) }
+        if (treeLoading && seatTreeError == null) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator() }
+        } else if (seatTreeError != null) {
+            ErrorCard(title = "加载校区信息失败", errorText = seatTreeError!!, onDismiss = { viewModel.clearSeatTreeError() }, modifier = Modifier.fillMaxWidth())
+        } else {
+            CascadingDropdown(nodes = treeNodes, selectedCampus = selectedCampus, selectedFloor = selectedFloor, selectedArea = selectedArea,
+                onSelectionChanged = { campusId, floorId, areaId, areaName ->
+                    if (areaId.isNotEmpty()) selectedArea = treeNodes.find { it.id == areaId }
+                    else if (floorId.isNotEmpty()) { selectedFloor = treeNodes.find { it.id == floorId }; selectedArea = null }
+                    else { selectedCampus = treeNodes.find { it.id == campusId }; selectedFloor = null; selectedArea = null }
+                }, modifier = Modifier.fillMaxWidth())
+        }
 
         if (selectedArea != null) {
             Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
@@ -142,7 +196,7 @@ fun NewTaskScreen(
             Button(onClick = {
                 if (selectedArea == null) { errorMessage = "请完整选择校区、楼层和区域"; return@Button }
                 errorMessage = null
-                viewModel.navigateToSeatMap(areaId = selectedArea!!.id, day = reserveDate.format(dateFormatter))
+                viewModel.navigateToSeatMap(areaId = selectedArea!!.id, day = reserveDate)
             }, enabled = selectedArea != null && !treeLoading, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
                 Text("选择座位", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -160,7 +214,7 @@ fun NewTaskScreen(
                     areaName = area.name,
                     areaId = area.id,
                     seatNo = seatNoInput.trim(),
-                    reserveDate = reserveDate.format(dateFormatter)
+                    reserveDate = reserveDate
                 )
                 seatNoInput = ""
                 // 通知权限只影响常驻通知是否可见，不影响任务本身，所以先建任务再申请
