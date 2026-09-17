@@ -45,7 +45,7 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
     }
 
     val navEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navEntry?.destination?.route ?: "tasks"
+    val currentRoute = navEntry?.destination?.route ?: "new_task"
 
     Scaffold(
         bottomBar = {
@@ -70,7 +70,13 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
             navController = navController,
             startDestination = "new_task"
         ) {
-            composable("new_task") { NewTaskScreen(mainController = mainController, viewModel = viewModel) }
+            composable("new_task") {
+                NewTaskScreen(
+                    mainController = mainController,
+                    viewModel = viewModel,
+                    onTaskCreated = { navController.navigate("tasks") { launchSingleTop = true } }
+                )
+            }
             composable("tasks") { TaskListScreen(mainController = mainController, viewModel = viewModel) }
             composable("seat_map/{areaId}/{day}") { backStackEntry ->
                 val areaId = backStackEntry.arguments?.getString("areaId") ?: ""

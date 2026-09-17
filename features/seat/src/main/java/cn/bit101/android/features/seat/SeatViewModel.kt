@@ -29,11 +29,21 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import javax.inject.Inject
 
+/** 座位图当前的查询参数，用于取消预约后按同样条件重新加载（避免日期/时段被回落值覆盖）。 */
+data class SeatQuery(
+    val areaId: String,
+    val day: String,
+    val segmentId: String,
+    val startTime: String,
+    val endTime: String
+)
+
 data class SeatMapState(
     val seats: List<Seat> = emptyList(),
     val areaName: String = "",
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val query: SeatQuery? = null
 )
 
 @HiltViewModel
@@ -219,17 +229,59 @@ class SeatViewModel @Inject constructor(
     }
 
     fun loadSeatsForMap(areaId: String, day: String, segmentId: String = "1", startTime: String = "08:00", endTime: String = "22:30") {
+        val query = SeatQuery(areaId, day, segmentId, startTime, endTime)
         viewModelScope.launch {
-            _seatMapState.value = _seatMapState.value.copy(isLoading = true, error = null)
+            _seatMapState.value = _seatMapState.value.copy(isLoading = true, error = null, query = query)
             val areaName = _seatTree.value.find { it.id == areaId }?.name ?: ""
             val result = seatApi.getSeats(areaId, segmentId, day, startTime, endTime)
             if (result.isSuccess) {
-                _seatMapState.value = SeatMapState(seats = result.getOrThrow(), areaName = areaName, isLoading = false)
+                _seatMapState.value = SeatMapState(seats = result.getOrThrow(), areaName = areaName, isLoading = false, query = query)
             } else {
                 handleApiError(result.exceptionOrNull())
-                _seatMapState.value = _seatMapState.value.copy(isLoading = false, error = result.exceptionOrNull()?.message ?: "加载失败")
+                _seatMapState.value = _seatMapState.value.copy(isLoading = false, error = result.exceptionOrNull()?.message ?: "加载失败", query = query)
             }
         }
+    }
+
+    /**
+     * 打开座位图。先确保时段数据就绪，再按解析出的时段参数加载座位。
+     * 把时段解析放在这里而不是 UI 侧，可以避免 seatDates 尚未加载时用回落值先行请求、导致时段错发。
+     */
+    fun openSeatMap(areaId: String, day: String) {
+        viewModelScope.launch {
+            _seatMapState.value = _seatMapState.value.copy(isLoading = true, error = null)
+            val params = resolveSegmentParams(areaId, day)
+            val query = SeatQuery(areaId, day, params.segmentId, params.startTime, params.endTime)
+            _seatMapState.value = _seatMapState.value.copy(query = query)
+            val areaName = _seatTree.value.find { it.id == areaId }?.name ?: ""
+            val result = seatApi.getSeats(areaId, params.segmentId, day, params.startTime, params.endTime)
+            if (result.isSuccess) {
+                _seatMapState.value = SeatMapState(seats = result.getOrThrow(), areaName = areaName, isLoading = false, query = query)
+            } else {
+                handleApiError(result.exceptionOrNull())
+                _seatMapState.value = _seatMapState.value.copy(isLoading = false, error = result.exceptionOrNull()?.message ?: "加载失败", query = query)
+            }
+        }
+    }
+
+    private data class SegmentParams(val segmentId: String, val startTime: String, val endTime: String)
+
+    /** 解析指定日期的时段参数；若时段数据未加载则先拉取，仍缺失时回落到默认时段。 */
+    private suspend fun resolveSegmentParams(areaId: String, day: String): SegmentParams {
+        var seg = _seatDates.value.firstOrNull { it.day == day }
+        if (seg == null) {
+            val r = seatApi.getSeatDates(areaId)
+            if (r.isSuccess) {
+                _seatDates.value = r.getOrThrow()
+                seg = _seatDates.value.firstOrNull { it.day == day }
+            }
+        }
+        fun String?.usable() = this?.takeIf { it.isNotBlank() && it != "null" }
+        return SegmentParams(
+            segmentId = seg?.segmentId.usable() ?: "1",
+            startTime = seg?.start.usable() ?: "08:00",
+            endTime = seg?.end.usable() ?: "22:30"
+        )
     }
 
     suspend fun reserveSeat(seatId: String, segment: String): String? {
@@ -260,19 +312,21 @@ class SeatViewModel @Inject constructor(
         _tasks.value = _tasks.value.map { if (it.id == taskId) it.copy(status = TaskStatus.CANCELLED, message = "已手动取消") else it }
     }
 
-    fun cancelReservation(seatId: String) {
-        viewModelScope.launch {
-            val result = seatApi.cancelSeat(seatId)
-            if (result.isSuccess) {
-                val state = _seatMapState.value
-                if (state.seats.isNotEmpty()) {
-                    loadSeatsForMap(
-                        areaId = state.seats.firstOrNull()?.areaId ?: return@launch,
-                        day = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-                    )
-                }
-            }
+    /** 取消预约。返回 null 表示成功，否则返回错误信息。成功后按当前查看的日期与时段重新加载座位图。 */
+    suspend fun cancelReservation(seatId: String): String? {
+        val result = seatApi.cancelSeat(seatId)
+        if (result.isFailure || result.getOrNull() != true) {
+            return result.exceptionOrNull()?.message ?: "取消失败，未知错误"
         }
+        val q = _seatMapState.value.query ?: return null
+        loadSeatsForMap(
+            areaId = q.areaId,
+            day = q.day,
+            segmentId = q.segmentId,
+            startTime = q.startTime,
+            endTime = q.endTime
+        )
+        return null
     }
 
     private fun handleApiError(e: Throwable?) {

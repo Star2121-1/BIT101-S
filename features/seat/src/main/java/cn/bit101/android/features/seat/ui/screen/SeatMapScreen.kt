@@ -66,21 +66,19 @@ fun SeatMapScreen(
     modifier: Modifier = Modifier
 ) {
     val seatState by viewModel.seatMapState.collectAsState()
-    val dates by viewModel.seatDates.collectAsState()
     var selectedSeat by remember { mutableStateOf<Seat?>(null) }
     var isReserving by remember { mutableStateOf(false) }
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    val currentSegment = if (dates.isEmpty()) null else dates.firstOrNull { it.day == day }
-    fun String.isValidParam() = this.isNotBlank() && this != "null"
-    val segId = currentSegment?.segmentId?.takeIf { it.isValidParam() } ?: "1"
-    val startTime = currentSegment?.start?.takeIf { it.isValidParam() } ?: "08:00"
-    val endTime = currentSegment?.end?.takeIf { it.isValidParam() } ?: "22:30"
+    // 时段参数由 ViewModel 在加载时解析并记录在 query 中，UI 只读取，避免用回落值先行请求
+    val segId = seatState.query?.segmentId ?: "1"
+    val startTime = seatState.query?.startTime ?: "08:00"
+    val endTime = seatState.query?.endTime ?: "22:30"
 
-    LaunchedEffect(areaId, day) {
-        viewModel.loadSeatsForMap(areaId = areaId, day = day, segmentId = segId, startTime = startTime, endTime = endTime)
+    LaunchedEffect(areaId, day, isLoggedIn) {
+        if (isLoggedIn) viewModel.openSeatMap(areaId = areaId, day = day)
     }
 
     val availableCount = seatState.seats.count { it.status == SeatStatus.AVAILABLE }
@@ -169,7 +167,13 @@ fun SeatMapScreen(
                                     if (!viewModel.ensureSeatlibSession()) {
                                         snackbarHostState.showSnackbar("请在弹出的 WebView 中完成 seatlib 登录，然后重试"); return@launch
                                     }
-                                    viewModel.cancelReservation(seat.id); snackbarHostState.showSnackbar("已尝试取消座位 ${seat.no}"); selectedSeat = null
+                                    val err = viewModel.cancelReservation(seat.id)
+                                    if (err == null) {
+                                        snackbarHostState.showSnackbar("已取消座位 ${seat.no}")
+                                        selectedSeat = null
+                                    } else {
+                                        snackbarHostState.showSnackbar("取消失败: $err")
+                                    }
                                 } }
                             }, enabled = selectedSeat != null && !isReserving, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)) {
