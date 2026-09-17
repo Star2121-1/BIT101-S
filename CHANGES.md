@@ -1,5 +1,105 @@
 # CHANGES
 
+## 2026-09-18 模拟器联调：修好 CAS 授权链路（部分受阻）
+
+在模拟器上用真实账号把 App 跑起来，把「座」功能一路验证到学校 SSO 登录页。
+过程中又发现并修了 **4 个问题**，其中两个解释了项目历史上的悬案。
+
+### 修复 1（悬案告破）：seatlib 的 TLS 证书链不完整
+
+**这就是「模拟器连不上 seatlib」的真实原因**，与学校防火墙无关。
+
+```
+openssl s_client -connect seatlib.bit.edu.cn:443
+→ 服务器只下发 1 张证书（叶），缺中间证书
+→ Verify return code: 21 (unable to verify the first certificate)
+```
+
+对照组：同一张证书、同一个签发者，`login.bit.edu.cn` 与 `www.bit.edu.cn`
+都正确下发了完整链（叶 → Thawte TLS RSA CA G1 → DigiCert Global Root G2）并验证通过。
+**这是 seatlib 服务端单独的配置缺陷**（`ssl_certificate` 漏拼中间证书）。
+
+为什么 Windows 上 curl 一直能通而 Android 不行：Windows 会自动按 AIA 补链，**Android 不会**。
+所以这不是模拟器的问题，任何干净的 Android 客户端都过不了 TLS 握手。
+
+**客户端兜底**（正确修法是服务端把中间证书拼进 `ssl_certificate`，建议向学校反馈）：
+- 新增 `features/seat/res/raw/thawte_tls_rsa_ca_g1.pem`（中间证书，
+  从 `login.bit.edu.cn` 的完整链中取得，**已密码学验证**确为签发 seatlib 叶证书的那张：
+  `openssl verify -untrusted intermediate.pem -CAfile root.pem leaf.pem` → OK）
+- 新增 `res/xml/network_security_config.xml`：仅对 `seatlib.bit.edu.cn` 追加该信任锚，
+  其他域名维持系统策略不变
+- seat 模块 manifest 声明 `android:networkSecurityConfig`（app 未设置，合并无冲突）
+
+### 修复 2（高严重度）：CAS 登录页把学校 SSO 踢出 WebView
+
+`CasLoginScreen.shouldOverrideUrlLoading` 原先只放行 `seatlib.bit.edu.cn`，
+其余 URL 一律交给外部浏览器。而 phpCAS 登录**必然**要跳到
+`login.bit.edu.cn` / `sso.bit.edu.cn` —— 结果是导航被拦截、WebView 停在空白页、
+CAS 会话落进外部浏览器而 App 读不到 cookie。**整条「App 内 WebView 完成 CAS」的链路实际是断的。**
+
+实测证据：修好后日志显示完整链路全部留在 WebView 内：
+`seatlib/h5 → #/login → /api/cas/cas → login.bit.edu.cn → sso.bit.edu.cn/cas/login`。
+
+修法：学校域名（`*.bit.edu.cn`）一律留在 WebView 内，只有真正的外链才交给浏览器。
+
+### 修复 3：ticket 提取逻辑过于死板
+
+原先用 `Regex("cas=([a-f0-9]{32})")` 硬匹配，phpCAS 的 ticket 形态
+（如 `?ticket=ST-...`）一变就永远抓不到。改为按查询参数取
+（`cas` 或 `ticket`），不做格式假设。
+
+### 修复 4：WebView 从未真正加载过页面（两个叠加的时序问题）
+
+1. `loadUrl` 写在 `AndroidView` 的 `update` 里 —— **update 只在重组时执行**，
+   WebView 布局完成后若没有新的重组，它就再也不会被调用，页面根本不加载
+2. WebView 在 Column 里没有尺寸约束，**首次测量高度为 0**，
+   `pageFinished` 后的收尾逻辑（见下）也无法按宽高判断
+
+修法：`Modifier.fillMaxWidth().weight(1f)` 给足空间；
+用 `addOnLayoutChangeListener` 在「宽高非 0 的首次布局」时加载一次。
+
+**为什么必须等布局完成**：学校 SSO 页面 `<head>` 里有一段内联脚本
+`window.innerHeight || documentElement.clientHeight || document.body.clientHeight`，
+WebView 未布局时前两个是 0（假值），会去读尚未存在的 `document.body` → 抛 TypeError，
+脚本块中断、指纹对象缺失 → 登录表单不渲染。
+
+### 修复 5：`onPageFinished` 只打日志
+
+注释写着 "then sync+auth on finish"，实际只打了日志 —— 即使 phpCAS 会话已在
+WebView 里建立，App 也永远不会去同步 cookie、换取 JWT。
+现在回到 seatlib 域名且未登录时，会自动 `syncAndExchange(null)`（带 2 秒防抖）。
+
+### 实测进度
+
+| 步骤 | 结果 |
+|------|------|
+| 安装、启动、无崩溃 | ✅ |
+| 外层门禁（BIT101 登录，含短信二次验证） | ✅ 登录成功，获取 8 个 Cookie |
+| 内层门禁（识别「学校已登录但座位未授权」+ 正确引导） | ✅ 文案与按钮均按设计出现 |
+| 静默认证（TLS 修复后） | ✅ 正确到达业务层判断（`member:[]` → 未登录）|
+| CAS WebView 链路留在 App 内 | ✅ 修复后不再跳外部浏览器 |
+| 走到学校 SSO 登录表单 | ⚠️ **页面不渲染**（见下） |
+
+### ⚠️ 未解决：学校 SSO 页面在 WebView 中不渲染
+
+`sso.bit.edu.cn/cas/login` 的 Angular 应用正常启动（控制台可见
+`UsernamePassword`、「北京理工大学版权所有」等日志），但**画面始终空白**。
+页面自身有脚本错误：`generateFingerprintObject is not defined`、
+`Cannot read properties of null (reading 'clientHeight')`，另有一条 Mixed Content 拦截。
+
+尝试过桌面 UA（会切换到 `cas-login-new` 资源包），未解决，已撤销。
+由于该页面在软件渲染的模拟器里连自身布局脚本都会失败，
+**不能排除是模拟器环境问题** —— 需在真机上复测；也可能是学校页面对 WebView 的兼容问题。
+
+**当前的替代验证路径**：真机上完成学校登录后，seatlib 会话即可建立；
+或者等学校修复 SSO 页面的脚本错误 / 我们改用无头 CAS 表单登录（工程量较大）。
+
+### 验证
+
+`compileDebugKotlin` BUILD SUCCESSFUL；`testDebugUnitTest` 51/51 通过。
+
+---
+
 ## 2026-09-18 首次真实环境验证：修正三处会静默失效的假设
 
 这一轮不再只是编译和单测 —— 直接对 `seatlib.bit.edu.cn` 发真实请求核对契约，

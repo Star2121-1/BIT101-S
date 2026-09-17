@@ -7,7 +7,12 @@
     <!-- API 33+ 显示常驻通知需要用户授权；未授权时服务仍可运行，只是通知不可见 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <application>
+    <!--
+      seatlib 的服务器不下发中间证书，Android 不会像 Windows 那样自动补链，
+      需要客户端为这一个域名补上信任锚。详见 res/xml/network_security_config.xml 的说明。
+      该属性会被 manifest 合并进 app（app 自身未设置，因此不冲突）。
+    -->
+    <application android:networkSecurityConfig="@xml/network_security_config">
         <service
             android:name="cn.bit101.android.features.seat.SeatMonitorService"
             android:exported="false"
