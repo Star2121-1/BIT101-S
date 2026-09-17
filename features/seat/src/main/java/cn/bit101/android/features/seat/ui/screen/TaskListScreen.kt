@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EventSeat
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -44,11 +45,13 @@ import cn.bit101.android.features.common.nav.NavDest
 import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.TaskStatus
+import cn.bit101.android.features.seat.ui.component.rememberNotificationPermissionState
 
 @Composable
 fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, modifier: Modifier = Modifier) {
     val tasks by viewModel.tasks.collectAsState()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
+    val notificationPermission = rememberNotificationPermissionState()
 
     if (!isLoggedIn) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -73,7 +76,26 @@ fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, mod
         }
     } else {
         LazyColumn(modifier = modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // 有活跃任务却看不到常驻通知时给出提示 —— 否则用户无法判断后台是否还在跑
+            if (!notificationPermission.granted && tasks.any { it.status == TaskStatus.RUNNING || it.status == TaskStatus.IDLE }) {
+                item { NotificationPermissionBanner(onRequest = { notificationPermission.request() }) }
+            }
             items(tasks, key = { it.id }) { task -> EnhancedTaskCard(task = task, onCancel = { viewModel.cancelTask(task.id) }) }
+        }
+    }
+}
+
+@Composable
+private fun NotificationPermissionBanner(onRequest: () -> Unit) {
+    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.NotificationsOff, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onErrorContainer)
+            Spacer(modifier = Modifier.size(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("通知权限未开启", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text("后台监控仍在运行，但通知栏看不到进度", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+            TextButton(onClick = onRequest) { Text("开启") }
         }
     }
 }

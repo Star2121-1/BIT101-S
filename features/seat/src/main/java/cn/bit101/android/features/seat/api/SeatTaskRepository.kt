@@ -13,7 +13,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -41,6 +44,8 @@ class SeatTaskRepository @Inject constructor(
     @Volatile
     private var loaded = false
 
+    private val loadMutex = Mutex()
+
     /** 待落盘 JSON。用单写入者串行写，避免并发写乱序导致恢复时读到更旧状态。 */
     private val pendingJson = MutableStateFlow<String?>(null)
 
@@ -54,42 +59,57 @@ class SeatTaskRepository @Inject constructor(
     val activeTasks: List<ReservationTask>
         get() = _tasks.value.filter { it.status == TaskStatus.RUNNING || it.status == TaskStatus.IDLE }
 
-    /** 从持久化存储载入一次。已载入过则直接返回。 */
-    suspend fun loadOnce() {
-        // 必须真正「一次」：ViewModel 与服务都会调用，
-        // 若重复读取，后一次会用存储里的旧列表覆盖内存中刚新增的任务。
-        if (loaded) return
-        loaded = true
+    /**
+     * 从持久化存储载入一次。已载入过则直接返回。
+     *
+     * 必须真正「一次」且**并发安全**：ViewModel 与服务都会调用 ——
+     * 若重复读取，后一次会用存储里的旧列表覆盖内存中刚新增的任务；
+     * 若并发调用不加锁，第二个调用方会在数据尚未载入时就看到空列表。
+     */
+    suspend fun loadOnce() = loadMutex.withLock {
+        if (loaded) return@withLock
         val restored = deserializeTasks(store.tasks.get())
-        if (restored.isNotEmpty()) _tasks.value = restored
+        loaded = true
+        if (restored.isEmpty()) return@withLock
+        // 合并而非覆盖：载入期间可能已有新任务被加入内存
+        _tasks.update { current ->
+            if (current.isEmpty()) restored
+            else current + restored.filterNot { r -> current.any { it.id == r.id } }
+        }
     }
 
     fun add(task: ReservationTask) {
-        _tasks.value = _tasks.value + task
+        _tasks.update { it + task }
         persist()
     }
 
     /** 更新状态。已是终态（成功 / 失败 / 已取消）的任务不再被覆盖。 */
     fun updateStatus(id: String, status: TaskStatus, message: String) {
-        _tasks.value = _tasks.value.map { task ->
-            if (task.id == id && !task.status.isTerminal) task.copy(status = status, message = message) else task
+        _tasks.update { tasks ->
+            tasks.map { task ->
+                if (task.id == id && !task.status.isTerminal) task.copy(status = status, message = message) else task
+            }
         }
         persist()
     }
 
     fun cancel(id: String) {
-        _tasks.value = _tasks.value.map { task ->
-            if (task.id == id && !task.status.isTerminal) task.copy(status = TaskStatus.CANCELLED, message = "已手动取消") else task
+        _tasks.update { tasks ->
+            tasks.map { task ->
+                if (task.id == id && !task.status.isTerminal) task.copy(status = TaskStatus.CANCELLED, message = "已手动取消") else task
+            }
         }
         persist()
     }
 
     /** 终止所有在跑的任务并置为失败。用于认证失效这类无法继续的场景。 */
     fun stopAll(reason: String) {
-        _tasks.value = _tasks.value.map { task ->
-            if (task.status == TaskStatus.RUNNING || task.status == TaskStatus.IDLE) {
-                task.copy(status = TaskStatus.FAILED, message = reason)
-            } else task
+        _tasks.update { tasks ->
+            tasks.map { task ->
+                if (task.status == TaskStatus.RUNNING || task.status == TaskStatus.IDLE) {
+                    task.copy(status = TaskStatus.FAILED, message = reason)
+                } else task
+            }
         }
         persist()
     }

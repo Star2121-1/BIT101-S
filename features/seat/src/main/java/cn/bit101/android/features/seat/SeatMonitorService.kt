@@ -3,6 +3,7 @@ package cn.bit101.android.features.seat
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -42,6 +43,7 @@ class SeatMonitorService : Service() {
     companion object {
         private const val TAG = "SeatMonitorService"
         private const val CHANNEL_ID = "seat_monitor"
+        private const val CHANNEL_RESULT_ID = "seat_result"
         private const val NOTIFICATION_ID = 0x5EA7
         private const val ACTION_START = "cn.bit101.android.features.seat.action.START"
 
@@ -57,10 +59,17 @@ class SeatMonitorService : Service() {
         /** 启动监控服务。无副作用，可重复调用。 */
         fun start(context: Context) {
             val intent = Intent(context, SeatMonitorService::class.java).setAction(ACTION_START)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                // Android 12+ 限制应用在后台启动前台服务，超限时抛
+                // ForegroundServiceStartNotAllowedException。这里不让它冒泡成崩溃：
+                // 任务本身仍在仓储里，用户回到前台时会再次尝试拉起。
+                Log.w(TAG, "startForegroundService rejected: ${e.javaClass.simpleName} ${e.message}")
             }
         }
     }
@@ -103,7 +112,14 @@ class SeatMonitorService : Service() {
                 jobs[task.id] = scope.launch { runTask(task) }
             }
         }
-        (jobs.keys - activeIds).forEach { id -> jobs.remove(id)?.cancel() }
+        (jobs.keys - activeIds).forEach { id ->
+            jobs.remove(id)?.cancel()
+            // 该任务刚离开执行集合：若为成功 / 失败则单独通知一条。
+            // 恰好在 jobs 里才通知 —— 服务重建后旧任务从未被本实例执行过，不会误报。
+            tasks.find { it.id == id }
+                ?.takeIf { it.status == TaskStatus.SUCCESS || it.status == TaskStatus.FAILED }
+                ?.let { notifyResult(it) }
+        }
 
         refreshNotification(active.size)
         if (active.isEmpty()) {
@@ -204,12 +220,21 @@ class SeatMonitorService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "座位监控", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "座位预约监控任务运行期间显示"
-            }
-        )
+        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "座位监控", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "座位预约监控任务运行期间显示"
+                }
+            )
+        }
+        // 结果通知单独一个渠道：轮询进度要安静，抢座结果要能提醒到人，两者重要性不同
+        if (manager.getNotificationChannel(CHANNEL_RESULT_ID) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(CHANNEL_RESULT_ID, "预约结果", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "预约成功或任务停止时提醒"
+                }
+            )
+        }
     }
 
     private fun buildNotification(activeCount: Int): Notification =
@@ -220,6 +245,40 @@ class SeatMonitorService : Service() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+
+    /** 任务结束（成功 / 失败）时发一条可清除的通知。 */
+    private fun notifyResult(task: ReservationTask) {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        val success = task.status == TaskStatus.SUCCESS
+        val where = listOf(task.areaName, task.seatNo).filter { it.isNotBlank() }.joinToString(" ")
+        val builder = NotificationCompat.Builder(this, CHANNEL_RESULT_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle(if (success) "座位预约成功" else "预约任务已停止")
+            .setContentText(task.message.ifBlank { where.ifBlank { task.reserveDate } })
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    listOfNotNull(
+                        where.takeIf { it.isNotBlank() },
+                        task.reserveDate.takeIf { it.isNotBlank() },
+                        task.message.takeIf { it.isNotBlank() }
+                    ).joinToString(" · ")
+                )
+            )
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+
+        // 点击回到应用（不依赖具体 Activity 类名）
+        packageManager.getLaunchIntentForPackage(packageName)?.let { launchIntent ->
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            builder.setContentIntent(
+                PendingIntent.getActivity(
+                    this, 0, launchIntent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+            )
+        }
+        manager.notify(task.id.hashCode(), builder.build())
+    }
 
     private fun refreshNotification(activeCount: Int) {
         val manager = getSystemService(NotificationManager::class.java) ?: return

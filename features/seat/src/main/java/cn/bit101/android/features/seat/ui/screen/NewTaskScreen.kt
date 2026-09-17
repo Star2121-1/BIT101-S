@@ -43,6 +43,7 @@ import cn.bit101.android.features.seat.model.TaskMode
 import cn.bit101.android.features.seat.ui.component.CascadingDropdown
 import cn.bit101.android.features.seat.ui.component.ErrorCard
 import cn.bit101.android.features.seat.ui.component.ModeSelector
+import cn.bit101.android.features.seat.ui.component.rememberNotificationPermissionState
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -64,6 +65,7 @@ fun NewTaskScreen(
     var seatNoInput by remember { mutableStateOf("") }
 
     val seatlibReady by viewModel.seatlibReady.collectAsState()
+    val notificationPermission = rememberNotificationPermissionState()
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val treeLoading = treeNodes.isEmpty()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
@@ -161,6 +163,8 @@ fun NewTaskScreen(
                     reserveDate = reserveDate.format(dateFormatter)
                 )
                 seatNoInput = ""
+                // 通知权限只影响常驻通知是否可见，不影响任务本身，所以先建任务再申请
+                if (!notificationPermission.granted) notificationPermission.request()
                 onTaskCreated()
             }, enabled = selectedArea != null && !treeLoading, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {

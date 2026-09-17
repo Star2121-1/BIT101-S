@@ -1,5 +1,50 @@
 # CHANGES
 
+## 2026-09-17 M2.3 收尾：通知权限请求与预约结果通知
+
+### 通知权限的运行时请求
+
+前台服务的常驻通知此前只声明了权限、没有申请。新增 `ui/component/NotificationPermission.kt`：
+
+- `hasNotificationPermission(context)`：Android 13 (API 33) 以下视为已授权（该权限从 33 才需要运行时申请）
+- `rememberNotificationPermissionState()`：Compose 侧读取状态并封装申请动作，用 `rememberLauncherForActivityResult(RequestPermission())`，不引入新依赖
+- 监听 `ON_RESUME` 重新核对 —— 用户可能去系统设置里手动开启后返回
+
+接入两处：
+- `NewTaskScreen`：点「创建任务」时若未授权则发起申请。**先建任务再申请** —— 权限只影响通知是否可见，不影响任务本身，不该因为一次授权拒绝而丢掉用户刚配好的任务
+- `TaskListScreen`：存在活跃任务且未授权时，列表顶部显示常驻提示条（`errorContainer` 配色 + 「开启」按钮）。用常驻提示而非一次性 toast，因为这是持续状态
+
+### 预约结果通知
+
+此前只有「正在监控」的常驻通知，任务成功时它静默消失 —— 而抢到座位恰恰是最需要通知用户的时刻。新增独立的结果通知：
+
+- 新渠道 `seat_result`（`IMPORTANCE_DEFAULT`）。与轮询进度分开：进度通知要安静（`IMPORTANCE_LOW`），结果通知要能提醒到人
+- `syncJobs` 中在「任务离开执行集合」时触发，且**仅当该任务此前由本实例执行**（即存在于 `jobs`）—— 服务重建后列表里的历史任务不会被误报
+- 只对 `SUCCESS` / `FAILED` 通知，`CANCELLED` 不通知（用户刚手动取消，再弹通知是噪音）
+- 点击通知通过 `getLaunchIntentForPackage` 回到应用，不依赖具体 Activity 类名
+
+### 修复：任务状态并发写导致丢失更新
+
+`SeatTaskRepository` 原先用 `_tasks.value = _tasks.value.map { … }` 做读-改-写，**不是原子操作**。而 ViewModel（主线程）与服务（`Dispatchers.Default`）会并发写入：服务更新任务 A 状态的同时 ViewModel 新增任务 B，两者各自读到同一份旧列表，后写入的一方会**把另一方的变更整个丢掉**（表现为新任务凭空消失）。
+
+改为 `MutableStateFlow.update {}`（内部 CAS 重试循环），所有变更路径（`add` / `updateStatus` / `cancel` / `stopAll`）统一使用。
+
+同样地，`loadOnce()` 的 `@Volatile loaded` 标志只能防止重复读取，无法让并发调用方**等待**首次载入完成 —— 改为 `Mutex.withLock` 串行化，并把「覆盖」改为「合并」，避免载入期间新增的任务被冲掉。
+
+### 修复：startForegroundService 的崩溃风险
+
+Android 12+ 限制应用在后台启动前台服务，超限抛 `ForegroundServiceStartNotAllowedException`。原实现直接调用，异常会冒泡成崩溃。改为捕获并记日志 —— 任务本身仍在仓储里，用户回到前台时会再次尝试拉起。
+
+**验证**：`:features:seat:compileDebugKotlin` BUILD SUCCESSFUL。
+**待真机验证**：授权弹窗时机、拒绝后提示条是否出现、抢到座位时的结果通知、杀进程后自动续跑。
+
+### 已知限制（待真机确认 / 后续处理）
+
+- **Android 15 对 `dataSync` 前台服务有 6 小时/天上限**：单任务最长 2 小时在限内，但连续跑多个任务可能触顶
+- 5-10 秒持续轮询 2 小时，电量消耗会比较明显
+
+---
+
 ## 2026-09-17 M2.3 前台服务保活
 
 ### 为什么不用 WorkManager
@@ -37,7 +82,7 @@
 
 ### 已知限制（待真机确认 / 后续处理）
 
-- **尚未申请 `POST_NOTIFICATIONS` 运行时权限**：API 33+ 用户未授权时服务仍可运行，但常驻通知不可见。需补一个运行时请求
+- ~~尚未申请 `POST_NOTIFICATIONS` 运行时权限~~ → 已在「M2.3 收尾」中补上
 - **Android 15 对 `dataSync` 前台服务有 6 小时/天上限**：单任务最长 2 小时在限内，但连续跑多个任务可能触顶
 - 5-10 秒持续轮询 2 小时，电量消耗会比较明显
 
