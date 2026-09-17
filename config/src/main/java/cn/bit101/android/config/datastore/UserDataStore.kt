@@ -39,4 +39,8 @@ internal class UserDataStore @Inject constructor(
     // 座位预约（seatlib）JWT，与学校会话独立，见 SeatLoginStatus
     private val SEAT_TOKEN = "seat_token"
     val seatToken = EncryptedPreferencesItem(preferences.ENCRYPTED_SHARED_PREFERENCES, SEAT_TOKEN)
+
+    // 座位预约任务列表（JSON），需跨进程存活，见 SeatTaskStore
+    private val SEAT_TASKS = stringPreferencesKey("seat_tasks")
+    val seatTasks = PreferencesDataStoreItem(SEAT_TASKS, "", preferences.SETTING_DATASTORE)
 }

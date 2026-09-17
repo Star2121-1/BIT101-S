@@ -29,7 +29,8 @@ internal class DefaultLoginStatus @Inject constructor(
         password.set("")
         fakeCookie.set("")
         cookieManager.cookieStore.removeAll()
-        // 学校会话失效后 seatlib 的 phpCAS 会话也随之失效，一并清除座位侧凭据
+        // 学校会话失效后 seatlib 的 phpCAS 会话也随之失效，一并清除座位侧凭据与任务
         userDataStore.seatToken.remove()
+        userDataStore.seatTasks.remove()
     }
 }

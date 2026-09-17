@@ -1,5 +1,37 @@
 # CHANGES
 
+## 2026-09-17 M2.2 任务列表持久化 + 三处缺陷修复
+
+### M2.2 任务列表持久化
+
+**背景**：`_tasks` 原先只在内存中，杀进程后任务列表全部丢失。同时 M2.3 的后台保活需要任务定义能在 ViewModel 之外被读写，因此持久化是它的**前置条件**。
+
+**新增**（`config` 模块，新建 `config/seat/` 包）
+- `config/seat/base/SeatTaskStore.kt`：公开接口，暴露 `tasks: SettingItem<String>`
+- `config/seat/DefaultSeatTaskStore.kt`：`internal` 实现，绑定 `UserDataStore.seatTasks`
+- `config/seat/SeatConfigModule.kt`：Hilt 绑定
+
+**修改**
+- `UserDataStore`：新增 `seatTasks`（普通 DataStore，任务不属于敏感信息）
+- `DefaultLoginStatus.clear()`：登出时一并清除任务
+- `model/Task.kt`：新增 `toJson()` / `toReservationTask()` / `serializeTasks()` / `deserializeTasks()`，使用模块已有的 `org.json`，不引入新依赖；枚举值未知时回落到安全默认值，脏数据不会导致崩溃
+- `SeatViewModel`：注入 `SeatTaskStore`；启动时恢复任务；`addTask` / `cancelTask` / `updateTaskStatus` 变更后落盘
+
+> ⚠️ 当前恢复的任务若为「运行中 / 等待中」，会被标记为 `FAILED` 并提示「应用已重启，任务未继续运行」—— 因为此刻还没有后台执行能力。**M2.3 完成后应改为续跑。**
+
+### 顺带修复的三处缺陷
+
+1. **持久化可能乱序**：原先每次变更各自 `launch` 一个协程写 DataStore，协程不保证 FIFO，崩溃恢复可能读到比实际更旧的状态。改为**单写入者**：状态变更只更新 `pendingTasksJson`，由唯一收集者经 `distinctUntilChanged` 串行写入。
+2. **认证失效后任务无限空转**：`handleApiError` 命中 `TOKEN_EXPIRED` 时只清 token，正在轮询的任务会继续以 5 分钟退避无限重试，而用户看不到「需要重新登录」。新增 `stopRunningTasks()`，认证失效时终止所有在跑任务并置为 `FAILED`。
+3. **终态被覆盖的竞态**：`stopRunningTasks` 置为 `FAILED` 后，紧接着的状态更新会把任务改回 `RUNNING`。给 `updateTaskStatus()` / `cancelTask()` 增加终态保护（成功 / 失败 / 已取消不再被覆盖）。
+
+另：`_seatlibReady` / `_isLoggedIn` 由 `var` 改为 `val`。
+
+**验证**：`:features:seat:compileDebugKotlin` BUILD SUCCESSFUL。
+**待真机验证**：杀进程重开后任务列表是否还在、登出后是否清空。
+
+---
+
 ## 2026-09-17 M2.1 持久化 seatlib JWT，冷启动免重登
 
 **背景**：`SeatApi.token` 原先是纯粹的实例字段（内存），App 一重启就丢失，每次冷启动都要重新走一遍 WebView CAS 登录才能用。

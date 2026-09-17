@@ -3,6 +3,7 @@ package cn.bit101.android.features.seat
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cn.bit101.android.config.seat.base.SeatTaskStore
 import cn.bit101.android.config.user.base.LoginStatus
 import cn.bit101.android.config.user.base.SeatLoginStatus
 import cn.bit101.android.features.seat.api.SeatApi
@@ -15,6 +16,8 @@ import cn.bit101.android.features.seat.model.SeatStatus
 import cn.bit101.android.features.seat.model.SeatTreeNode
 import cn.bit101.android.features.seat.model.TaskMode
 import cn.bit101.android.features.seat.model.TaskStatus
+import cn.bit101.android.features.seat.model.deserializeTasks
+import cn.bit101.android.features.seat.model.serializeTasks
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -51,6 +55,7 @@ data class SeatMapState(
 class SeatViewModel @Inject constructor(
     private val loginStatus: LoginStatus,
     private val seatLoginStatus: SeatLoginStatus,
+    private val seatTaskStore: SeatTaskStore,
 ) : ViewModel() {
 
     companion object {
@@ -70,10 +75,10 @@ class SeatViewModel @Inject constructor(
     private val seatCasLogin = SeatCasLogin(loginStatus)
     val seatApi = SeatApi(loginStatus)
 
-    private var _seatlibReady = MutableStateFlow(false)
+    private val _seatlibReady = MutableStateFlow(false)
     val seatlibReady: StateFlow<Boolean> = _seatlibReady.asStateFlow()
 
-    private var _isLoggedIn = MutableStateFlow(false)
+    private val _isLoggedIn = MutableStateFlow(false)
     val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
 
     private fun updateLoginState() {
@@ -130,6 +135,43 @@ class SeatViewModel @Inject constructor(
 
     private val _tasks = MutableStateFlow<List<ReservationTask>>(emptyList())
     val tasks: StateFlow<List<ReservationTask>> = _tasks.asStateFlow()
+
+    /**
+     * 待落盘的任务列表 JSON。
+     *
+     * 用单一收集者串行写入 DataStore —— 若每次变更各自 `launch` 一个协程，多个挂起写入不保证 FIFO，
+     * 崩溃恢复时可能读到比实际更旧的状态。
+     */
+    private val pendingTasksJson = MutableStateFlow<String?>(null)
+
+    // 注意：必须放在 _tasks 声明之后。Kotlin 按声明顺序初始化，写在类顶部会读到未初始化的属性。
+    init {
+        viewModelScope.launch {
+            val saved = seatTaskStore.tasks.get()
+            val restored = deserializeTasks(saved)
+            if (restored.isNotEmpty()) {
+                // 上次「运行中 / 等待中」的任务已随进程结束，不能继续显示为运行中
+                _tasks.value = restored.map { task ->
+                    if (task.status == TaskStatus.RUNNING || task.status == TaskStatus.IDLE) {
+                        task.copy(status = TaskStatus.FAILED, message = "应用已重启，任务未继续运行")
+                    } else task
+                }
+                persistTasks()
+                Log.d("SeatViewModel", "restored ${restored.size} task(s)")
+            }
+        }
+        // 单写入者：串行落盘保证顺序，distinctUntilChanged 避免重复写入
+        viewModelScope.launch {
+            pendingTasksJson.filterNotNull().distinctUntilChanged().collect { json ->
+                seatTaskStore.tasks.set(json)
+            }
+        }
+    }
+
+    /** 请求把当前任务列表落盘（实际写入由上面的单写入者串行执行）。 */
+    private fun persistTasks() {
+        pendingTasksJson.value = serializeTasks(_tasks.value)
+    }
 
     private val taskJobs = mutableMapOf<String, Job>()
 
@@ -322,6 +364,7 @@ class SeatViewModel @Inject constructor(
             reserveDate = reserveDate, campusName = campusName, floorName = floorName, areaName = areaName
         )
         _tasks.value = _tasks.value + task
+        persistTasks()
         val job = viewModelScope.launch {
             when (mode) {
                 TaskMode.MONITOR -> executeMonitor(task)
@@ -336,7 +379,11 @@ class SeatViewModel @Inject constructor(
     fun cancelTask(taskId: String) {
         taskJobs[taskId]?.cancel()
         taskJobs.remove(taskId)
-        _tasks.value = _tasks.value.map { if (it.id == taskId) it.copy(status = TaskStatus.CANCELLED, message = "已手动取消") else it }
+        _tasks.value = _tasks.value.map { task ->
+            val terminal = task.status == TaskStatus.SUCCESS || task.status == TaskStatus.FAILED
+            if (task.id == taskId && !terminal) task.copy(status = TaskStatus.CANCELLED, message = "已手动取消") else task
+        }
+        persistTasks()
     }
 
     /** 取消预约。返回 null 表示成功，否则返回错误信息。成功后按当前查看的日期与时段重新加载座位图。 */
@@ -357,13 +404,24 @@ class SeatViewModel @Inject constructor(
     }
 
     private fun handleApiError(e: Throwable?) {
-        if (e?.message == "TOKEN_EXPIRED" || e?.cause?.message == "TOKEN_EXPIRED") {
-            viewModelScope.launch {
-                setSeatToken("")
-                seatSession.jwtToken = ""
-                updateLoginState()
-            }
+        if (e?.message != "TOKEN_EXPIRED" && e?.cause?.message != "TOKEN_EXPIRED") return
+        setSeatToken("")
+        seatSession.jwtToken = ""
+        updateLoginState()
+        // 认证已失效：继续轮询只会白等并持续打请求，直接终止所有在跑的任务
+        stopRunningTasks("登录已失效，请重新登录")
+    }
+
+    /** 终止所有在跑的任务并置为失败。用于认证失效这类无法继续的场景。 */
+    private fun stopRunningTasks(reason: String) {
+        taskJobs.values.forEach { it.cancel() }
+        taskJobs.clear()
+        _tasks.value = _tasks.value.map { task ->
+            if (task.status == TaskStatus.RUNNING || task.status == TaskStatus.IDLE) {
+                task.copy(status = TaskStatus.FAILED, message = reason)
+            } else task
         }
+        persistTasks()
     }
 
     /** 解析任务对应日期的时段参数；拉取失败返回 null，由调用方决定如何处理。 */
@@ -464,7 +522,17 @@ class SeatViewModel @Inject constructor(
         updateTaskStatus(task.id, TaskStatus.FAILED, "已超过最长优先预约时长（2 小时），任务自动停止")
     }
 
+    /**
+     * 更新任务状态。已是终态（成功/失败/已取消）的任务不再被覆盖 ——
+     * 否则认证失效等场景下 stopRunningTasks 置的 FAILED 会被紧接着的状态更新改回 RUNNING。
+     */
     private fun updateTaskStatus(taskId: String, status: TaskStatus, message: String) {
-        _tasks.value = _tasks.value.map { if (it.id == taskId && it.status != TaskStatus.CANCELLED) it.copy(status = status, message = message) else it }
+        _tasks.value = _tasks.value.map { task ->
+            val terminal = task.status == TaskStatus.CANCELLED ||
+                task.status == TaskStatus.FAILED ||
+                task.status == TaskStatus.SUCCESS
+            if (task.id == taskId && !terminal) task.copy(status = status, message = message) else task
+        }
+        persistTasks()
     }
 }
