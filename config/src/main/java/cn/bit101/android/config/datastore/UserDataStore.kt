@@ -35,4 +35,8 @@ internal class UserDataStore @Inject constructor(
     // 密码
     private val LOGIN_PASSWORD = "login_password"
     val loginPassword = EncryptedPreferencesItem(preferences.ENCRYPTED_SHARED_PREFERENCES, LOGIN_PASSWORD)
+
+    // 座位预约（seatlib）JWT，与学校会话独立，见 SeatLoginStatus
+    private val SEAT_TOKEN = "seat_token"
+    val seatToken = EncryptedPreferencesItem(preferences.ENCRYPTED_SHARED_PREFERENCES, SEAT_TOKEN)
 }

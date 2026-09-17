@@ -1,6 +1,7 @@
 package cn.bit101.android.config.user
 
 import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.config.user.base.SeatLoginStatus
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -15,4 +16,10 @@ internal abstract class UserModule {
     abstract fun bindLoginStatus(
         loginStatus: DefaultLoginStatus
     ): LoginStatus
+
+    @Binds
+    @Singleton
+    abstract fun bindSeatLoginStatus(
+        seatLoginStatus: DefaultSeatLoginStatus
+    ): SeatLoginStatus
 }

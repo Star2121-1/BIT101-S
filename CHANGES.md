@@ -1,5 +1,32 @@
 # CHANGES
 
+## 2026-09-17 M2.1 持久化 seatlib JWT，冷启动免重登
+
+**背景**：`SeatApi.token` 原先是纯粹的实例字段（内存），App 一重启就丢失，每次冷启动都要重新走一遍 WebView CAS 登录才能用。
+
+**方案**：沿用项目现有的持久化约定（`SettingItem<T>` + DataStore + Hilt 绑定），新增座位会话专用的 `SeatStatus`。seatlib 的 phpCAS 会话与 BIT101 学校会话是两套独立体系，因此**不并入通用的 `LoginStatus`**，避免把座位概念塞进公共接口。
+
+**新增**（`config` 模块）：
+- `config/user/base/SeatLoginStatus.kt`：公开接口，仅暴露 `token: SettingItem<String>`
+  （**命名刻意避开 `SeatStatus`** —— 该名字已被座位模块的座位可用状态枚举占用，最初同名导致 KSP 报 `error.NonExistentClass`）
+- `config/user/DefaultSeatLoginStatus.kt`：`internal` 实现，绑定到 `UserDataStore.seatToken`
+
+**修改**：
+- `UserDataStore`：新增 `seatToken`，使用 **`EncryptedPreferencesItem`**（与学号/密码同级的加密存储，因为它是凭据）
+- `UserModule`：新增 `bindSeatLoginStatus` 绑定
+- `DefaultLoginStatus.clear()`：登出时**一并清除 seat token**（学校会话失效后 phpCAS 会话也随之失效，避免残留显示「已登录」）
+- `SeatViewModel`：
+  - 注入 `SeatLoginStatus`
+  - 新增 `setSeatToken()` 统一入口，**所有 7 处 token 写入都收敛到这里**并同步持久化，避免以后新增写入点时遗漏
+  - `init` 中先恢复持久化 token，再决定 UI 状态，最后尝试静默认证刷新
+
+**行为**：冷启动若存在持久化 token，直接进入可用状态，无需再走 WebView 登录；若 token 已过期，首次 API 调用返回 401 后由已有的 `handleApiError` 清理并回到登录态（自愈）。
+
+**验证**：`:features:seat:compileDebugKotlin` BUILD SUCCESSFUL。
+**待真机验证**：杀进程重开是否免登录、登出 BIT101 后座位侧凭据是否被清除。
+
+---
+
 ## 2026-09-17 M1.2 统一单次预约 + M2.4 轮询退避与时长上限
 
 ### M1.2 统一单次预约实现（保留座位图路径）

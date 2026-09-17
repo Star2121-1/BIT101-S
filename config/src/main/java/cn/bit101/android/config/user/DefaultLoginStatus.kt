@@ -8,7 +8,7 @@ import java.net.CookiePolicy
 import javax.inject.Inject
 
 internal class DefaultLoginStatus @Inject constructor(
-    userDataStore: UserDataStore
+    private val userDataStore: UserDataStore
 ) : LoginStatus {
     override val sid = userDataStore.loginSid.toSettingItem()
     override val password = userDataStore.loginPassword.toSettingItem()
@@ -29,5 +29,7 @@ internal class DefaultLoginStatus @Inject constructor(
         password.set("")
         fakeCookie.set("")
         cookieManager.cookieStore.removeAll()
+        // 学校会话失效后 seatlib 的 phpCAS 会话也随之失效，一并清除座位侧凭据
+        userDataStore.seatToken.remove()
     }
 }

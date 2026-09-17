@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.config.user.base.SeatLoginStatus
 import cn.bit101.android.features.seat.api.SeatApi
 import cn.bit101.android.features.seat.api.SeatCasLogin
 import cn.bit101.android.features.seat.api.SeatSession
@@ -49,6 +50,7 @@ data class SeatMapState(
 @HiltViewModel
 class SeatViewModel @Inject constructor(
     private val loginStatus: LoginStatus,
+    private val seatLoginStatus: SeatLoginStatus,
 ) : ViewModel() {
 
     companion object {
@@ -78,16 +80,29 @@ class SeatViewModel @Inject constructor(
         _isLoggedIn.value = seatApi.token.isNotEmpty()
     }
 
+    /** 写入内存中的 seatlib token 并持久化，统一入口避免各处遗漏。 */
+    private fun setSeatToken(value: String) {
+        seatApi.token = value
+        viewModelScope.launch { seatLoginStatus.token.set(value) }
+    }
+
     init {
         viewModelScope.launch {
-            // Use BIT101 login status immediately — no flash of login button
+            // 1. 先恢复上次持久化的 token，冷启动即可免登录
+            val saved = seatLoginStatus.token.get()
+            if (saved.isNotEmpty()) {
+                seatApi.token = saved
+                Log.d("SeatViewModel", "restored persisted token=${saved.take(8)}...")
+            }
+
+            // 2. BIT101 登录状态立即决定 UI，避免闪现登录按钮
             val bit101LoggedIn = loginStatus.status.get()
             _isLoggedIn.value = bit101LoggedIn || seatApi.token.isNotEmpty()
 
-            // Try silent auth (may work if user previously logged into seatlib via browser)
+            // 3. 尝试静默认证刷新 token；失败则沿用已恢复的 token（过期时由 401 兜底清理）
             val result = seatSession.authenticateSeatlib()
             if (result.isSuccess) {
-                seatApi.token = result.getOrThrow().token
+                setSeatToken(result.getOrThrow().token)
                 _isLoggedIn.value = true
                 Log.d("SeatViewModel", "authenticateSeatlib success: token=${seatApi.token.take(8)}...")
             } else {
@@ -103,7 +118,7 @@ class SeatViewModel @Inject constructor(
                 if (loggedIn && seatApi.token.isEmpty()) {
                     val result = seatSession.authenticateSeatlib()
                     if (result.isSuccess) {
-                        seatApi.token = result.getOrThrow().token
+                        setSeatToken(result.getOrThrow().token)
                         _isLoggedIn.value = true
                         Log.d("SeatViewModel", "re-auth success: token=${seatApi.token.take(8)}...")
                     }
@@ -155,7 +170,7 @@ class SeatViewModel @Inject constructor(
         // 直接尝试静默认证，无需单独探测会话
         val token = seatCasLogin.trySilentAuth()
         if (token.isNotEmpty()) {
-            seatApi.token = token
+            setSeatToken(token)
             updateLoginState()
             return true
         }
@@ -173,7 +188,7 @@ class SeatViewModel @Inject constructor(
         // 3. Try silent auth first (may succeed if phpCAS session established)
         val silentToken = seatCasLogin.trySilentAuth()
         if (silentToken.isNotEmpty()) {
-            seatApi.token = silentToken
+            setSeatToken(silentToken)
             updateLoginState()
             _casLoginFlow.value = false
             Log.d("SeatViewModel", "syncAndExchange success (silent): token=${silentToken.take(8)}...")
@@ -201,7 +216,7 @@ class SeatViewModel @Inject constructor(
                 if (member != null && !member.isNull("token")) {
                     val t = member.optString("token", "")
                     if (t.isNotEmpty()) {
-                        seatApi.token = t
+                        setSeatToken(t)
                         updateLoginState()
                         _casLoginFlow.value = false
                         Log.d("SeatViewModel", "syncAndExchange success (ticket): token=${t.take(8)}...")
@@ -344,7 +359,7 @@ class SeatViewModel @Inject constructor(
     private fun handleApiError(e: Throwable?) {
         if (e?.message == "TOKEN_EXPIRED" || e?.cause?.message == "TOKEN_EXPIRED") {
             viewModelScope.launch {
-                seatApi.token = ""
+                setSeatToken("")
                 seatSession.jwtToken = ""
                 updateLoginState()
             }
