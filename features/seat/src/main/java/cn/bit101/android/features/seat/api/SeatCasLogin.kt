@@ -1,8 +1,5 @@
 package cn.bit101.android.features.seat.api
 
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.util.Log
 import android.webkit.CookieManager
 import cn.bit101.android.config.user.base.LoginStatus
@@ -26,18 +23,6 @@ class SeatCasLogin @Inject constructor(
     companion object {
         private const val TAG = "SeatCasLogin"
         private const val SEATLIB_BASE = "https://seatlib.bit.edu.cn"
-    }
-
-    /** Opens seatlib in system browser. With existing SSO cookie, phpCAS session establishes automatically. */
-    fun openCasLogin(context: Context) {
-        try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(SEATLIB_BASE))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
-            Log.d(TAG, "opened seatlib in browser")
-        } catch (e: Exception) {
-            Log.d(TAG, "failed to open browser: ${e.message}")
-        }
     }
 
     /**
@@ -69,11 +54,6 @@ class SeatCasLogin @Inject constructor(
                 Log.d(TAG, "  synced: $name")
             }
         }
-    }
-
-    /** Checks if seatlib has an active phpCAS session. */
-    suspend fun hasActiveSession(): Boolean = withContext(Dispatchers.IO) {
-        trySilentAuth().isNotEmpty()
     }
 
     /** Tries silent auth via existing cookies. Returns JWT token or empty string. */

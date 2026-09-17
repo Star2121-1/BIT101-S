@@ -1,18 +1,26 @@
 *.iml
 .gradle
-/local.properties
 .idea/
 .DS_Store
+local.properties
+/local.properties
+
+# 构建产物
 /build
 /captures
-.externalNativeBuild
-.cxx
-local.properties
-
-/TODO.md
-/AGENTS.md
+/features/build/
 /features/*/build/
 /api/build/
 /config/build/
 /data/build/
 /app/build/
+bin/
+.externalNativeBuild
+.cxx
+
+# Kotlin 编译元数据与错误日志
+.kotlin/
+
+# 本地临时文件
+/TODO.md
+/AGENTS.md

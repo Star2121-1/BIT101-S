@@ -1,6 +1,5 @@
 package cn.bit101.android.features.seat
 
-import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -115,33 +114,11 @@ class SeatViewModel @Inject constructor(
     private val _navigateToSeatMap = MutableStateFlow<Pair<String, String>?>(null)
     val navigateToSeatMap: StateFlow<Pair<String, String>?> = _navigateToSeatMap.asStateFlow()
 
-    val loginResultFlow = MutableStateFlow<Result<cn.bit101.android.features.seat.api.LoginResult>?>(null)
-
     fun clearNavigation() { _navigateToSeatMap.value = null }
     fun clearSeatTreeError() { _seatTreeError.value = null }
 
     fun navigateToSeatMap(areaId: String, day: String) {
         _navigateToSeatMap.value = areaId to day
-    }
-
-    fun login(username: String, password: String) {
-        viewModelScope.launch {
-            val result = seatSession.login(username, password)
-            if (result.isSuccess) {
-                seatApi.token = result.getOrThrow().token
-                updateLoginState()
-                loginResultFlow.value = Result.success(result.getOrThrow())
-            } else {
-                loginResultFlow.value = Result.failure(result.exceptionOrNull() ?: Exception("Unknown error"))
-            }
-        }
-    }
-
-    fun logout() {
-        seatApi.token = ""
-        seatSession.jwtToken = ""
-        updateLoginState()
-        loginResultFlow.value = null
     }
 
     private val _casLoginFlow = MutableStateFlow(false)
@@ -154,9 +131,9 @@ class SeatViewModel @Inject constructor(
     }
 
     /** Checks seatlib session; opens WebView login if needed. Returns true if session is active. */
-    suspend fun ensureSeatlibSession(context: Context): Boolean {
+    suspend fun ensureSeatlibSession(): Boolean {
         if (seatApi.token.isNotEmpty()) return true
-        // Try silent auth directly — no need for separate hasActiveSession() call
+        // 直接尝试静默认证，无需单独探测会话
         val token = seatCasLogin.trySilentAuth()
         if (token.isNotEmpty()) {
             seatApi.token = token

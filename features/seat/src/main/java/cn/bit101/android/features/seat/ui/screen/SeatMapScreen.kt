@@ -40,7 +40,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -73,7 +72,6 @@ fun SeatMapScreen(
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
 
     val currentSegment = if (dates.isEmpty()) null else dates.firstOrNull { it.day == day }
     fun String.isValidParam() = this.isNotBlank() && this != "null"
@@ -168,7 +166,7 @@ fun SeatMapScreen(
                             Button(onClick = {
                                 val seat = selectedSeat
                                 if (seat != null) { scope.launch {
-                                    if (!viewModel.ensureSeatlibSession(context)) {
+                                    if (!viewModel.ensureSeatlibSession()) {
                                         snackbarHostState.showSnackbar("请在弹出的 WebView 中完成 seatlib 登录，然后重试"); return@launch
                                     }
                                     viewModel.cancelReservation(seat.id); snackbarHostState.showSnackbar("已尝试取消座位 ${seat.no}"); selectedSeat = null
@@ -183,7 +181,7 @@ fun SeatMapScreen(
                             if (seat != null) {
                                 isReserving = true
                                 scope.launch {
-                                    if (!viewModel.ensureSeatlibSession(context)) {
+                                    if (!viewModel.ensureSeatlibSession()) {
                                         isReserving = false
                                         snackbarHostState.showSnackbar("请在弹出的 WebView 中完成 seatlib 登录，然后重试"); return@launch
                                     }

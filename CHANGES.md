@@ -1,5 +1,31 @@
 # CHANGES
 
+## 2026-09-17 代码清理：移除被 WebView 方案取代的死代码
+
+**背景**：`features/seat` 自 2026-08-29 集成后经历多轮方案迭代（OkHttp CAS 抓取 → 外部浏览器 → App 内 WebView），遗留大量已废弃实现。本次按全仓库调用点逐一核实后清理。
+
+**移除**（均已确认无任何调用点）：
+- `SeatSession`：`login()`（约 200 行 OkHttp CAS 抓取链）、`findFieldValue()`、`AESUtils`、`noRedirectClient`、`parseSalt()`/`parseExecution()`/`findCasField()`。保留仍在使用中的 `authenticateSeatlib()`。文件由 350 行降至 118 行
+- `SeatCasLogin`：`openCasLogin(context)`、`hasActiveSession()`
+- `SeatViewModel`：`login(username, password)`、`logout()`、`loginResultFlow`；`ensureSeatlibSession(context)` 中未使用的 `context` 参数（同步更新 `SeatMapScreen` 两处调用，移除 `LocalContext` 依赖）
+- `SeatModule.kt`：无任何绑定的空 Hilt 模块
+
+**保留说明**：`addTask()` 与 `executeSingleReserve`/`executeMonitor`/`executePreferReserve` 当前虽无 UI 调用点，但属待接线功能的现成骨架，**予以保留**，待后续接通 ModeSelector。
+
+**效果**：`features/seat` 由 2145 行降至 1858 行，净减 287 行。
+
+**文档**：合并 `CHANGES.md` 中两段完全重复的「2026-08-29 登录状态快速响应」记录。
+
+**已知遗留（本次未处理）**：
+- 三种预约模式中仅「单次」可用，监控/优先未接线
+- `cancelReservation()` 重载座位图硬编码 `LocalDate.now()`，忽略当前查看日期
+- `SeatMapScreen` 的 `segId`/`startTime`/`endTime` 未纳入 `LaunchedEffect` key
+- JWT token 仅存内存，无持久化
+- `features/seat` 缺少 `consumer-rules.pro`/`proguard-rules.pro`（其余 16 个 feature 模块均有）
+- 仓库缺 `.gitattributes`，`gradlew` 在 `core.autocrlf=true` 下被检出为 CRLF，Git Bash 中无法执行
+
+---
+
 ## 2026-08-30 seatlib phpCAS WebView 登录方案（修复浏览器 cookie 隔离问题）
 
 **问题**：外部浏览器登录后，App 的 OkHttp 无法读取浏览器 cookie（Android 沙箱隔离），导致始终拿不到 JWT token。
@@ -39,21 +65,6 @@
 - `SeatViewModel`：移除 `tryAutoLogin()`，改为 `ensureSeatlibSession(context)` suspend 函数
 - `SeatMapScreen`：预约/取消按钮增加 session 检查，未认证时打开浏览器并提示
 - `SeatSession`：增加 CAS SPA HTTP 200 响应处理（检测 cas= 参数并调用 api/cas/user）
-
----
-
-## 2026-08-29 登录状态快速响应（第二次提交）
-
-**问题**：用户已登录 BIT101 后进入"座"页面，会先显示"登录"按钮，约 2 秒后才跳转回正常预约界面。
-
-**根因**：`_isLoggedIn` 初始硬编码为 `false`，需等待异步 seatlib token 获取完成后才变为 `true`。UI 实时收集 `isLoggedIn` StateFlow 时在此期间显示登录按钮。
-
-**修改**：
-- `SeatViewModel.kt`：`init` 块内先同步读取 `loginStatus.status.get()` 设置 `_isLoggedIn`，无需等待 seatlib token；异步流程保留用于获取真实 seatlib JWT token
-- `updateLoginState()` 直接操作 `_isLoggedIn.value`（移除 helper 函数冗余）
-- 所有 token 设置处统一改为 `_isLoggedIn.value = true`
-
-**效果**：BIT101 已登录 → 进入 Seat 页面无闪烁，立即显示预约界面。
 
 ---
 
