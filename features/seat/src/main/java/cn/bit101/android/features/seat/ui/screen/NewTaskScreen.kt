@@ -89,7 +89,9 @@ fun NewTaskScreen(
         }
     }
 
-    LaunchedEffect(reserveDate, seatlibReady) {
+    // isLoggedIn 必须进 key：登录态可能在页面已组合之后才就绪，
+    // 否则 key 不变、副作用不会重跑，座位树就永远不会加载
+    LaunchedEffect(reserveDate, seatlibReady, isLoggedIn) {
         if (seatlibReady && isLoggedIn) {
             viewModel.loadSeatTree(reserveDate)
             selectedCampus = null; selectedFloor = null; selectedArea = null
