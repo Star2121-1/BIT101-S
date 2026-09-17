@@ -2,7 +2,11 @@ package cn.bit101.android.features.seat.api
 
 import android.util.Log
 import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.config.user.base.SeatLoginStatus
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -24,18 +28,41 @@ import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatDate
 import cn.bit101.android.features.seat.model.SeatStatus
 import cn.bit101.android.features.seat.model.SeatTreeNode
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class SeatApi(private val loginStatus: LoginStatus) {
+@Singleton
+class SeatApi @Inject constructor(
+    private val loginStatus: LoginStatus,
+    private val seatLoginStatus: SeatLoginStatus,
+) {
 
     companion object {
         private const val BASE = "https://seatlib.bit.edu.cn"
     }
 
-    @Volatile
-    var token: String = ""
+    /** 用于异步落盘 token，生命周期与应用一致。 */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    init {
-        Log.d("SeatApi", "instance created, id=${System.identityHashCode(this)}, token='$token'")
+    @Volatile
+    private var _token: String = ""
+
+    /**
+     * seatlib 的 JWT。**赋值即持久化** —— ViewModel 与前台服务共享同一份会话，
+     * 因此 token 的读写统一收敛在这里，不再由调用方各自维护。
+     */
+    var token: String
+        get() = _token
+        set(value) {
+            _token = value
+            scope.launch { seatLoginStatus.token.set(value) }
+        }
+
+    /** 从持久化存储恢复 token（不回写）。冷启动时调用一次。 */
+    suspend fun restoreToken(): String {
+        val saved = seatLoginStatus.token.get()
+        _token = saved
+        return saved
     }
 
     private val cookieManager: CookieManager get() = loginStatus.cookieManager

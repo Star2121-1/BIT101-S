@@ -15,6 +15,8 @@ import java.net.CookieManager
 import java.net.HttpCookie
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
 
 data class LoginResult(
     val token: String = "",
@@ -22,7 +24,8 @@ data class LoginResult(
     val studentId: String = ""
 )
 
-class SeatSession(
+@Singleton
+class SeatSession @Inject constructor(
     private val loginStatus: LoginStatus
 ) {
     companion object {

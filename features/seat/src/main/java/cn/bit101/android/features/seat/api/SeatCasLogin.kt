@@ -16,7 +16,9 @@ import org.json.JSONObject
 import java.net.HttpCookie
 import java.net.URI
 import javax.inject.Inject
+import javax.inject.Singleton
 
+@Singleton
 class SeatCasLogin @Inject constructor(
     private val loginStatus: LoginStatus,
 ) {

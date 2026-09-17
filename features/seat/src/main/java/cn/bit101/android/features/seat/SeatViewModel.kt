@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.seat.base.SeatTaskStore
 import cn.bit101.android.config.user.base.LoginStatus
-import cn.bit101.android.config.user.base.SeatLoginStatus
 import cn.bit101.android.features.seat.api.SeatApi
 import cn.bit101.android.features.seat.api.SeatCasLogin
 import cn.bit101.android.features.seat.api.SeatSession
@@ -54,8 +53,10 @@ data class SeatMapState(
 @HiltViewModel
 class SeatViewModel @Inject constructor(
     private val loginStatus: LoginStatus,
-    private val seatLoginStatus: SeatLoginStatus,
     private val seatTaskStore: SeatTaskStore,
+    private val seatApi: SeatApi,
+    private val seatSession: SeatSession,
+    private val seatCasLogin: SeatCasLogin,
 ) : ViewModel() {
 
     companion object {
@@ -71,10 +72,6 @@ class SeatViewModel @Inject constructor(
         private const val PREFER_INTERVAL_MS = 5_000L
     }
 
-    private val seatSession = SeatSession(loginStatus)
-    private val seatCasLogin = SeatCasLogin(loginStatus)
-    val seatApi = SeatApi(loginStatus)
-
     private val _seatlibReady = MutableStateFlow(false)
     val seatlibReady: StateFlow<Boolean> = _seatlibReady.asStateFlow()
 
@@ -85,18 +82,11 @@ class SeatViewModel @Inject constructor(
         _isLoggedIn.value = seatApi.token.isNotEmpty()
     }
 
-    /** 写入内存中的 seatlib token 并持久化，统一入口避免各处遗漏。 */
-    private fun setSeatToken(value: String) {
-        seatApi.token = value
-        viewModelScope.launch { seatLoginStatus.token.set(value) }
-    }
-
     init {
         viewModelScope.launch {
-            // 1. 先恢复上次持久化的 token，冷启动即可免登录
-            val saved = seatLoginStatus.token.get()
+            // 1. 先恢复上次持久化的 token，冷启动即可免登录（持久化由 SeatApi 统一负责）
+            val saved = seatApi.restoreToken()
             if (saved.isNotEmpty()) {
-                seatApi.token = saved
                 Log.d("SeatViewModel", "restored persisted token=${saved.take(8)}...")
             }
 
@@ -107,7 +97,7 @@ class SeatViewModel @Inject constructor(
             // 3. 尝试静默认证刷新 token；失败则沿用已恢复的 token（过期时由 401 兜底清理）
             val result = seatSession.authenticateSeatlib()
             if (result.isSuccess) {
-                setSeatToken(result.getOrThrow().token)
+                seatApi.token = result.getOrThrow().token
                 _isLoggedIn.value = true
                 Log.d("SeatViewModel", "authenticateSeatlib success: token=${seatApi.token.take(8)}...")
             } else {
@@ -123,7 +113,7 @@ class SeatViewModel @Inject constructor(
                 if (loggedIn && seatApi.token.isEmpty()) {
                     val result = seatSession.authenticateSeatlib()
                     if (result.isSuccess) {
-                        setSeatToken(result.getOrThrow().token)
+                        seatApi.token = result.getOrThrow().token
                         _isLoggedIn.value = true
                         Log.d("SeatViewModel", "re-auth success: token=${seatApi.token.take(8)}...")
                     }
@@ -212,7 +202,7 @@ class SeatViewModel @Inject constructor(
         // 直接尝试静默认证，无需单独探测会话
         val token = seatCasLogin.trySilentAuth()
         if (token.isNotEmpty()) {
-            setSeatToken(token)
+            seatApi.token = token
             updateLoginState()
             return true
         }
@@ -230,7 +220,7 @@ class SeatViewModel @Inject constructor(
         // 3. Try silent auth first (may succeed if phpCAS session established)
         val silentToken = seatCasLogin.trySilentAuth()
         if (silentToken.isNotEmpty()) {
-            setSeatToken(silentToken)
+            seatApi.token = silentToken
             updateLoginState()
             _casLoginFlow.value = false
             Log.d("SeatViewModel", "syncAndExchange success (silent): token=${silentToken.take(8)}...")
@@ -258,7 +248,7 @@ class SeatViewModel @Inject constructor(
                 if (member != null && !member.isNull("token")) {
                     val t = member.optString("token", "")
                     if (t.isNotEmpty()) {
-                        setSeatToken(t)
+                        seatApi.token = t
                         updateLoginState()
                         _casLoginFlow.value = false
                         Log.d("SeatViewModel", "syncAndExchange success (ticket): token=${t.take(8)}...")
@@ -405,7 +395,7 @@ class SeatViewModel @Inject constructor(
 
     private fun handleApiError(e: Throwable?) {
         if (e?.message != "TOKEN_EXPIRED" && e?.cause?.message != "TOKEN_EXPIRED") return
-        setSeatToken("")
+        seatApi.token = ""
         seatSession.jwtToken = ""
         updateLoginState()
         // 认证已失效：继续轮询只会白等并持续打请求，直接终止所有在跑的任务
