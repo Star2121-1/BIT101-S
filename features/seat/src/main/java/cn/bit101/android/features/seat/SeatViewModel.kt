@@ -1,13 +1,14 @@
 package cn.bit101.android.features.seat
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import cn.bit101.android.config.seat.base.SeatTaskStore
 import cn.bit101.android.config.user.base.LoginStatus
 import cn.bit101.android.features.seat.api.SeatApi
 import cn.bit101.android.features.seat.api.SeatCasLogin
 import cn.bit101.android.features.seat.api.SeatSession
+import cn.bit101.android.features.seat.api.SeatTaskRepository
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatDate
@@ -15,16 +16,11 @@ import cn.bit101.android.features.seat.model.SeatStatus
 import cn.bit101.android.features.seat.model.SeatTreeNode
 import cn.bit101.android.features.seat.model.TaskMode
 import cn.bit101.android.features.seat.model.TaskStatus
-import cn.bit101.android.features.seat.model.deserializeTasks
-import cn.bit101.android.features.seat.model.serializeTasks
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -52,8 +48,9 @@ data class SeatMapState(
 
 @HiltViewModel
 class SeatViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val loginStatus: LoginStatus,
-    private val seatTaskStore: SeatTaskStore,
+    private val repository: SeatTaskRepository,
     private val seatApi: SeatApi,
     private val seatSession: SeatSession,
     private val seatCasLogin: SeatCasLogin,
@@ -61,15 +58,6 @@ class SeatViewModel @Inject constructor(
 
     companion object {
         private const val SEATLIB_BASE = "https://seatlib.bit.edu.cn"
-
-        /** 单个任务的最长运行时长：超过后自动停止，避免忘记取消导致无限轮询。 */
-        private const val MAX_TASK_DURATION_MS = 2 * 60 * 60 * 1000L
-        /** 轮询退避上限（5 分钟）。 */
-        private const val MAX_POLL_INTERVAL_MS = 5 * 60 * 1000L
-        /** 监控预约的基准轮询间隔。 */
-        private const val MONITOR_INTERVAL_MS = 10_000L
-        /** 优先预约的基准轮询间隔。 */
-        private const val PREFER_INTERVAL_MS = 5_000L
     }
 
     private val _seatlibReady = MutableStateFlow(false)
@@ -104,6 +92,14 @@ class SeatViewModel @Inject constructor(
                 Log.d("SeatViewModel", "authenticateSeatlib failed: ${result.exceptionOrNull()?.message}")
             }
             _seatlibReady.value = true
+
+            // 4. 若上次还有未完成的任务，拉起前台服务续跑（进程被杀后也能自动接上）
+            repository.loadOnce()
+            val pending = repository.activeTasks
+            if (pending.isNotEmpty()) {
+                Log.d("SeatViewModel", "resuming ${pending.size} task(s)")
+                SeatMonitorService.start(appContext)
+            }
         }
         // Re-check when BIT101 login status changes
         viewModelScope.launch {
@@ -123,47 +119,11 @@ class SeatViewModel @Inject constructor(
     }
 
 
-    private val _tasks = MutableStateFlow<List<ReservationTask>>(emptyList())
-    val tasks: StateFlow<List<ReservationTask>> = _tasks.asStateFlow()
-
     /**
-     * 待落盘的任务列表 JSON。
-     *
-     * 用单一收集者串行写入 DataStore —— 若每次变更各自 `launch` 一个协程，多个挂起写入不保证 FIFO，
-     * 崩溃恢复时可能读到比实际更旧的状态。
+     * 任务列表来自仓储（应用级单例），与前台服务共享同一份状态。
+     * ViewModel 只负责「加任务 / 取消任务」，实际轮询由 [SeatMonitorService] 执行。
      */
-    private val pendingTasksJson = MutableStateFlow<String?>(null)
-
-    // 注意：必须放在 _tasks 声明之后。Kotlin 按声明顺序初始化，写在类顶部会读到未初始化的属性。
-    init {
-        viewModelScope.launch {
-            val saved = seatTaskStore.tasks.get()
-            val restored = deserializeTasks(saved)
-            if (restored.isNotEmpty()) {
-                // 上次「运行中 / 等待中」的任务已随进程结束，不能继续显示为运行中
-                _tasks.value = restored.map { task ->
-                    if (task.status == TaskStatus.RUNNING || task.status == TaskStatus.IDLE) {
-                        task.copy(status = TaskStatus.FAILED, message = "应用已重启，任务未继续运行")
-                    } else task
-                }
-                persistTasks()
-                Log.d("SeatViewModel", "restored ${restored.size} task(s)")
-            }
-        }
-        // 单写入者：串行落盘保证顺序，distinctUntilChanged 避免重复写入
-        viewModelScope.launch {
-            pendingTasksJson.filterNotNull().distinctUntilChanged().collect { json ->
-                seatTaskStore.tasks.set(json)
-            }
-        }
-    }
-
-    /** 请求把当前任务列表落盘（实际写入由上面的单写入者串行执行）。 */
-    private fun persistTasks() {
-        pendingTasksJson.value = serializeTasks(_tasks.value)
-    }
-
-    private val taskJobs = mutableMapOf<String, Job>()
+    val tasks: StateFlow<List<ReservationTask>> = repository.tasks
 
     private val _seatTree = MutableStateFlow<List<SeatTreeNode>>(emptyList())
     val seatTree: StateFlow<List<SeatTreeNode>> = _seatTree.asStateFlow()
@@ -349,31 +309,19 @@ class SeatViewModel @Inject constructor(
     fun addTask(mode: TaskMode, campusName: String, floorName: String, areaName: String, areaId: String, seatNo: String, reserveDate: String) {
         // 单次预约不走任务流：它由 SeatMapScreen.reserveSeat() 直接完成，可以在座位图上精确挑座
         if (mode == TaskMode.SINGLE) return
-        val task = ReservationTask(
-            mode = mode, status = TaskStatus.RUNNING, areaId = areaId, seatNo = seatNo,
-            reserveDate = reserveDate, campusName = campusName, floorName = floorName, areaName = areaName
+        repository.add(
+            ReservationTask(
+                mode = mode, status = TaskStatus.RUNNING, areaId = areaId, seatNo = seatNo,
+                reserveDate = reserveDate, campusName = campusName, floorName = floorName, areaName = areaName
+            )
         )
-        _tasks.value = _tasks.value + task
-        persistTasks()
-        val job = viewModelScope.launch {
-            when (mode) {
-                TaskMode.MONITOR -> executeMonitor(task)
-                TaskMode.PREFER -> executePreferReserve(task)
-                // 已在函数入口拦截，不会走到这里
-                TaskMode.SINGLE -> Unit
-            }
-        }
-        taskJobs[task.id] = job
+        // 把执行交给前台服务，退到后台 / 锁屏也能继续轮询
+        SeatMonitorService.start(appContext)
     }
 
     fun cancelTask(taskId: String) {
-        taskJobs[taskId]?.cancel()
-        taskJobs.remove(taskId)
-        _tasks.value = _tasks.value.map { task ->
-            val terminal = task.status == TaskStatus.SUCCESS || task.status == TaskStatus.FAILED
-            if (task.id == taskId && !terminal) task.copy(status = TaskStatus.CANCELLED, message = "已手动取消") else task
-        }
-        persistTasks()
+        // 只改状态：服务的任务流收集器会发现该任务不再活跃并终止对应协程
+        repository.cancel(taskId)
     }
 
     /** 取消预约。返回 null 表示成功，否则返回错误信息。成功后按当前查看的日期与时段重新加载座位图。 */
@@ -393,136 +341,13 @@ class SeatViewModel @Inject constructor(
         return null
     }
 
+
     private fun handleApiError(e: Throwable?) {
         if (e?.message != "TOKEN_EXPIRED" && e?.cause?.message != "TOKEN_EXPIRED") return
         seatApi.token = ""
         seatSession.jwtToken = ""
         updateLoginState()
         // 认证已失效：继续轮询只会白等并持续打请求，直接终止所有在跑的任务
-        stopRunningTasks("登录已失效，请重新登录")
-    }
-
-    /** 终止所有在跑的任务并置为失败。用于认证失效这类无法继续的场景。 */
-    private fun stopRunningTasks(reason: String) {
-        taskJobs.values.forEach { it.cancel() }
-        taskJobs.clear()
-        _tasks.value = _tasks.value.map { task ->
-            if (task.status == TaskStatus.RUNNING || task.status == TaskStatus.IDLE) {
-                task.copy(status = TaskStatus.FAILED, message = reason)
-            } else task
-        }
-        persistTasks()
-    }
-
-    /** 解析任务对应日期的时段参数；拉取失败返回 null，由调用方决定如何处理。 */
-    private suspend fun resolveTaskSegment(areaId: String, day: String): SegmentParams? {
-        val r = seatApi.getSeatDates(buildId = areaId)
-        if (r.isFailure) { handleApiError(r.exceptionOrNull()); return null }
-        val dates = r.getOrThrow()
-        val seg = dates.firstOrNull { it.day == day } ?: dates.firstOrNull() ?: return null
-        fun String.usable() = takeIf { it.isNotBlank() && it != "null" }
-        return SegmentParams(
-            segmentId = seg.segmentId.usable() ?: "1",
-            startTime = seg.start.usable() ?: "08:00",
-            endTime = seg.end.usable() ?: "22:30"
-        )
-    }
-
-    /** 指数退避：连续失败时每次翻倍，封顶 MAX_POLL_INTERVAL_MS。 */
-    private fun backoff(current: Long): Long = minOf(current * 2, MAX_POLL_INTERVAL_MS)
-
-    /** 监控预约：轮询指定座位，空出后立即预约。 */
-    private suspend fun executeMonitor(task: ReservationTask) {
-        val params = resolveTaskSegment(task.areaId, task.reserveDate)
-            ?: run { updateTaskStatus(task.id, TaskStatus.FAILED, "获取时段失败"); return }
-
-        val deadline = System.currentTimeMillis() + MAX_TASK_DURATION_MS
-        var interval = MONITOR_INTERVAL_MS
-
-        while (System.currentTimeMillis() < deadline) {
-            val seatsResult = seatApi.getSeats(task.areaId, params.segmentId, task.reserveDate, params.startTime, params.endTime)
-            if (seatsResult.isFailure) {
-                handleApiError(seatsResult.exceptionOrNull())
-                interval = backoff(interval)
-                updateTaskStatus(task.id, TaskStatus.RUNNING, "查询失败，${interval / 1000}s 后重试")
-                delay(interval)
-                continue
-            }
-            interval = MONITOR_INTERVAL_MS
-
-            val targetSeat = seatsResult.getOrNull()?.find { it.no == task.seatNo }
-            if (targetSeat == null) {
-                updateTaskStatus(task.id, TaskStatus.RUNNING, "未找到座位，继续监控…")
-                delay(interval)
-                continue
-            }
-
-            if (targetSeat.status == SeatStatus.AVAILABLE) {
-                updateTaskStatus(task.id, TaskStatus.RUNNING, "座位可用！正在预约…")
-                val result = seatApi.confirmSeat(targetSeat.id, params.segmentId)
-                if (result.isSuccess && result.getOrNull() == true) {
-                    updateTaskStatus(task.id, TaskStatus.SUCCESS, "预约成功")
-                    return
-                }
-                handleApiError(result.exceptionOrNull())
-                updateTaskStatus(task.id, TaskStatus.RUNNING, "预约失败，继续监控")
-            } else {
-                updateTaskStatus(task.id, TaskStatus.RUNNING, "座位被占，继续监控…")
-            }
-            delay(interval)
-        }
-        updateTaskStatus(task.id, TaskStatus.FAILED, "已超过最长监控时长（2 小时），任务自动停止")
-    }
-
-    /** 优先预约：轮询区域内所有空闲座位，优先取指定座位号，否则取最早可用的。 */
-    private suspend fun executePreferReserve(task: ReservationTask) {
-        val params = resolveTaskSegment(task.areaId, task.reserveDate)
-            ?: run { updateTaskStatus(task.id, TaskStatus.FAILED, "获取时段失败"); return }
-
-        val deadline = System.currentTimeMillis() + MAX_TASK_DURATION_MS
-        var interval = PREFER_INTERVAL_MS
-
-        while (System.currentTimeMillis() < deadline) {
-            val seatsResult = seatApi.getSeats(task.areaId, params.segmentId, task.reserveDate, params.startTime, params.endTime)
-            if (seatsResult.isFailure) {
-                handleApiError(seatsResult.exceptionOrNull())
-                interval = backoff(interval)
-                updateTaskStatus(task.id, TaskStatus.RUNNING, "查询失败，${interval / 1000}s 后重试")
-                delay(interval)
-                continue
-            }
-            interval = PREFER_INTERVAL_MS
-
-            val availableSeats = seatsResult.getOrNull()?.filter { it.status == SeatStatus.AVAILABLE }?.sortedBy { it.no }
-            if (!availableSeats.isNullOrEmpty()) {
-                val targetSeat = availableSeats.find { it.no == task.seatNo } ?: availableSeats.first()
-                updateTaskStatus(task.id, TaskStatus.RUNNING, "发现空闲座位 ${targetSeat.no}，正在预约…")
-                val result = seatApi.confirmSeat(targetSeat.id, params.segmentId)
-                if (result.isSuccess && result.getOrNull() == true) {
-                    updateTaskStatus(task.id, TaskStatus.SUCCESS, "预约成功，座位 ${targetSeat.no}")
-                    return
-                }
-                handleApiError(result.exceptionOrNull())
-                updateTaskStatus(task.id, TaskStatus.RUNNING, "预约失败，继续尝试")
-            } else {
-                updateTaskStatus(task.id, TaskStatus.RUNNING, "暂无空闲座位，等待中…")
-            }
-            delay(interval)
-        }
-        updateTaskStatus(task.id, TaskStatus.FAILED, "已超过最长优先预约时长（2 小时），任务自动停止")
-    }
-
-    /**
-     * 更新任务状态。已是终态（成功/失败/已取消）的任务不再被覆盖 ——
-     * 否则认证失效等场景下 stopRunningTasks 置的 FAILED 会被紧接着的状态更新改回 RUNNING。
-     */
-    private fun updateTaskStatus(taskId: String, status: TaskStatus, message: String) {
-        _tasks.value = _tasks.value.map { task ->
-            val terminal = task.status == TaskStatus.CANCELLED ||
-                task.status == TaskStatus.FAILED ||
-                task.status == TaskStatus.SUCCESS
-            if (task.id == taskId && !terminal) task.copy(status = status, message = message) else task
-        }
-        persistTasks()
+        repository.stopAll("登录已失效，请重新登录")
     }
 }

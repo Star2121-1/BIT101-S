@@ -43,7 +43,7 @@
 |---|------|---------|---------|
 | 2.1 | ~~JWT token 持久化~~ ✅ | 已完成：新增 `SeatStatus`（加密 DataStore）+ Hilt 绑定；`SeatViewModel` 用统一入口 `setSeatToken()` 写入并持久化；登出时一并清除 | 杀进程重开无需再走一次 WebView 登录 |
 | 2.2 | ~~任务持久化~~ ✅ | 已完成：新增 `SeatTaskStore`（DataStore）+ Hilt 绑定；`ReservationTask` JSON 序列化；启动恢复、变更落盘（单写入者保证顺序）；登出清空 | 杀进程重开，任务与状态都还在 |
-| 2.3 | 后台保活 ⚠️ 方案待定 | `viewModelScope` 里的轮询在退到后台 / 锁屏后会停。**WorkManager 并不适合秒级轮询** —— 它是为「可延迟任务」设计的，Doze / App Standby 会显著推迟执行（可能从 10s 拖到数分钟），**建议改用前台服务**（`dataSync` 类型 + 常驻通知）。需先确认方案 | 退到后台 / 锁屏后监控仍继续 |
+| 2.3 | ~~后台保活~~ ✅ | 已完成：**前台服务**（`SeatMonitorService`，`dataSync` + 常驻通知）执行轮询，新增 `SeatTaskRepository` 作为任务状态唯一持有者；服务由任务流驱动，无活跃任务时自停。**未用 WorkManager**（Doze 会推迟到分钟级，不适合秒级抢座） | 退到后台 / 锁屏后监控仍继续；进程被杀后自动续跑 |
 | 2.4 | 轮询退避与上限 | 监控失败重试加指数退避；增加最长监控时长上限 | 断网时不会无限高频重试 |
 | 2.5 | 401 自动登出联调 | 验证 `handleApiError` 的 `TOKEN_EXPIRED` 路径 | token 过期后 UI 正确回到登录态 |
 

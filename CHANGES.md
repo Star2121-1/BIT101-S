@@ -1,5 +1,48 @@
 # CHANGES
 
+## 2026-09-17 M2.3 前台服务保活
+
+### 为什么不用 WorkManager
+
+原计划是「换 WorkManager」，但 **WorkManager 是为「可延迟任务」设计的** —— Doze / App Standby 会显著推迟执行（可能从 10s 拖到数分钟）。对需要 5-10 秒粒度抢座的应用来说等于功能失效。WorkManager 擅长的是「跨进程存活」，不是「准时执行」。
+
+因此改用**前台服务**：可以持续执行，代价是一条常驻通知（也正好让用户知道正在后台抢座）。
+
+### 架构调整：任务状态改为单一持有者
+
+原先任务状态由 `SeatViewModel` 独享（内存 `_tasks` + 协程 `taskJobs`）。前台服务也要读写任务，两份状态必然分叉。因此：
+
+- 新增 **`SeatTaskRepository`**（`@Singleton`）：任务状态的**唯一持有者**，负责内存缓存 + 落盘（单写入者串行写）。对外暴露只读 `tasks` 与 `add` / `cancel` / `updateStatus` / `stopAll` / `loadOnce`
+- 新增 **`SeatMonitorService`**（`@AndroidEntryPoint` 前台服务，`dataSync` 类型）：**由仓储的任务流驱动** —— 收集 `repository.tasks`，为新增的活跃任务启动协程、为已结束的取消协程，无活跃任务时自行 `stopSelf()`
+- `SeatViewModel` **不再自己轮询**：`addTask` 只写仓储并拉起服务，`cancelTask` 只改状态（服务的收集器会终止对应协程）。文件由 480 行降至 345 行
+
+### 顺带解决
+
+- **进程被杀后可自动续跑**：服务使用 `START_STICKY`，被系统重建后由 `onCreate` 从仓储恢复任务；ViewModel 冷启动时若发现未完成任务也会拉起服务。这补上了 M2.2 遗留的「恢复的任务只能标记为失败」的缺口
+- 轮询、退避、2 小时上限、认证失效终止等逻辑整体迁入服务
+
+### 新增权限与声明
+
+`features/seat/src/main/AndroidManifest.xml`：
+- `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC` / `POST_NOTIFICATIONS`
+- `<service android:name="...SeatMonitorService" android:foregroundServiceType="dataSync" />`
+
+通知图标使用系统内置 `android.R.drawable.stat_notify_sync`，避免为 seat 模块新增 `res` 目录。
+
+### 修复：loadOnce 会覆盖内存中的新任务
+
+`SeatTaskRepository.loadOnce()` 原先无条件用存储内容覆盖内存列表，而 ViewModel 与服务**都会调用**它 —— 若 UI 刚新增任务、服务随后加载到旧列表，新任务会被覆盖丢失。改为真正只加载一次（`@Volatile loaded` 标志）。
+
+**验证**：`:features:seat:compileDebugKotlin` BUILD SUCCESSFUL。
+
+### 已知限制（待真机确认 / 后续处理）
+
+- **尚未申请 `POST_NOTIFICATIONS` 运行时权限**：API 33+ 用户未授权时服务仍可运行，但常驻通知不可见。需补一个运行时请求
+- **Android 15 对 `dataSync` 前台服务有 6 小时/天上限**：单任务最长 2 小时在限内，但连续跑多个任务可能触顶
+- 5-10 秒持续轮询 2 小时，电量消耗会比较明显
+
+---
+
 ## 2026-09-17 M2.2 任务列表持久化 + 三处缺陷修复
 
 ### M2.2 任务列表持久化

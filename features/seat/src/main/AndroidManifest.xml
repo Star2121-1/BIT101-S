@@ -1,3 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 座位监控需要在前台服务中长期轮询（WorkManager 会被 Doze 推迟到分钟级，不适用于秒级抢座） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- API 33+ 显示常驻通知需要用户授权；未授权时服务仍可运行，只是通知不可见 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <service
+            android:name="cn.bit101.android.features.seat.SeatMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+
 </manifest>
