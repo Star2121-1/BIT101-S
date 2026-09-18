@@ -55,6 +55,8 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
     implementation "com.google.accompanist:accompanist-webview:0.31.2-alpha"
+    // 座位底图来自服务端（/api/seat/map 给的 1920×1080 图），用 Coil 加载并按状态缓存
+    implementation "io.coil-kt:coil-compose:2.5.0"
 
     // junit 已由根 build.gradle 的 subprojects 块统一加给所有 library 模块。
     // org.json 必须显式提供真实实现：Android SDK 里的 org.json 在单元测试中是空壳，

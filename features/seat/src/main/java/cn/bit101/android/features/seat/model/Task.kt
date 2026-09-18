@@ -34,7 +34,15 @@ data class ReservationTask(
     val status: TaskStatus = TaskStatus.IDLE,
     val areaId: String = "",
     val segment: String = "",
+    /** 监控模式的目标座位号（单个） */
     val seatNo: String = "",
+    /**
+     * 优先模式的偏好座位号，**按优先级排序**（空 = 不限，区域内最早空出即可）。
+     *
+     * 引入原因：优先预约原先只有单座位号，用户想「先抢 018，抢不到再抢 020」表达不出来，
+     * 只能被迫选一个；现在可以从座位图上多选并排序。
+     */
+    val preferredSeats: List<String> = emptyList(),
     val reserveDate: String = "",
     val startTime: String = "08:00",
     val endTime: String = "22:30",
@@ -53,6 +61,7 @@ fun ReservationTask.toJson(): JSONObject = JSONObject().apply {
     put("areaId", areaId)
     put("segment", segment)
     put("seatNo", seatNo)
+    put("preferredSeats", JSONArray().apply { preferredSeats.forEach { put(it) } })
     put("reserveDate", reserveDate)
     put("startTime", startTime)
     put("endTime", endTime)
@@ -70,6 +79,9 @@ fun JSONObject.toReservationTask(): ReservationTask = ReservationTask(
     areaId = optString("areaId"),
     segment = optString("segment"),
     seatNo = optString("seatNo"),
+    preferredSeats = optJSONArray("preferredSeats")?.let { arr ->
+        (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }
+    } ?: emptyList(),
     reserveDate = optString("reserveDate"),
     startTime = optString("startTime", "08:00"),
     endTime = optString("endTime", "22:30"),

@@ -68,7 +68,9 @@ internal fun parseSeatTree(data: JSONArray): List<SeatTreeNode> {
                     id = id,
                     name = item.getString("name"),
                     type = item.intOrZero("type"),
-                    parentId = parentId
+                    parentId = parentId,
+                    // 楼层节点带平面图（用于认路）；区域节点的地址实测 500，UI 侧需容错
+                    imageUrl = item.optString("image_url").takeIf { it.isNotBlank() && it != "null" }
                 )
             )
             item.optJSONArray("children")?.let { walk(it, id) }
@@ -109,8 +111,11 @@ internal fun parseSeatDates(data: JSONArray): List<SeatDate> {
 /**
  * 解析 `/api/Seat/seat` 的 `data`。
  *
- * 实测 `status` 是**字符串**：`"1"` = 可预约、`"2"` = 我已预约、其它 = 被占用。
- * 座位号 `no` 是补零字符串（`"001"`），比较时需用 `seatNumberEquals`。
+ * - `status` 是**字符串**，取值与含义见 [SeatStatus] 的注释（映射取自官方前端）
+ * - `status_name` 是服务端给的原文（「空闲」「已预约」），比数字稳，直接带上
+ * - `point_x/point_y/width/height` 是**底图百分比**（实测全量有值），
+ *   用于在真实座位底图上定位热区；缺失时 [Seat.hasMapPosition] 为 false，UI 回落方格
+ * - 座位号 `no` 是补零字符串（`"001"`），比较时需用 `seatNumberEquals`
  */
 internal fun parseSeats(data: JSONArray, areaId: String): List<Seat> {
     val seats = mutableListOf<Seat>()
@@ -120,14 +125,40 @@ internal fun parseSeats(data: JSONArray, areaId: String): List<Seat> {
             Seat(
                 id = s.getString("id"),
                 no = s.getString("no"),
-                status = when (s.optString("status")) {
-                    "1" -> SeatStatus.AVAILABLE
-                    "2" -> SeatStatus.RESERVED
-                    else -> SeatStatus.OCCUPIED
-                },
-                areaId = areaId
+                status = seatStatusOf(s.optString("status")),
+                areaId = areaId,
+                statusName = s.optString("status_name").takeIf { it.isNotBlank() },
+                pointX = s.optFloat("point_x"),
+                pointY = s.optFloat("point_y"),
+                width = s.optFloat("width"),
+                height = s.optFloat("height"),
             )
         )
     }
     return seats
+}
+
+/**
+ * 服务端状态码 → [SeatStatus]。
+ *
+ * 取值分组取自官方前端 `seat-map.js` 里按状态挑底图的分支：
+ * `1→free`、`2/10/11→book`、`6/8/9→use`、`7→leave`、`3/4/5→close`。
+ * 未知值一律按「不可用」处理（宁可不让点，也不要错报成可约）。
+ */
+internal fun seatStatusOf(raw: String?): SeatStatus = when (raw?.trim()) {
+    "1" -> SeatStatus.AVAILABLE
+    "2", "10", "11" -> SeatStatus.RESERVED
+    "6", "8", "9" -> SeatStatus.IN_USE
+    "7" -> SeatStatus.LEAVE
+    else -> SeatStatus.UNAVAILABLE
+}
+
+/** 坐标是字符串形式的浮点（如 `"69.106880000000004"`），解析失败返回 null。 */
+internal fun JSONObject.optFloat(key: String): Float? {
+    if (isNull(key)) return null
+    return when (val v = opt(key)) {
+        is Number -> v.toFloat()
+        is String -> v.toFloatOrNull()
+        else -> null
+    }
 }

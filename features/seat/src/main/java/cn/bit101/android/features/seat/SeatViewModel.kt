@@ -8,14 +8,17 @@ import cn.bit101.android.features.seat.api.SeatApi
 import cn.bit101.android.features.seat.api.SeatHttp
 import cn.bit101.android.features.seat.api.SeatSession
 import cn.bit101.android.features.seat.api.SeatTaskRepository
+import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatDate
+import cn.bit101.android.features.seat.model.SeatMapImages
 import cn.bit101.android.features.seat.model.SeatTreeNode
 import cn.bit101.android.features.seat.model.TaskMode
 import cn.bit101.android.features.seat.model.TaskStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import javax.inject.Inject
 
 /** 座位图当前的查询参数，用于取消预约后按同样条件重新加载（避免日期/时段被回落值覆盖）。 */
@@ -39,8 +43,19 @@ data class SeatMapState(
     val areaName: String = "",
     val isLoading: Boolean = false,
     val error: String? = null,
-    val query: SeatQuery? = null
+    val query: SeatQuery? = null,
+    /** 区域底图（按状态分色的五张图），为空时 UI 回落格子视图 */
+    val images: SeatMapImages? = null
 )
+
+/**
+ * 座位图的进入用途。
+ *
+ * - [RESERVE]：单次预约——只能点空闲座位，底部是「立即预约」
+ * - [MONITOR]：监控预约——**单选**，占用座位也可点（那正是要等的目标）
+ * - [PREFER]：优先预约——**多选**，按点选顺序排队抢
+ */
+enum class SeatPickMode { RESERVE, MONITOR, PREFER }
 
 @HiltViewModel
 class SeatViewModel @Inject constructor(
@@ -54,6 +69,9 @@ class SeatViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "SeatViewModel"
+
+        /** 规则规定每天可取消 2 次（`/api/index/booking_rules`），服务端未提供计数接口。 */
+        const val CANCELS_PER_DAY = 2
     }
 
     private val _seatlibReady = MutableStateFlow(false)
@@ -172,6 +190,99 @@ class SeatViewModel @Inject constructor(
     private val _seatMapState = MutableStateFlow(SeatMapState())
     val seatMapState: StateFlow<SeatMapState> = _seatMapState.asStateFlow()
 
+    // ── 选座（监控 / 优先模式的座位选择，替代手输座位号）────────────────────
+
+    /** 当前座位图的用途；[SeatPickMode.RESERVE] 表示直接预约。 */
+    private val _pickMode = MutableStateFlow(SeatPickMode.RESERVE)
+    val pickMode: StateFlow<SeatPickMode> = _pickMode.asStateFlow()
+
+    /** 已选座位（优先模式按点选顺序 = 优先级）。 */
+    private val _pickedSeats = MutableStateFlow<List<Seat>>(emptyList())
+    val pickedSeats: StateFlow<List<Seat>> = _pickedSeats.asStateFlow()
+
+    /** 打开座位图，指定用途。监控/优先由 NewTaskScreen 调用。 */
+    fun openSeatMapForPick(mode: SeatPickMode, areaId: String, day: String) {
+        _pickMode.value = mode
+        _pickedSeats.value = emptyList()
+        openSeatMap(areaId, day)
+    }
+
+    /**
+     * 进入座位图前先声明用途（导航由 SeatScreen 负责，数据加载由座位图页自己触发）。
+     *
+     * 与 [openSeatMapForPick] 的区别：这里**不发请求**，避免导航前多打一次座位接口。
+     */
+    fun preparePick(mode: SeatPickMode) {
+        _pickMode.value = mode
+        _pickedSeats.value = emptyList()
+    }
+
+    /** 单次预约路径：重置为预约语义。 */
+    fun openSeatMapForReserve(areaId: String, day: String) {
+        _pickMode.value = SeatPickMode.RESERVE
+        openSeatMap(areaId, day)
+    }
+
+    /**
+     * 点选/取消点选一个座位。
+     *
+     * 预约语义下由 SeatMapScreen 单独处理（选中即待预约），不走这里。
+     */
+    fun togglePick(seat: Seat) {
+        val current = _pickedSeats.value
+        _pickedSeats.value = when (_pickMode.value) {
+            SeatPickMode.MONITOR -> if (current.any { it.id == seat.id }) emptyList() else listOf(seat)
+            SeatPickMode.PREFER -> if (current.any { it.id == seat.id }) {
+                current.filterNot { it.id == seat.id }
+            } else {
+                current + seat
+            }
+            SeatPickMode.RESERVE -> current
+        }
+    }
+
+    fun clearPickedSeats() { _pickedSeats.value = emptyList() }
+
+    /** 离开座位图时复位，避免下次进来还带着上次的选择。 */
+    fun resetPick() {
+        _pickedSeats.value = emptyList()
+        _pickMode.value = SeatPickMode.RESERVE
+    }
+
+    // ── 「我的预约」（签到时限提醒 + 取消）────────────────────────────────
+
+    private val _myReservations = MutableStateFlow<List<ReservationRecord>>(emptyList())
+    val myReservations: StateFlow<List<ReservationRecord>> = _myReservations.asStateFlow()
+
+    fun refreshMyReservations() {
+        viewModelScope.launch {
+            seatApi.getMyReservations()
+                .onSuccess { _myReservations.value = it }
+                .onFailure { SeatLog.d(TAG) { "load reservations failed: ${it.message}" } }
+        }
+    }
+
+    /**
+     * 今日剩余可取消次数。
+     *
+     * 服务端没有这个计数（规则写死在说明里：每天 2 次），只能在本地按天记录。
+     * 仅统计**本 App 内**发起的取消，网页端或其他设备的取消不会计入 —— 所以只作提示。
+     */
+    private val cancelPrefs by lazy { appContext.getSharedPreferences("seat_cancels", Context.MODE_PRIVATE) }
+
+    private fun todayKey(): String = java.time.LocalDate.now().toString()
+
+    fun remainingCancelsToday(): Int {
+        val storeDay = cancelPrefs.getString("day", "")
+        if (storeDay != todayKey()) return CANCELS_PER_DAY
+        return (CANCELS_PER_DAY - cancelPrefs.getInt("used", 0)).coerceAtLeast(0)
+    }
+
+    private fun markCancelUsed() {
+        val used = if (cancelPrefs.getString("day", "") == todayKey()) cancelPrefs.getInt("used", 0) else 0
+        cancelPrefs.edit().putString("day", todayKey()).putInt("used", used + 1).apply()
+    }
+
     private val _navigateToSeatMap = MutableStateFlow<Pair<String, String>?>(null)
     val navigateToSeatMap: StateFlow<Pair<String, String>?> = _navigateToSeatMap.asStateFlow()
 
@@ -263,6 +374,7 @@ class SeatViewModel @Inject constructor(
             } else {
                 _seatTreeError.value = treeResult.exceptionOrNull()?.message
                 handleApiError(treeResult.exceptionOrNull())
+                verifySessionOrLogout()
                 return@launch
             }
             val datesResult = seatApi.getSeatDates()
@@ -274,28 +386,49 @@ class SeatViewModel @Inject constructor(
         }
     }
 
-    fun loadSeatsForMap(areaId: String, day: String, segmentId: String = "1", startTime: String = "08:00", endTime: String = "22:30") {
-        val query = SeatQuery(areaId, day, segmentId, startTime, endTime)
-        viewModelScope.launch {
-            _seatMapState.value = _seatMapState.value.copy(isLoading = true, error = null, query = query)
-            val areaName = _seatTree.value.find { it.id == areaId }?.name ?: ""
-            val result = seatApi.getSeats(areaId, segmentId, day, startTime, endTime)
-            if (result.isSuccess) {
-                _seatMapState.value = SeatMapState(seats = result.getOrThrow(), areaName = areaName, isLoading = false, query = query)
-            } else {
-                handleApiError(result.exceptionOrNull())
-                _seatMapState.value = _seatMapState.value.copy(
-                    isLoading = false,
-                    error = result.exceptionOrNull()?.message ?: "加载失败",
-                    query = query
-                )
-            }
+    /**
+     * 用静默认证探一次会话；确认失效就清空 token。
+     *
+     * 为什么需要：**token 失效时，服务端连「无需认证」的接口也会返回 HTTP 500 + 空响应**
+     * （2026-09-18 实测：带失效 token 请求 `/api/Seat/tree` → 500，空 body；
+     * 不带 token 却是 200 + 正常数据）。这种情况下拿不到 10001 业务码，
+     * [handleApiError] 判定不出来，表现就是「新建预约」页只报加载失败、
+     * 而 UI 仍以为已登录、不给重新授权入口。
+     */
+    private suspend fun verifySessionOrLogout() {
+        if (seatApi.token.isEmpty()) return
+        val stillValid = seatSession.authenticateSeatlib().isSuccess
+        if (!stillValid) {
+            SeatLog.w(TAG, "session probe failed, clearing token to surface the auth gate")
+            seatApi.token = ""
+            repository.stopAll("登录已失效，请重新授权座位系统")
         }
+    }
+
+    /**
+     * 按既有查询参数重新加载座位图（取消预约后刷新用）。
+     *
+     * 直接委托 [openSeatMap]：需要重算时段、重取底图、重新标记「我订的座位」，
+     * 否则取消后那张座位仍会显示成「我已预约」。
+     */
+    fun loadSeatsForMap(
+        areaId: String,
+        day: String,
+        segmentId: String = "1",
+        startTime: String = "08:00",
+        endTime: String = "22:30"
+    ) {
+        openSeatMap(areaId, day)
     }
 
     /**
      * 打开座位图。先确保时段数据就绪，再按解析出的时段参数加载座位。
      * 把时段解析放在这里而不是 UI 侧，可以避免 seatDates 尚未加载时用回落值先行请求、导致时段错发。
+     *
+     * 顺带并行取两样东西：
+     * - 区域底图（`/api/seat/map`）——有则用真实房间图渲染
+     * - 我的预约（`/api/index/subscribe`）——用于把「我订的座位」与其他人的预约区分开
+     *   （服务端状态码 `2` 只表示「已预约」，不区分是谁订的）
      */
     fun openSeatMap(areaId: String, day: String) {
         viewModelScope.launch {
@@ -303,16 +436,31 @@ class SeatViewModel @Inject constructor(
             val params = resolveSegmentParams(areaId, day)
             val query = SeatQuery(areaId, day, params.segmentId, params.startTime, params.endTime)
             _seatMapState.value = _seatMapState.value.copy(query = query)
+
+            val imgDeferred = async { seatApi.getSeatMap(areaId) }
+            val mineDeferred = async { seatApi.getMyReservations() }
+
             val areaName = _seatTree.value.find { it.id == areaId }?.name ?: ""
             val result = seatApi.getSeats(areaId, params.segmentId, day, params.startTime, params.endTime)
+
+            val images = imgDeferred.await().getOrNull()
+            val mineIds = mineDeferred.await().getOrNull()
+                ?.filter { it.isActive }
+                ?.map { it.seatId }?.toSet() ?: emptySet()
+
             if (result.isSuccess) {
-                _seatMapState.value = SeatMapState(seats = result.getOrThrow(), areaName = areaName, isLoading = false, query = query)
+                val seats = result.getOrThrow().map { if (it.id in mineIds) it.asMine() else it }
+                _seatMapState.value = SeatMapState(
+                    seats = seats, areaName = areaName, isLoading = false, query = query, images = images
+                )
             } else {
                 handleApiError(result.exceptionOrNull())
+                verifySessionOrLogout()
                 _seatMapState.value = _seatMapState.value.copy(
                     isLoading = false,
                     error = result.exceptionOrNull()?.message ?: "加载失败",
-                    query = query
+                    query = query,
+                    images = images
                 )
             }
         }
@@ -360,12 +508,23 @@ class SeatViewModel @Inject constructor(
         else e?.message ?: "预约失败，未知错误"
     }
 
-    fun addTask(mode: TaskMode, campusName: String, floorName: String, areaName: String, areaId: String, seatNo: String, reserveDate: String) {
+    fun addTask(
+        mode: TaskMode,
+        campusName: String,
+        floorName: String,
+        areaName: String,
+        areaId: String,
+        seatNo: String,
+        reserveDate: String,
+        /** 优先模式的偏好座位（按优先级），留空表示不限 */
+        preferredSeats: List<String> = emptyList(),
+    ) {
         // 单次预约不走任务流：它由 SeatMapScreen.reserveSeat() 直接完成，可以在座位图上精确挑座
         if (mode == TaskMode.SINGLE) return
         repository.add(
             ReservationTask(
                 mode = mode, status = TaskStatus.RUNNING, areaId = areaId, seatNo = seatNo,
+                preferredSeats = preferredSeats,
                 reserveDate = reserveDate, campusName = campusName, floorName = floorName, areaName = areaName
             )
         )
@@ -381,9 +540,22 @@ class SeatViewModel @Inject constructor(
     /** 取消预约。返回 null 表示成功，否则返回错误信息。成功后按当前查看的日期与时段重新加载座位图。 */
     suspend fun cancelReservation(seatId: String): String? {
         val result = seatApi.cancelSeat(seatId)
+        return finishCancel(result)
+    }
+
+    /** 按**预约记录 id** 取消（「我的预约」列表用）。 */
+    suspend fun cancelReservationById(recordId: String): String? {
+        val result = seatApi.cancelReservation(recordId)
+        return finishCancel(result)
+    }
+
+    private suspend fun finishCancel(result: Result<Boolean>): String? {
         if (result.isFailure || result.getOrNull() != true) {
             return result.exceptionOrNull()?.message ?: "取消失败，未知错误"
         }
+        // 规则规定每天限取消 2 次，服务端无计数接口 → 本地按天累计，仅用于提示
+        markCancelUsed()
+        refreshMyReservations()
         val q = _seatMapState.value.query ?: return null
         loadSeatsForMap(
             areaId = q.areaId,

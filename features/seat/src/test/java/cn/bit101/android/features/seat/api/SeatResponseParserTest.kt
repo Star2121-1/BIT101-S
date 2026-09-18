@@ -4,6 +4,7 @@ import cn.bit101.android.features.seat.model.SeatStatus
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -103,9 +104,62 @@ class SeatResponseParserTest {
         assertEquals(listOf("001", "002", "003"), seats.map { it.no })
         assertEquals(SeatStatus.RESERVED, seats[0].status)
         assertEquals(SeatStatus.AVAILABLE, seats[1].status)
-        // 未知状态码按「被占用」处理，而不是当成可约 —— 宁可漏约也不能误约
-        assertEquals(SeatStatus.OCCUPIED, seats[2].status)
+        // 未知状态码按「不可用」处理，而不是当成可约 —— 宁可漏约也不能误约
+        assertEquals(SeatStatus.UNAVAILABLE, seats[2].status)
         assertTrue(seats.all { it.areaId == "3" })
+    }
+
+    @Test
+    fun `server status codes map to the five documented groups`() {
+        // 分组取自官方前端 seat-map.js 挑底图的分支
+        assertEquals(SeatStatus.AVAILABLE, seatStatusOf("1"))
+        listOf("2", "10", "11").forEach { assertEquals("status=$it", SeatStatus.RESERVED, seatStatusOf(it)) }
+        listOf("6", "8", "9").forEach { assertEquals("status=$it", SeatStatus.IN_USE, seatStatusOf(it)) }
+        assertEquals(SeatStatus.LEAVE, seatStatusOf("7"))
+        listOf("3", "4", "5").forEach { assertEquals("status=$it", SeatStatus.UNAVAILABLE, seatStatusOf(it)) }
+        // 空值与未知值都不能被误判成可约
+        assertEquals(SeatStatus.UNAVAILABLE, seatStatusOf(null))
+        assertEquals(SeatStatus.UNAVAILABLE, seatStatusOf(""))
+        assertEquals(SeatStatus.UNAVAILABLE, seatStatusOf("999"))
+    }
+
+    @Test
+    fun `seat map position and status name are parsed from real payload`() {
+        val payload = """
+            [{"id":"656","no":"001","status":"1","status_name":"空闲",
+              "point_x":"69.106880000000004","point_y":"90.193370000000002",
+              "width":"2.4890189999999999","height":"4.4198890000000004"}]
+        """.trimIndent()
+        val seat = parseSeats(JSONArray(payload), areaId = "4").single()
+
+        assertEquals("空闲", seat.statusName)
+        assertTrue("坐标必须能定位", seat.hasMapPosition)
+        assertEquals(69.10688f, seat.pointX!!, 0.001f)
+        assertEquals(4.419889f, seat.height!!, 0.001f)
+    }
+
+    @Test
+    fun `coordinates may be missing and must not break map positioning`() {
+        val payload = """[{"id":"1","no":"001","status":"1"}]"""
+        val seat = parseSeats(JSONArray(payload), areaId = "4").single()
+
+        assertFalse("缺坐标时不应声称可定位", seat.hasMapPosition)
+        assertNull(seat.pointX)
+    }
+
+    @Test
+    fun `seat map images pick the right background per status`() {
+        val images = cn.bit101.android.features.seat.model.SeatMapImages(
+            free = "free.jpg", book = "book.jpg", close = "close.jpg",
+            leave = "leave.jpg", use = "use.jpg"
+        )
+        assertEquals("free.jpg", images.forStatus(SeatStatus.AVAILABLE))
+        assertEquals("book.jpg", images.forStatus(SeatStatus.RESERVED))
+        assertEquals("book.jpg", images.forStatus(SeatStatus.MINE))
+        assertEquals("use.jpg", images.forStatus(SeatStatus.IN_USE))
+        assertEquals("leave.jpg", images.forStatus(SeatStatus.LEAVE))
+        assertEquals("close.jpg", images.forStatus(SeatStatus.UNAVAILABLE))
+        assertTrue(cn.bit101.android.features.seat.model.SeatMapImages().isEmpty)
     }
 
     @Test

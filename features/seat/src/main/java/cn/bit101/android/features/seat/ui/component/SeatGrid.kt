@@ -60,9 +60,9 @@ private fun SeatCell(seat: Seat, isSelected: Boolean, onClick: () -> Unit, modif
             .clip(shape)
             .background(bgColor, shape)
             .border(width = if (isSelected) 2.dp else 1.dp, color = borderColor, shape = shape)
-            // 可约、我已预约的座位都可点：选中「我已预约」才能看到「取消预约」按钮。
-            // 早期只放行 AVAILABLE，导致自己的预约在座位图上无法选中、取消路径不可达。
-            .clickable(enabled = seat.status == SeatStatus.AVAILABLE || seat.status == SeatStatus.RESERVED) { onClick() },
+            // 可约、以及「我已预约」的座位都可点（后者用于取消）。
+            // 其余状态（他人预约 / 在用 / 临时离开 / 暂停使用）不做可点元素，避免误触。
+            .clickable(enabled = seat.status == SeatStatus.AVAILABLE || seat.status == SeatStatus.MINE) { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {

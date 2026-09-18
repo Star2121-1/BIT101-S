@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -22,7 +21,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,16 +33,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.nav.NavDest
+import cn.bit101.android.features.seat.SeatPickMode
 import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.model.SeatTreeNode
 import cn.bit101.android.features.seat.model.TaskMode
-import cn.bit101.android.features.seat.ui.component.CascadingDropdown
 import cn.bit101.android.features.seat.ui.component.ErrorCard
+import cn.bit101.android.features.seat.ui.component.LocationPicker
 import cn.bit101.android.features.seat.ui.component.ModeSelector
+import cn.bit101.android.features.seat.ui.component.PickedSeatRow
+import cn.bit101.android.features.seat.ui.component.SeatColors
 import cn.bit101.android.features.seat.ui.component.rememberNotificationPermissionState
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -65,7 +65,7 @@ fun NewTaskScreen(
     var selectedArea by remember { mutableStateOf<SeatTreeNode?>(null) }
     var reserveDate by remember { mutableStateOf(LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var seatNoInput by remember { mutableStateOf("") }
+    val pickedSeats by viewModel.pickedSeats.collectAsState()
 
     val seatlibReady by viewModel.seatlibReady.collectAsState()
     val availableDays by viewModel.availableDays.collectAsState()
@@ -156,12 +156,20 @@ fun NewTaskScreen(
         } else if (seatTreeError != null) {
             ErrorCard(title = "加载校区信息失败", errorText = seatTreeError!!, onDismiss = { viewModel.clearSeatTreeError() }, modifier = Modifier.fillMaxWidth())
         } else {
-            CascadingDropdown(nodes = treeNodes, selectedCampus = selectedCampus, selectedFloor = selectedFloor, selectedArea = selectedArea,
-                onSelectionChanged = { campusId, floorId, areaId, areaName ->
-                    if (areaId.isNotEmpty()) selectedArea = treeNodes.find { it.id == areaId }
-                    else if (floorId.isNotEmpty()) { selectedFloor = treeNodes.find { it.id == floorId }; selectedArea = null }
-                    else { selectedCampus = treeNodes.find { it.id == campusId }; selectedFloor = null; selectedArea = null }
-                }, modifier = Modifier.fillMaxWidth())
+            LocationPicker(
+                nodes = treeNodes,
+                selectedCampus = selectedCampus,
+                selectedFloor = selectedFloor,
+                selectedArea = selectedArea,
+                onCampusSelected = { campus ->
+                    selectedCampus = campus; selectedFloor = null; selectedArea = null
+                },
+                onFloorSelected = { floor ->
+                    selectedFloor = floor; selectedArea = null
+                },
+                onAreaSelected = { area -> selectedArea = area },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         if (selectedArea != null) {
@@ -175,21 +183,34 @@ fun NewTaskScreen(
                 }
             }
         }
+
+        // 监控 / 优先：座位从**图上点选**，不再要求手打座位号（易错且不知道位置好坏）
         if (selectedMode != TaskMode.SINGLE) {
             Spacer(modifier = Modifier.height(4.dp))
-            OutlinedTextField(
-                value = seatNoInput,
-                onValueChange = { seatNoInput = it },
-                label = { Text(if (selectedMode == TaskMode.MONITOR) "目标座位号（必填）" else "目标座位号（可留空）") },
-                supportingText = {
-                    Text(
-                        if (selectedMode == TaskMode.MONITOR) "座位空出后自动预约该座位"
-                        else "留空则在所选区域内抢最早空出的座位"
-                    )
+            PickedSeatRow(
+                title = if (selectedMode == TaskMode.MONITOR) "目标座位（必选）" else "偏好座位（可选，按顺序抢）",
+                pickedLabels = pickedSeats.mapIndexed { i, seat ->
+                    if (selectedMode == TaskMode.PREFER) "${i + 1}.${seat.no}" else "${seat.no}（${SeatColors.shortLabel(seat.status)}）"
                 },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
+                hint = if (selectedMode == TaskMode.MONITOR) {
+                    "在座位图上点选一个座位 —— 已被占的座位也能选，那正是要等它空出来的目标"
+                } else {
+                    "不选 = 不限座位（区域内谁先空就抢谁）；也可点选多个座位按优先级依次抢"
+                },
+                buttonText = if (selectedMode == TaskMode.MONITOR) "选择目标座位" else "选择偏好座位",
+                onPick = {
+                    val area = selectedArea
+                    if (area == null) {
+                        errorMessage = "请先选择校区、楼层和区域"
+                    } else {
+                        errorMessage = null
+                        viewModel.preparePick(
+                            if (selectedMode == TaskMode.MONITOR) SeatPickMode.MONITOR else SeatPickMode.PREFER
+                        )
+                        viewModel.navigateToSeatMap(areaId = area.id, day = reserveDate)
+                    }
+                },
+                onClear = { viewModel.clearPickedSeats() }
             )
         }
         if (errorMessage != null) { ErrorCard(title = "错误", errorText = errorMessage!!, onDismiss = { errorMessage = null }, modifier = Modifier.padding(top = 4.dp)) }
@@ -198,6 +219,7 @@ fun NewTaskScreen(
             Button(onClick = {
                 if (selectedArea == null) { errorMessage = "请完整选择校区、楼层和区域"; return@Button }
                 errorMessage = null
+                viewModel.resetPick()
                 viewModel.navigateToSeatMap(areaId = selectedArea!!.id, day = reserveDate)
             }, enabled = selectedArea != null && !treeLoading, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
@@ -207,7 +229,9 @@ fun NewTaskScreen(
             Button(onClick = {
                 val area = selectedArea
                 if (area == null) { errorMessage = "请完整选择校区、楼层和区域"; return@Button }
-                if (selectedMode == TaskMode.MONITOR && seatNoInput.isBlank()) { errorMessage = "监控预约需要填写目标座位号"; return@Button }
+                if (selectedMode == TaskMode.MONITOR && pickedSeats.isEmpty()) {
+                    errorMessage = "监控预约需要先在座位图上点选目标座位"; return@Button
+                }
                 errorMessage = null
                 viewModel.addTask(
                     mode = selectedMode,
@@ -215,10 +239,11 @@ fun NewTaskScreen(
                     floorName = selectedFloor?.name ?: "",
                     areaName = area.name,
                     areaId = area.id,
-                    seatNo = seatNoInput.trim(),
+                    seatNo = pickedSeats.firstOrNull()?.no ?: "",
+                    preferredSeats = if (selectedMode == TaskMode.PREFER) pickedSeats.map { it.no } else emptyList(),
                     reserveDate = reserveDate
                 )
-                seatNoInput = ""
+                viewModel.clearPickedSeats()
                 // 通知权限只影响常驻通知是否可见，不影响任务本身，所以先建任务再申请
                 if (!notificationPermission.granted) notificationPermission.request()
                 onTaskCreated()

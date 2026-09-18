@@ -15,27 +15,42 @@ internal object SeatColors {
     val available = Color(0xFF4CAF50)
     val occupied = Color(0xFFF44336)
     val reserved = Color(0xFFFF9800)
+    val inUse = Color(0xFF9C27B0)
+    val leave = Color(0xFF00ACC1)
+    val unavailable = Color(0xFF9E9E9E)
+
+    /** 我订的座位。与「他人的预约」区分开：服务端状态码不区分归属。 */
+    val mine = Color(0xFF2E7D32)
 
     /** 选中态。不属于任何座位状态，是独立的交互高亮。 */
     val selected = Color(0xFF1565C0)
 
     fun of(status: SeatStatus): Color = when (status) {
         SeatStatus.AVAILABLE -> available
-        SeatStatus.OCCUPIED -> occupied
         SeatStatus.RESERVED -> reserved
+        SeatStatus.MINE -> mine
+        SeatStatus.IN_USE -> inUse
+        SeatStatus.LEAVE -> leave
+        SeatStatus.UNAVAILABLE -> unavailable
     }
 
     /** 座位格上的短标签。 */
     fun shortLabel(status: SeatStatus): String = when (status) {
         SeatStatus.AVAILABLE -> "可约"
-        SeatStatus.OCCUPIED -> "占用"
         SeatStatus.RESERVED -> "预约"
+        SeatStatus.MINE -> "我的"
+        SeatStatus.IN_USE -> "在用"
+        SeatStatus.LEAVE -> "离开"
+        SeatStatus.UNAVAILABLE -> "不可用"
     }
 
     /** 图例里的说明文案。 */
     fun legendLabel(status: SeatStatus): String = when (status) {
         SeatStatus.AVAILABLE -> "可预约"
-        SeatStatus.OCCUPIED -> "已被占用"
-        SeatStatus.RESERVED -> "我已预约"
+        SeatStatus.RESERVED -> "已被预约"
+        SeatStatus.MINE -> "我已预约"
+        SeatStatus.IN_USE -> "在用"
+        SeatStatus.LEAVE -> "临时离开"
+        SeatStatus.UNAVAILABLE -> "暂停使用"
     }
 }

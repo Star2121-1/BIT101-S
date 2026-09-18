@@ -173,10 +173,17 @@ class SeatMonitorService : Service() {
             val seats = result.getOrNull().orEmpty()
 
             val target = if (mode == TaskMode.PREFER) {
-                // 优先预约：区域内最早可用的座位；若指定座位号恰好可用则优先它
                 val available = seats.filter { it.status == SeatStatus.AVAILABLE }
                     .sortedWith(compareBy(SeatNumberComparator) { it.no })
-                available.firstOrNull { seatNumberEquals(it.no, task.seatNo) } ?: available.firstOrNull()
+                // 优先预约：有偏好清单就按优先级逐个试；清单为空 = 不限，取最早空出的座位
+                val byPreference = task.preferredSeats.firstNotNullOfOrNull { wanted ->
+                    available.firstOrNull { seatNumberEquals(it.no, wanted) }
+                }
+                byPreference ?: if (task.preferredSeats.isEmpty()) {
+                    available.firstOrNull { seatNumberEquals(it.no, task.seatNo) } ?: available.firstOrNull()
+                } else {
+                    null
+                }
             } else {
                 // 监控预约：只盯指定座位。座位号做补零容错 ——
                 // 服务端返回 "001" 而用户常填 "1"，直接比较会永远匹配不上
@@ -190,6 +197,16 @@ class SeatMonitorService : Service() {
                 )
                 delay(interval)
                 continue
+            }
+            // 该座位已被预约：可能是我自己订到的（服务端状态不区分归属），
+            // 用「我的预约」核对一次，是本人就直接算成功，避免重复下单
+            if (target.status == SeatStatus.RESERVED || target.status == SeatStatus.MINE) {
+                val isMine = seatApi.getMyReservations().getOrNull()
+                    ?.any { it.isActive && it.seatId == target.id } == true
+                if (isMine) {
+                    repository.updateStatus(task.id, TaskStatus.SUCCESS, "该座位已是你的预约（${target.no}）")
+                    return
+                }
             }
             if (target.status != SeatStatus.AVAILABLE) {
                 repository.updateStatus(task.id, TaskStatus.RUNNING, "座位被占，继续监控…")

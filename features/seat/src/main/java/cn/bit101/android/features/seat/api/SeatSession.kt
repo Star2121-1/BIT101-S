@@ -68,6 +68,14 @@ class SeatSession @Inject constructor(
 
         /** phpCAS 内部 code 出现在最终 hash 路由的查询串里。 */
         private val CAS_CODE_REGEX = Regex("""[?&]cas=([A-Za-z0-9.\-]+)""")
+
+        /**
+         * CAS 返回 200（而不是 302）且页面含这些标记时，说明学校要求二次验证。
+         *
+         * 实测：同一账号短时间内多次登录后，即使密码正确也会被要求短信/邮件/扫码
+         * （2026-09-19 凌晨出现，此前同一天内密码直登是通的）。
+         */
+        private val SECOND_FACTOR_MARKERS = listOf("短信验证码", "smsLogin", "邮件验证码", "mailLogin")
     }
 
     /** 静默认证。失败返回 failure，由调用方引导走 WebView 登录。 */
@@ -169,8 +177,14 @@ class SeatSession @Inject constructor(
                 ).execute()
                 val ticketUrl = postRes.header("Location")
                 val postCode = postRes.code
-                postRes.body?.close()
+                val postBody = postRes.body?.string().orEmpty()
+                postRes.close()
                 if (postCode != 302 || ticketUrl.isNullOrEmpty()) {
+                    // 200 + 页面里出现二次验证方式 = 学校要求短信/邮件/扫码（实测会随风控触发，
+                    // 同一账号多次登录后即使密码正确也会被拦），必须给出可区分的提示
+                    if (postCode == 200 && SECOND_FACTOR_MARKERS.any { postBody.contains(it) }) {
+                        throw IOException("学校要求二次验证（短信/邮件/扫码），当前版本不支持，请稍后再试")
+                    }
                     throw IOException("CAS 认证失败（HTTP $postCode），请检查学号密码")
                 }
 
