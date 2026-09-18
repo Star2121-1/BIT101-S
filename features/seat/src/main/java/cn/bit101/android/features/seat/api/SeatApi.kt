@@ -149,7 +149,12 @@ class SeatApi @Inject constructor(
 
     suspend fun confirmSeat(seatId: String, segment: String): Result<Boolean> = withContext(Dispatchers.IO) {
         runCatching {
-            val body = jsonBody(JSONObject().apply { put("seat_id", seatId); put("segment", segment) })
+            // seat_id 必须是数字（服务端按 int 处理；字符串形态未验证通过）
+            val seatIdNum = seatId.toLongOrNull() ?: seatId.trim().toLongOrNull()
+                ?: throw IOException("座位 id 非法: $seatId")
+            val body = jsonBody(
+                JSONObject().apply { put("seat_id", seatIdNum); put("segment", segment) }
+            )
             val json = JSONObject(post("/api/Seat/confirm", body))
             val code = json.intOrZero("code")
             if (code != 1) {
@@ -160,9 +165,18 @@ class SeatApi @Inject constructor(
         }
     }
 
+    /**
+     * 取消预约。
+     *
+     * ⚠️ `/api/Space/cancel` 的参数是**预约记录 id**（`/api/index/subscribe` 里的 `id`），
+     * 不是座位 id —— 传座位 id 恒返回「操作失败」（2026-09-18 真实请求实测：
+     * 预约 3427299 用 seat_id 取消失败，用 `{"id":"3427299"}` 取消成功）。
+     */
     suspend fun cancelSeat(seatId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         runCatching {
-            val body = jsonBody(JSONObject().put("seat_id", seatId))
+            val recordId = findActiveReservationId(seatId)
+                ?: throw IOException("未找到该座位的有效预约记录")
+            val body = jsonBody(JSONObject().put("id", recordId))
             val json = JSONObject(post("/api/Space/cancel", body))
             val code = json.intOrZero("code")
             if (code != 1) {
@@ -171,5 +185,26 @@ class SeatApi @Inject constructor(
             }
             true
         }
+    }
+
+    /**
+     * 在「我的预约」里找某座位当前有效的预约记录 id。
+     *
+     * subscribe 返回的字段：`id`=预约记录、`space`=座位 id、`status`（"2"=未签到有效）。
+     * 优先取未签到的有效记录，否则取该座位的最新一条。
+     */
+    private suspend fun findActiveReservationId(seatId: String): String? {
+        val body = jsonBody(JSONObject().put("type", "1"))
+        val json = JSONObject(post("/api/index/subscribe", body))
+        val data = json.optJSONArray("data") ?: return null
+        var fallback: String? = null
+        for (i in 0 until data.length()) {
+            val item = data.getJSONObject(i)
+            if (item.optString("space") != seatId) continue
+            val id = item.optString("id", "").takeIf { it.isNotEmpty() } ?: continue
+            if (item.optString("status") == "2") return id
+            if (fallback == null) fallback = id
+        }
+        return fallback
     }
 }

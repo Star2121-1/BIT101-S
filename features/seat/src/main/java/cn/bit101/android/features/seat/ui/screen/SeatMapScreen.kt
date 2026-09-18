@@ -214,25 +214,28 @@ fun SeatMapScreen(
                                 Text("取消预约", fontWeight = FontWeight.SemiBold)
                             }
                         }
-                        Button(onClick = {
-                            val seat = selectedSeat
-                            if (seat != null) {
-                                isReserving = true
-                                scope.launch {
-                                    if (!viewModel.ensureSeatlibSession()) {
+                        // 已选中自己的预约时只显示「取消预约」，避免对着已约座位再点预约
+                        if (selectedSeat?.status != SeatStatus.RESERVED) {
+                            Button(onClick = {
+                                val seat = selectedSeat
+                                if (seat != null) {
+                                    isReserving = true
+                                    scope.launch {
+                                        if (!viewModel.ensureSeatlibSession()) {
+                                            isReserving = false
+                                            snackbarHostState.showSnackbar("请在弹出的 WebView 中完成 seatlib 登录，然后重试"); return@launch
+                                        }
+                                        val result = viewModel.reserveSeat(seat.id, segId)
                                         isReserving = false
-                                        snackbarHostState.showSnackbar("请在弹出的 WebView 中完成 seatlib 登录，然后重试"); return@launch
+                                        if (result == null) { snackbarHostState.showSnackbar("预约座位 ${seat.no} 成功！"); selectedSeat = null; onNavigateToTasks() }
+                                        else snackbarHostState.showSnackbar("预约失败: $result")
                                     }
-                                    val result = viewModel.reserveSeat(seat.id, segId)
-                                    isReserving = false
-                                    if (result == null) { snackbarHostState.showSnackbar("预约座位 ${seat.no} 成功！"); selectedSeat = null; onNavigateToTasks() }
-                                    else snackbarHostState.showSnackbar("预约失败: $result")
                                 }
+                            }, enabled = selectedSeat != null && !isReserving, modifier = Modifier.weight(1.5f), shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                                if (isReserving) CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(end = 8.dp))
+                                Text("立即预约", fontWeight = FontWeight.SemiBold)
                             }
-                        }, enabled = selectedSeat != null && !isReserving, modifier = Modifier.weight(1.5f), shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                            if (isReserving) CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(end = 8.dp))
-                            Text("立即预约", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

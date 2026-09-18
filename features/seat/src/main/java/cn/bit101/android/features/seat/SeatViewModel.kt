@@ -204,6 +204,25 @@ class SeatViewModel @Inject constructor(
         return false
     }
 
+    /**
+     * 账号密码直登（纯 HTTP CAS，不经 WebView）。
+     *
+     * 学校 SSO 登录页在 WebView 里不渲染表单（真机/模拟器均复现），
+     * 而纯 HTTP 模拟 CAS 流程已在 JAVA 侧真机验证可用。成功返回 null，失败返回错误信息。
+     */
+    fun loginWithCredentials(username: String, password: String, onDone: (String?) -> Unit) {
+        viewModelScope.launch {
+            seatSession.loginWithCredentials(username.trim(), password)
+                .onSuccess {
+                    seatApi.token = it.token
+                    onAuthSuccess()
+                    _casLoginFlow.value = false
+                    onDone(null)
+                }
+                .onFailure { onDone(it.message ?: "登录失败") }
+        }
+    }
+
     /** CAS 登录页的统一回调：同步 cookie → 静默认证 → 用 ticket 换取。 */
     suspend fun syncAndExchange(ticket: String? = null) {
         SeatLog.d(TAG) {
@@ -301,15 +320,26 @@ class SeatViewModel @Inject constructor(
 
     private data class SegmentParams(val segmentId: String, val startTime: String, val endTime: String)
 
-    /** 解析指定日期的时段参数；若时段数据未加载则先拉取，仍缺失时回落到默认时段。 */
+    /**
+     * 解析指定日期的时段参数。
+     *
+     * ⚠️ 必须按区域 id（build_id=区域）拉取时段：服务端的 times[].id 只在
+     * 传入区域 id 时才非空（2026-09-18 实测：区域 4 → id=355533；不带则恒 null）。
+     * 早期版本「缓存优先」，而缓存来自 loadSeatTree 的无 build_id 调用（id 全空），
+     * 于是永远命中空 id → 回落 "1" → confirm 直接 HTTP 500。
+     * 现在始终按区域拉新，并把结果合并进缓存供 UI 使用。
+     */
     private suspend fun resolveSegmentParams(areaId: String, day: String): SegmentParams {
-        var seg = _seatDates.value.firstOrNull { it.day == day }
+        var seg: SeatDate? = null
+        val r = seatApi.getSeatDates(areaId)
+        if (r.isSuccess) {
+            val fresh = r.getOrThrow()
+            seg = fresh.firstOrNull { it.day == day }
+            val freshDays = fresh.map { it.day }.toSet()
+            _seatDates.value = _seatDates.value.filter { it.day !in freshDays } + fresh
+        }
         if (seg == null) {
-            val r = seatApi.getSeatDates(areaId)
-            if (r.isSuccess) {
-                _seatDates.value = r.getOrThrow()
-                seg = _seatDates.value.firstOrNull { it.day == day }
-            }
+            seg = _seatDates.value.firstOrNull { it.day == day }
         }
         fun String?.usable() = this?.takeIf { it.isNotBlank() && it != "null" }
         return SegmentParams(
@@ -321,8 +351,13 @@ class SeatViewModel @Inject constructor(
 
     suspend fun reserveSeat(seatId: String, segment: String): String? {
         val result = seatApi.confirmSeat(seatId, segment)
-        return if (result.isSuccess && result.getOrNull() == true) null
-        else result.exceptionOrNull()?.message ?: "预约失败，未知错误"
+        if (result.isSuccess && result.getOrNull() == true) return null
+        val e = result.exceptionOrNull()
+        // 会话失效时清空 token 并终止任务，UI 回到登录门禁（否则下次仍拿着死 token 请求）
+        handleApiError(e)
+        return if (e?.message == SeatApi.TOKEN_EXPIRED || e?.cause?.message == SeatApi.TOKEN_EXPIRED)
+            "登录已失效，请重新授权座位系统"
+        else e?.message ?: "预约失败，未知错误"
     }
 
     fun addTask(mode: TaskMode, campusName: String, floorName: String, areaName: String, areaId: String, seatNo: String, reserveDate: String) {

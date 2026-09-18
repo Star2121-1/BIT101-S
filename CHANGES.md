@@ -1,5 +1,42 @@
 # CHANGES
 
+## 2026-09-18 真机联调：打通预约/取消全链路（凭据直登 + 三处服务端契约修正）
+
+**环境**：真机 NP05J（Android 16，校园网内），App 全程无崩溃。
+
+### 新增：账号密码直登（纯 HTTP CAS）
+- 学校 SSO 登录页在 WebView 里不渲染表单（模拟器/真机双端复现：Angular 在跑、页脚渲染，但登录区空白），WebView 路径死结无法在客户端根治
+- 照搬 JAVA 侧已验证方案移植进 `SeatSession.loginWithCredentials()`：
+  GET 登录页取 salt/execution → AES/ECB/PKCS5 加密密码 → 不跟随重定向 POST 表单 → 两跳 302 从 hash 路由取 phpCAS code → `/api/cas/user` 换 JWT
+- **必须用隔离的内存 CookieJar**：共享 jar 里的陈旧 phpCAS 会话会让票据校验走岔（302 到 authserver 登录页）；JAVA 侧可用实现同样是"每次登录清 cookie"
+- `CasLoginScreen` 新增原生凭据表单（默认主路径），WebView 降级为"改用网页登录"
+- 真机实测：直登成功、短信验证码不需要（BIT101 登录才要，CAS 不要）
+
+### 修正：confirm 的 segment 必须是真实时段 id（此前恒 500）
+- `/api/Seat/date` 的 `times[].id` **只在 `build_id=区域id` 时才非空**（实测区域 4 → id=355533；不带/带校区 id 恒 null）
+- 旧代码 `resolveSegmentParams` 缓存优先，而缓存来自无 build_id 的调用（id 全空）→ 永远回落 `"1"` → confirm **HTTP 500**（PHP 对不存在的时段 id 直接崩）
+- 修复：`resolveSegmentParams` 始终按区域拉新并合并缓存；`confirmSeat` 的 seat_id 转 int
+
+### 修正：取消预约要传预约记录 id，不是座位 id
+- 实测：`/api/Space/cancel` 传 seat_id 恒「操作失败」；传 `/api/index/subscribe` 里该预约的 `id` 才成功
+- `cancelSeat()` 改为先查 subscribe（按 `space`==座位 id 匹配，优先 status="2"）再取消
+
+### 修正：取消路径在 UI 上不可达
+- `SeatGrid` 此前只允许点 AVAILABLE 座位 → 「我已预约」选不中 → 取消按钮永远不出现
+- 现在 RESERVED 也可点；选中自己的预约时底部只显示「取消预约」
+
+### 修复：会话失效的自愈闭环
+- `reserveSeat` 失败时调用 `handleApiError`：清 token、终止任务、UI 回到授权门禁；
+  错误文案改为「登录已失效，请重新授权座位系统」（此前把内部信号 `TOKEN_EXPIRED` 直接显示给用户）
+- 真机实测自愈全链路：token 被踢 → 预约报失效 → 门禁出现 → 凭据重授权 → 预约成功
+
+### 真机验证记录（全部通过）
+凭据授权 → token 持久化（重启免登录）→ 座位树/座位图真实数据（图例/剩余 45/55）→
+**真实预约成功**（004，segment=355533）→ **App 内取消成功**（subscribe 链路）→
+**监控任务**（盯 002）：前台服务启动、正确轮询报告「座位被占，继续监控…」、通知渠道
+seat_monitor/seat_result 注册 → 取消任务 → 服务自动停止。
+另实测 seatlib 为**单会话**（同账号他处登录互踢），探测时勿并行登录。
+
 ## 2026-09-18 模拟器联调：修好 CAS 授权链路（部分受阻）
 
 在模拟器上用真实账号把 App 跑起来，把「座」功能一路验证到学校 SSO 登录页。

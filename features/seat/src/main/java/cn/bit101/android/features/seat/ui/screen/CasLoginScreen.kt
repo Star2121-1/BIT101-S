@@ -2,18 +2,25 @@ package cn.bit101.android.features.seat.ui.screen
 
 import android.graphics.Bitmap
 import cn.bit101.android.features.seat.SeatLog
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -21,8 +28,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -77,6 +88,9 @@ fun CasLoginScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     // 页面只加载一次：等布局完成后再 loadUrl（见 update 里的说明）
     var urlLoaded by remember { mutableStateOf(false) }
+    // 学校 SSO 登录页在 WebView 里不渲染表单（真机/模拟器均复现），
+    // 默认走账号密码直登；WebView 作为备选保留。
+    var useWebLogin by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -99,7 +113,8 @@ fun CasLoginScreen(
             errorMessage?.let { msg ->
                 Text("登录失败: $msg", color = Color.Red, modifier = Modifier.padding(16.dp))
             }
-            AndroidView(
+            if (useWebLogin) {
+                AndroidView(
                 // 必须显式占满剩余空间：不给约束时 WebView 首次测量高度为 0，
                 // 布局监听里的「宽高非 0 才加载」条件就永远不成立
                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -192,6 +207,87 @@ fun CasLoginScreen(
                     }
                 }
             )
+            } else {
+                CredentialLoginForm(
+                    viewModel = viewModel,
+                    onUseWeb = { useWebLogin = true },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 账号密码直登表单 —— 走 [SeatViewModel.loginWithCredentials]（纯 HTTP CAS）。
+ *
+ * 这是当前的**主登录路径**：WebView 里的学校 SSO 页面不渲染表单（2026-09-18
+ * 真机/模拟器双端复现，Angular 应用在跑但登录区空白），而纯 HTTP 模拟 CAS
+ * 在 JAVA 侧项目真机实测可用。
+ */
+@Composable
+private fun CredentialLoginForm(
+    viewModel: SeatViewModel,
+    onUseWeb: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = modifier.padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("座位系统授权", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "使用学校统一身份认证（学号 + 密码）直接授权 seatlib，" +
+                "无需跳转网页。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = username,
+            onValueChange = { username = it },
+            label = { Text("学号") },
+            singleLine = true,
+            enabled = !loading,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next),
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("密码") },
+            singleLine = true,
+            enabled = !loading,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            onClick = {
+                loading = true
+                error = null
+                viewModel.loginWithCredentials(username, password) { err ->
+                    loading = false
+                    error = err
+                }
+            },
+            enabled = !loading && username.isNotBlank() && password.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (loading) "授权中…" else "授权座位系统")
+        }
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        TextButton(onClick = onUseWeb, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            Text("改用网页登录")
         }
     }
 }
