@@ -127,6 +127,12 @@ cd F:\Agent_Work\BIT-102\BIT101-seat
 
 ---
 
+## 相关文档
+
+- [docs/seatlib-contract.md](docs/seatlib-contract.md) —— **seatlib 服务端契约与关键发现**（时段 id / 取消参数 / 单会话 / TLS 缺陷等，联调前必读）
+- [ROADMAP.md](ROADMAP.md) —— 路线图与真机验证清单
+- [DEVELOPMENT.md](DEVELOPMENT.md) —— 开发环境与构建细节
+- [CHANGES.md](CHANGES.md) —— 变更记录
 ## 测试状态
 
 | 项目 | 状态 |

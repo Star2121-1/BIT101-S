@@ -1,0 +1,123 @@
+# seatlib 服务端契约与关键发现
+
+> 本文记录 2026-09-17 ~ 09-18 通过**真实请求**（curl / Python / 真机 App）逐项核实的
+> seatlib 行为。所有结论均为实测，非推测；每条都标注了验证方式。
+> 联调或排查问题前先读这份文档——多处行为与直觉相反。
+
+## 1. 接口认证语义
+
+| 接口 | 需要认证 | 未认证时的真实响应 |
+|------|---------|-------------------|
+| `POST /api/Seat/tree` | 否 | 200 + 真实数据 |
+| `POST /api/Seat/date` | 否 | 200 + 真实数据 |
+| `POST /api/Seat/seat` | 否 | 200 + 真实数据 |
+| `POST /api/Seat/confirm` | **是** | **HTTP 200** + `{"code":10001,"message":"您尚未登录"}` |
+| `POST /api/Space/cancel` | **是** | **HTTP 200** + 同上 |
+| `POST /api/cas/user` | — | 200 + `{"code":0,...,"member":[]}`（空数组）；已认证时 `member` 是**对象** |
+
+**要点**：认证失败不是 HTTP 401，而是 200 + 业务码 10001。
+按 `response.code == 401` 判定 token 失效永远不触发（早期版本踩过）。
+App 内的判据：业务码 10001 → `TOKEN_EXPIRED` → 清 token 回门禁。
+
+## 2. 时段 id（segment）—— confirm 恒 500 的根因
+
+- `/api/Seat/date` 的 `times[].id` **只在 `build_id` 传「区域 id」时才非空**：
+  - 实测：区域 3（视听学习空间）→ `id=354438`；区域 4（自然科学图书第一阅览室）→ `id=355533`
+  - 不传 `build_id`、或传校区/楼层 id → `times[].id/start/end` **恒为 null**
+- `/api/Seat/confirm` 的 `segment` 必须是该区域当日的真实时段 id：
+  - 传 `"1"` 等不存在的 id → **HTTP 500（空响应体）**——PHP 直接崩，无错误信息
+  - 传 null / 缺省 → 200 + `{"code":0,"msg":"请选择时段不能为空"}`
+  - 传正确 id → 200 + `{"code":1,"msg":"预约成功~","time":"11:03-22:30","seat":"徐特立馆-三层-… 004"}`
+- `seat_id` 必须是 **int**（字符串形态未验证通过）
+- 官方 h5 前端（`/h5/assets/region.*.js`）的提交格式就是
+  `{seat_id: 座位id, segment: timeList[timeIndex].id}`，与上述一致
+
+## 3. 取消预约 —— 要预约记录 id，不是座位 id
+
+- `/api/Space/cancel` 传 `{"seat_id": ...}` 恒返回 `{"code":0,"msg":"操作失败"}`
+- 正确参数：`{"id": <预约记录id>}`，记录从 `POST /api/index/subscribe`（`{"type":"1"}`）查：
+  每条含 `id`（记录 id）、`space`（座位 id）、`status`（`"2"`=未签到有效）、
+  `no`（座位号）、`areaName`、`beginTime/endTime` 等
+- 实测：预约记录 `3427299` 用 seat_id 取消失败，用 `{"id":"3427299"}` 取消成功
+- subscribe 就是「我的预约」数据源，App 任务列表未来可直接对接
+
+## 4. 字段类型陷阱（org.json 隐式转换会静默出错）
+
+- `type` / `status` 是**字符串** `"1"` / `"2"`（同一响应里 `isValid` 混合字符串与数字）
+- 座位号 `no` 是补零字符串（`"001"`）——用户输入 `"1"` 需按数值等价比较
+  （App 内为 `seatNumberEquals`）
+- `/api/Seat/date` 只返回**今天与明天**两天
+- 座位响应含 `point_x/point_y/width/height`（真实座位图坐标，当前 UI 未用）
+- 树是**嵌套 children** 结构：校区 → 楼层 → 区域（区域 `type="1"`），
+  `parseSeatTree` 递归展平
+
+## 5. 单会话（互踢）
+
+- 同一账号在其他客户端登录 seatlib，**旧会话立即失效**
+- 实测：脚本登录后 App 内预约立刻报 10001 → TOKEN_EXPIRED
+- 推论：**联调时禁止 python 脚本与 App 并行登录同一账号**；
+  用户在网页版登录也会踢掉 App
+
+## 6. CAS 认证（纯 HTTP 流程，WebView 已非必需）
+
+WebView 加载学校 SSO 登录页**不渲染表单**（模拟器 + 真机双端复现：
+Angular 应用在跑、页脚渲染，但登录区空白，页面自身脚本抛错）。
+已在 App 内用纯 HTTP 模拟整条链路（`SeatSession.loginWithCredentials`）：
+
+```
+1. GET  sso.bit.edu.cn/cas/login?service=<urlencode seatlib/api/cas/cas>
+        → 从 HTML 取 <p id="login-croypto">（AES salt）与
+          <p id="login-page-flowkey">（execution）
+2. 密码与 captcha_payload 用 AES/ECB/PKCS5 加密（key = Base64 解码的 salt）
+3. POST 表单（不跟随重定向）：
+   username / password / execution / croypto / captcha_payload /
+   type=UsernamePassword / geolocation="" / captcha_code="" / _eventId=submit
+   → 302 Location = seatlib/api/cas/cas?ticket=ST-xxx
+4. GET  ticket URL → 302 → /api/cas/cas（phpCAS 校验并落会话）
+   GET  /api/cas/cas → 302 → /h5/index.html#/cas/?cas=<32位code>
+5. POST /api/cas/user  {"cas": code}  → member.token 即 JWT
+```
+
+**关键坑**：整个流程必须用**隔离的 CookieJar**（每次登录全量干净）。
+共享 jar 里的陈旧 phpCAS 会话会让第 4 步走岔——302 到
+`login.bit.edu.cn/authserver/login` 而非下发 code。
+
+- CAS 直登**不需要短信验证码**（BIT101 自己的登录才需要）
+- 凭据登录必须先清态：salt/execution 每次都是新的
+
+## 7. TLS 证书链缺陷（服务端配置问题，建议向学校反馈）
+
+- `seatlib.bit.edu.cn` 的服务器**只下发叶证书、不下发中间证书**
+  （openssl verify code 21：unable to verify the first certificate）
+- 同证书同签发者，`login.bit.edu.cn` / `www.bit.edu.cn` 均下发完整 3 张链
+  （叶 → Thawte TLS RSA CA G1 → DigiCert Global Root G2）并验证通过
+  → 是 seatlib 单独的配置缺陷（nginx `ssl_certificate` 漏拼中间证书）
+- 影响：Windows/curl 会按 AIA 自动补链所以能过；**Android 不补链**，
+  任何干净的 Android 客户端（OkHttp、WebView）TLS 握手必失败——
+  这就是早期误判「模拟器连不上 seatlib / 被防火墙封锁」的真相
+- 客户端兜底：`features/seat/res/raw/thawte_tls_rsa_ca_g1.pem`（中间证书，
+  已与学校服务器下发的链密码学比对验证）+
+  `res/xml/network_security_config.xml`（**仅对 seatlib.bit.edu.cn** 追加信任锚）
+
+## 8. 官方前端接口参考
+
+- h5 站点：`seatlib.bit.edu.cn/h5/`（根路径 302 过去）；主包
+  `assets/index.1662019816941.js`，座位业务在 `assets/region.*.js` 与
+  `assets/seat-select.*.js` 等分包
+- `/api/Seat/*` 全家桶（tree/date/seat/confirm）只在 region 分包里；
+  `Space/checkout|cancel|signin|leave` 在主包
+- 值得关注的未用接口：`/api/Seat/qr_book_check`、`/api/Seat/qr_change_seat`、
+  `/api/Seat/touch_qr_books`、`/api/Seminar/*`（研讨间）、`/api/Enter/*`
+- `booking_rules`：每天 6:00 起可预约当日/次日；当日预约需 60 分钟内刷卡签到；
+  未签到记违约 1 次；累计 5 次违约暂停 7 日；每天可取消 2 次
+
+## 9. 联调环境备忘（真机 NP05J / Android 16）
+
+- 校园网内宿主机与模拟器均可达 seatlib（`10.0.11.162:443`）；
+  模拟器内用 `nc -w 5 <ip> 443 < /dev/null` 测连通（ping 不通只是 ICMP 不转发）
+- 真机 logcat 被 ROM 禁用（缓冲区仅 2 行）→ 诊断靠
+  `uiautomator dump`（坐标/文本）+ 截图 + 服务端脚本复现；
+  `dumpsys notification` / `dumpsys activity services` 可用
+- 密码框聚焦触发 FLAG_SECURE，截屏全黑属正常，dump 仍可读文本
+- 复测脚本：`F:/Agent_Work/BIT-102/.workbuddy/tmp_cert/seatlib.py`
+  （登录 + 鉴权头封装，凭据走参数，不含硬编码）
