@@ -236,7 +236,9 @@ private fun ReservationCard(record: ReservationRecord, busy: Boolean, onCancel: 
                 Icon(Icons.Default.Schedule, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
                 Spacer(Modifier.size(4.dp))
                 Text(
-                    "${record.beginTime.take(16)} - ${record.endTime.take(11).takeLast(5)}",
+                    // ⚠️ 不要用固定切片取时间：服务端给的是 `2026-09-19 10:55:00`（结尾还有秒），
+                    // 早期用 `endTime.take(11).takeLast(5)` 会切成「9-19 」这种鬼东西
+                    "${record.beginTime.datePart()} ${record.beginTime.timePart()} - ${record.endTime.timePart()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -355,3 +357,16 @@ private fun TaskStatusBadge(status: TaskStatus) {
         Text(text, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = contentColor, fontWeight = FontWeight.SemiBold)
     }
 }
+
+/**
+ * 服务端时间形如 `2026-09-19 10:55:00`（也可能是 ISO 的 `T` 分隔、或只有日期）。
+ * 按分隔符取而不是按固定下标切 —— 固定切片遇到格式变化会静默切错。
+ */
+private fun String.normalizeTime(): String = replace('T', ' ').trim()
+
+/** `2026-09-19 10:55:00` → `2026-09-19`。 */
+private fun String.datePart(): String = normalizeTime().split(' ').firstOrNull().orEmpty()
+
+/** `2026-09-19 10:55:00` → `10:55`；取不到时分时回落为空串。 */
+private fun String.timePart(): String =
+    normalizeTime().split(' ').getOrNull(1)?.take(5).orEmpty()

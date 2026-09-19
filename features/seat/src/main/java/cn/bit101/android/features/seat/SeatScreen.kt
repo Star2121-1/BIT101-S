@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -38,9 +39,13 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
     val navigateToMap by viewModel.navigateToSeatMap.collectAsState()
     val showCasLogin by viewModel.casLoginFlow.collectAsState()
 
-    navigateToMap?.let { (areaId, day) ->
-        viewModel.clearNavigation()
-        navController.navigate("seat_map/$areaId/$day")
+    // ⚠️ 导航必须放在副作用里。直接在组合期间调用 navController.navigate() 是
+    // Compose 的经典坑：组合可能被打断/重跑，跳转时灵时不灵（表现为「选座按钮点了没反应」）。
+    LaunchedEffect(navigateToMap) {
+        navigateToMap?.let { (areaId, day) ->
+            navController.navigate("seat_map/$areaId/$day")
+            viewModel.clearNavigation()
+        }
     }
 
     if (showCasLogin) {
