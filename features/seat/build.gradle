@@ -58,6 +58,11 @@ dependencies {
     // 座位底图来自服务端（/api/seat/map 给的 1920×1080 图），用 Coil 加载并按状态缓存
     implementation "io.coil-kt:coil-compose:2.5.0"
 
+    // 学校统一身份认证（CAS）用 BIT101 官方库完成登录：它包含风控指纹、CSRF、
+    // URL 加密与短信二次验证的完整实现，比自行拼装可靠得多。库已在 App 内（:api 依赖），
+    // 这里只是让 seat 模块可以直接调用。
+    implementation 'com.github.BIT101-dev.BIT-Login:bit-login:v4.0.2'
+
     // junit 已由根 build.gradle 的 subprojects 块统一加给所有 library 模块。
     // org.json 必须显式提供真实实现：Android SDK 里的 org.json 在单元测试中是空壳，
     // 会让 parseCasUser / serializeTasks 这类纯解析逻辑的测试全部失效。

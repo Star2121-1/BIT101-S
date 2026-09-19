@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -24,6 +25,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +41,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.seat.SeatViewModel
+import cn.bit101.android.features.seat.api.SeatSmsChallenge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -224,6 +227,9 @@ fun CasLoginScreen(
  * 这是当前的**主登录路径**：WebView 里的学校 SSO 页面不渲染表单（2026-09-18
  * 真机/模拟器双端复现，Angular 应用在跑但登录区空白），而纯 HTTP 模拟 CAS
  * 在 JAVA 侧项目真机实测可用。
+ *
+ * 学校在风控触发时会要求**短信二次验证**（密码正确也被拦下）：此时登录流程
+ * 会挂起并通过 [SeatViewModel.smsChallenge] 请求界面输入验证码。
  */
 @Composable
 private fun CredentialLoginForm(
@@ -235,6 +241,7 @@ private fun CredentialLoginForm(
     var password by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val smsChallenge by viewModel.smsChallenge.collectAsState()
 
     Column(
         modifier = modifier.padding(24.dp),
@@ -244,7 +251,7 @@ private fun CredentialLoginForm(
         Text("座位系统授权", style = MaterialTheme.typography.titleLarge)
         Text(
             "使用学校统一身份认证（学号 + 密码）直接授权 seatlib，" +
-                "无需跳转网页。",
+                "无需跳转网页。若学校要求短信验证，会在此处提示输入。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -280,7 +287,13 @@ private fun CredentialLoginForm(
             enabled = !loading && username.isNotBlank() && password.isNotBlank(),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (loading) "授权中…" else "授权座位系统")
+            Text(
+                when {
+                    smsChallenge != null -> "等待短信验证码…"
+                    loading -> "授权中…"
+                    else -> "授权座位系统"
+                }
+            )
         }
         error?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
@@ -290,4 +303,61 @@ private fun CredentialLoginForm(
             Text("改用网页登录")
         }
     }
+
+    // 学校风控触发二次验证时弹出验证码输入框
+    smsChallenge?.let { challenge ->
+        SmsCodeDialog(
+            challenge = challenge,
+            onSubmit = { viewModel.submitSmsCode(it) },
+            onCancel = { viewModel.cancelSmsChallenge() }
+        )
+    }
 }
+
+/**
+ * 短信验证码输入框。
+ *
+ * 提交后不立即关闭：登录流程拿到验证码才继续，失败会重新弹出（重新发起登录即可）。
+ * 这里保持简单 —— 提交即关闭，错误由表单下方的提示呈现。
+ */
+@Composable
+private fun SmsCodeDialog(
+    challenge: SeatSmsChallenge,
+    onSubmit: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var code by remember(challenge) { mutableStateOf("") }
+
+    AlertDialog(
+        // 刻意不响应「点外部 / 返回键」：登录流程正挂起等这个验证码，
+        // 误触（例如按返回键收键盘）会直接取消整次登录。要放弃必须显式点「取消」。
+        onDismissRequest = { },
+        title = { Text("输入短信验证码") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(challenge.hint, style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { input -> code = input.filter { it.isDigit() }.take(8) },
+                    label = { Text("验证码") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.NumberPassword,
+                        imeAction = ImeAction.Done
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSubmit(code) },
+                enabled = code.isNotBlank()
+            ) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("取消") }
+        }
+    )
+}
+

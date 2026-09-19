@@ -7,6 +7,7 @@ import cn.bit101.android.config.user.base.LoginStatus
 import cn.bit101.android.features.seat.api.SeatApi
 import cn.bit101.android.features.seat.api.SeatHttp
 import cn.bit101.android.features.seat.api.SeatSession
+import cn.bit101.android.features.seat.api.SeatSmsChallenge
 import cn.bit101.android.features.seat.api.SeatTaskRepository
 import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.ReservationTask
@@ -95,6 +96,20 @@ class SeatViewModel @Inject constructor(
     val authNotice: StateFlow<String?> = _authNotice.asStateFlow()
 
     fun clearAuthNotice() { _authNotice.value = null }
+
+    /**
+     * 学校要求短信二次验证时的挑战状态。
+     *
+     * 学校在风控触发时会要求二次验证：此时密码正确也会被拦下，需要短信验证码。
+     * 非空即表示「登录流程正挂起等待用户输入」，界面据此弹出输入框。
+     */
+    val smsChallenge: StateFlow<SeatSmsChallenge?> = seatSession.smsChallenge
+
+    /** 界面侧提交验证码，继续挂起中的登录流程。 */
+    fun submitSmsCode(code: String) = seatSession.submitSmsCode(code)
+
+    /** 界面侧放弃本次二次验证。 */
+    fun cancelSmsChallenge() = seatSession.cancelSmsChallenge()
 
     private fun onAuthSuccess() {
         _isLoggedIn.value = true

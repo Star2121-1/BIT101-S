@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,13 +60,27 @@ fun NewTaskScreen(
 ) {
     val treeNodes by viewModel.seatTree.collectAsState()
     val seatTreeError by viewModel.seatTreeError.collectAsState()
-    var selectedMode by remember { mutableStateOf(TaskMode.SINGLE) }
-    var selectedCampus by remember { mutableStateOf<SeatTreeNode?>(null) }
-    var selectedFloor by remember { mutableStateOf<SeatTreeNode?>(null) }
-    var selectedArea by remember { mutableStateOf<SeatTreeNode?>(null) }
-    var reserveDate by remember { mutableStateOf(LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))) }
+    // ⚠️ 表单状态必须用 rememberSaveable：跳去座位图选座再返回时，本页会离开组合，
+    // remember 的状态会被整体丢弃 —— 表现为「选完座位回来，预约模式和已选地点全被重置」，
+    // 于是刚选的座位无处安放、任务也建不出来。
+    // 树节点本身不可序列化，所以只存 id，回来后再从树里查回节点。
+    var selectedModeName by rememberSaveable { mutableStateOf(TaskMode.SINGLE.name) }
+    var reserveDate by rememberSaveable {
+        mutableStateOf(LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")))
+    }
+    var selectedCampusId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedFloorId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedAreaId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    /** 最近一次真正发起加载的日期，用来区分「日期变了要重载」与「只是重新进入页面」。 */
+    var loadedTreeDate by rememberSaveable { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val pickedSeats by viewModel.pickedSeats.collectAsState()
+
+    val selectedMode = TaskMode.values().firstOrNull { it.name == selectedModeName } ?: TaskMode.SINGLE
+    val selectedCampus = treeNodes.find { it.id == selectedCampusId }
+    val selectedFloor = treeNodes.find { it.id == selectedFloorId }
+    val selectedArea = treeNodes.find { it.id == selectedAreaId }
 
     val seatlibReady by viewModel.seatlibReady.collectAsState()
     val availableDays by viewModel.availableDays.collectAsState()
@@ -89,12 +104,27 @@ fun NewTaskScreen(
         }
     }
 
+    // 初始选中日期是**设备本地今天**，而可约日期来自服务端（按北京时间算）。
+    // 设备时区与北京不一致时（模拟器用 UTC 就会落到「昨天」），这个日期既不在选项里、
+    // 服务端也已经不接受，会用无效日期去查座位树 —— 表现为下拉里只剩个别常年开放的区域。
+    // 服务端日期一到就把它拉回第一个可约日期。
+    LaunchedEffect(availableDays) {
+        if (availableDays.isNotEmpty() && reserveDate !in availableDays) {
+            reserveDate = availableDays.first()
+        }
+    }
+
     // isLoggedIn 必须进 key：登录态可能在页面已组合之后才就绪，
-    // 否则 key 不变、副作用不会重跑，座位树就永远不会加载
+    // 否则 key 不变、副作用不会重跑，座位树就永远不会加载。
+    //
+    // ⚠️ 但**只在日期真的变了时才加载并清空已选地点**：从座位图选完座位返回时
+    // 本页会重新进入组合、这个副作用会再跑一次，若无条件清空，用户刚选好的
+    // 校区/楼层/区域（连同选座的前提）就又没了。
     LaunchedEffect(reserveDate, seatlibReady, isLoggedIn) {
-        if (seatlibReady && isLoggedIn) {
+        if (seatlibReady && isLoggedIn && loadedTreeDate != reserveDate) {
             viewModel.loadSeatTree(reserveDate)
-            selectedCampus = null; selectedFloor = null; selectedArea = null
+            selectedCampusId = null; selectedFloorId = null; selectedAreaId = null
+            loadedTreeDate = reserveDate
         }
     }
 
@@ -130,7 +160,7 @@ fun NewTaskScreen(
     Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("新建预约", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(4.dp))
-        ModeSelector(selectedMode = selectedMode, onModeSelected = { selectedMode = it })
+        ModeSelector(selectedMode = selectedMode, onModeSelected = { selectedModeName = it.name })
         Spacer(modifier = Modifier.height(4.dp))
         Text("选择日期", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Row(
@@ -162,12 +192,12 @@ fun NewTaskScreen(
                 selectedFloor = selectedFloor,
                 selectedArea = selectedArea,
                 onCampusSelected = { campus ->
-                    selectedCampus = campus; selectedFloor = null; selectedArea = null
+                    selectedCampusId = campus.id; selectedFloorId = null; selectedAreaId = null
                 },
                 onFloorSelected = { floor ->
-                    selectedFloor = floor; selectedArea = null
+                    selectedFloorId = floor.id; selectedAreaId = null
                 },
-                onAreaSelected = { area -> selectedArea = area },
+                onAreaSelected = { area -> selectedAreaId = area.id },
                 modifier = Modifier.fillMaxWidth()
             )
         }

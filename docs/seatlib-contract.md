@@ -96,6 +96,55 @@ Angular 应用在跑、页脚渲染，但登录区空白，页面自身脚本抛
 - CAS 直登**不需要短信验证码**（BIT101 自己的登录才需要）
 - 凭据登录必须先清态：salt/execution 每次都是新的
 
+### 6.1 学校风控与短信二次验证（2026-09-19 实测，重要）
+
+同一账号**短时间内多次登录后**，即使密码正确，CAS 也不返回 302，而是返回
+**200 + 二次验证选择页**（`current-login-type=smsLogin`，可选短信 / 邮件 / 北理工扫码）。
+这是学校的风控行为，会自行消退，但**客户端必须能处理**——否则用户看到的是
+「密码正确却登录失败」。
+
+页面里可直接读到的字段（决定了实现方式）：
+
+| 元素 id | 含义 | 示例 |
+|---|---|---|
+| `login-page-flowkey` | 二次验证阶段的新 execution | `<uuid>_<base64 JWT>` |
+| `user-id` / `user-object-id` | 平台侧用户 id（取手机号要用它） | `669fd5d4…` |
+| `phone-number` | 绑定手机号（**完整**） | `176****0308` |
+| `user-email-value` | 绑定邮箱 | `112025xxxx@bit.edu.cn` |
+| `captcha-url` | 图形验证码（为空即不需要） | 空 |
+| `riskSystemSwitch` | 风控引擎 | `USTC` |
+
+二次验证的接口契约（取自官方前端 `cas-login-new` 的懒加载 chunk）：
+
+```
+1. POST {sso}/cas/api/protected/sms/getPhoneNumberByUserId
+   body = URL 加密（RSA 公钥 + AES），headers: hasCrypto=true、privateKey=<加密后的 key>
+   → 解出 {tel, maskTel}    ← tel 是后续要用的手机号标识，不是页面上的明文
+2. POST {sso}/cas/api/protected/sms/publicNoToken/sendSmsCode
+   {"phone": tel, "businessNo": "0008"}
+3. POST {sso}/cas/api/protected/sms/checkToken
+   {"phone": tel, "token": <验证码>, "delete": false, "trustDevice": false}
+4. 用**二次验证页的 flowkey** 作为 execution 重新提交登录表单：
+   username / password=<验证码> / type=smsLogin / _eventId=submit /
+   geolocation="" / execution=<flowkey> / captcha_code="" / trustDevice=false
+   → 这次才 302 下发 ticket
+```
+
+**三个踩过的坑**：
+
+1. **`/api/...` 的真实前缀是 `/gate`**（前端 base href = `/gate/public/cas-login-new/`），
+   而 `protected` 类路径要求 **CSRF 头**：`Csrf-Key` = 32 位随机串，
+   `Csrf-Value` = MD5(base64(key) 对半切开再拼回原串)。缺它一律 **401 `Invalid request`**。
+2. **`/linkid/...` 会被前端改写成 `/sso-extend/...`**（拦截器里硬编码的替换列表）。
+3. **风控引擎 USTC 需要指纹**：`POST {sso}/ustc-rba-front/fp`（浏览器指纹 JSON）换
+   `responsetoken`，再作为加密的 `risk_payload` 随登录表单提交。缺指纹会得到
+   **412 / errorCode 60008**——且**换任何参数组合都一样**，这是判断「不是参数问题是前置条件问题」的关键信号。
+
+> 结论：**不要自己拼这套流程**。App 已依赖 `com.github.BIT101-dev.BIT-Login:bit-login:v4.0.2`，
+> 其 `SsoLogin.login(username, password, callbackUrl, smsCodeCallback)` 已实现上述全部
+> （风控指纹、CSRF、URL 加密、二次验证页解析、短信发码与校验）。座位模块直接复用该库，
+> 把 `callbackUrl` 指定为 `https://seatlib.bit.edu.cn/api/cas/cas` 即可。
+
 ## 7. TLS 证书链缺陷（服务端配置问题，建议向学校反馈）
 
 - `seatlib.bit.edu.cn` 的服务器**只下发叶证书、不下发中间证书**
