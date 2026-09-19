@@ -223,13 +223,12 @@ class SeatMonitorService : Service() {
             if (handleAuthError(confirm.exceptionOrNull())) return
             // 带上服务端原因：只写「预约失败」用户无从判断——可能是尚未到 6:00 开抢时间，
             // 也可能是座位被别人抢走或当天取消次数用尽，几种情况的处理方式完全不同。
-            val reason = confirm.exceptionOrNull()?.message
-                ?.replace("预约失败：", "").replace("预约失败: ", "")
-                ?.takeIf { it.isNotBlank() }
-                ?.let { if (it.length > 24) it.take(24) + "…" else it }
+            val reason = confirm.exceptionOrNull()?.message.orEmpty()
+                .replace("预约失败：", "").replace("预约失败: ", "").trim()
+                .let { if (it.length > 24) it.take(24) + "…" else it }
             repository.updateStatus(
                 task.id, TaskStatus.RUNNING,
-                if (reason == null) "预约失败，继续尝试" else "预约失败（$reason），继续尝试"
+                if (reason.isEmpty()) "预约失败，继续尝试" else "预约失败（$reason），继续尝试"
             )
             delay(interval)
         }
