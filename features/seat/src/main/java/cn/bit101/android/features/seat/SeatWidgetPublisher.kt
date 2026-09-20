@@ -2,7 +2,6 @@ package cn.bit101.android.features.seat
 
 import android.content.Context
 import cn.bit101.android.features.seat.api.SeatTaskRepository
-import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.TaskStatus
 import cn.bit101.android.features.seat.model.isActive
 import cn.bit101.android.features.widget.SeatWidgetSnapshot

@@ -126,6 +126,8 @@ features/seat/
 任务执行链路：`SeatViewModel`（加/取消任务）→ `SeatTaskRepository`（状态 + 落盘）
 → `SeatMonitorService`（由任务流驱动，实际轮询）→ 结果通知。
 
+### 桌面小组件（features/widget）
+
 ```
 features/widget/               # 桌面小组件（课程 / DDL / 座位 三页）
 ├── WidgetLogic.kt             # 全部纯逻辑聚合（25 条单测）
