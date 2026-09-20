@@ -79,6 +79,25 @@ data class SeatMapImages(
         SeatStatus.UNAVAILABLE -> close
     }
 
+    /**
+     * 状态 → 图片 URL 的完整映射。
+     *
+     * 供 `SeatMapCanvas` 给**每个座位**挑图用。
+     *
+     * ⚠️ 五张图是**各自完整的房间图**（同一位置在不同图里画不同图标），
+     * 不是互补图层 —— 必须**每座位选一张**，绝不能叠加。详见 `SeatMapCanvas` 抬头说明。
+     */
+    fun byStatus(): Map<SeatStatus, String> = buildMap {
+        free?.let { put(SeatStatus.AVAILABLE, it) }
+        (book)?.let {
+            put(SeatStatus.RESERVED, it)
+            put(SeatStatus.MINE, it)
+        }
+        use?.let { put(SeatStatus.IN_USE, it) }
+        leave?.let { put(SeatStatus.LEAVE, it) }
+        close?.let { put(SeatStatus.UNAVAILABLE, it) }
+    }
+
     val isEmpty: Boolean
         get() = free == null && book == null && close == null && leave == null && use == null
 }

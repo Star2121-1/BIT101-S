@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,29 +42,30 @@ import cn.bit101.android.features.seat.model.SeatStatus
 import kotlin.math.hypot
 
 /**
- * 座位底图视图：**服务端真实房间图（五张状态图叠加） + 按坐标叠热区**。
+ * 座位底图视图：**服务端真实房间图 + 按坐标叠座位状态瓦片 + 热区**。
  *
  * 为什么不用等宽方格：方格看不出房间布局，且 80dp 一格在手机上一屏只放得下 10 个座位。
- * 官方前端（`assets/seat-map.js`）的做法就是取 `/api/seat/map` 的**五张**底图
- * （free/book/close/leave/use），按座位状态各画一张 —— 这里用同一套数据、同样的叠加顺序。
  *
- * ⚠️ 早期只画了 `free` 一张图，结果**除了空闲座位，其它状态的座位在图上完全不存在**
- * （被预约/在用/暂停的座位在 free 图里就是空白），看起来「整个房间全是空闲」，
- * 丢失了最关键的信息。必须五张全叠：每张图只有对应状态的座位是亮的，叠加后才是完整状态。
+ * ⚠️⚠️ **核心机制（曾经理解错，导致「所有座位都显示成临时离开」）**：
+ * `/api/seat/map` 返回的五张图（free/book/close/leave/use）**不是「互补的图层」**，
+ * 而是**五张各自完整的房间图 —— 同一位置在不同图里画的是不同的座位图标**。
+ * 逐像素验证（2026-09-20，区域 4 原图）：
  *
- * ✅ 实测确认（2026-09-20 拉取五张原图逐像素比对）：五张图**底部图例区完全一致**
- * （同坐标同像素值），叠加不会产生重影，直接用服务端自带的那条图例即可，无需自绘。
+ * | 图 | 同一座位位置画的是 |
+ * |---|---|
+ * | `free` | 绿色座位 + 座位号 |
+ * | `book` | 白色文件图标（已预约） |
+ * | `use` | 人坐在座位上（使用中） |
+ * | `leave` | 时钟图标（临时离开） |
+ * | `close` | 黄色座位（暂停使用） |
  *
- * 交互与实现要点：
- * - 底图是 **16:9 的横向房间图**。竖屏下若按宽度贴合，图高只占可视区约 1/3、上下留白巨大；
- *   若纵向铺满又只能看到房间 1/3 宽。初始取 **1.8 倍折中**（见 [initialViewport]）：
- *   图占屏高约 60%、左右仅裁掉约 10%，认路与看细节兼顾，用户可随时捏合调整。
- * - 双指缩放**以双指中心为锚点**（不是左上角）：锚点不动、其它位置按比例扩散，
- *   符合「捏合放大看细节」的直觉。
- * - 点按命中用**坐标换算**，而不是给每个座位放一个可点 Box ——
- *   座位视觉方块只有约 2.5%×4.4%（手机上 10dp 量级），做成可点元素既点不中、
- *   又会被相邻座位抢走事件。
- * - 命中带手指宽容半径（[TAP_SLOP_DP]）：先看落点是否落在矩形内，否则取半径内最近的座位。
+ * 所以正确做法是**每个座位按自己的 status 挑一张图，只显示那一张**（官方前端
+ * `seat-map.js` 就是这么做的：给每个座位一个 div，`background-image` 指向对应图，
+ * 再用 `background-position` 把画面裁剪到该座位那一小块）。
+ *
+ * ❌ 曾经的错误做法：**五张全叠**。以为「每张图只有对应状态的座位是亮的、叠加起来才完整」，
+ * 但真相是每张图都在同一位置画了东西 —— 叠加后**后叠的盖住先叠的**，
+ * 而 `leave` 在最上层，于是**所有座位都变成了时钟（临时离开）**。
  */
 @Composable
 fun SeatMapCanvas(
@@ -126,31 +130,92 @@ fun SeatMapCanvas(
                     transformOrigin = TransformOrigin(0f, 0f)
                 }
         ) {
-            // ── 五张状态底图按固定顺序叠加 ────────────────────────────────
-            // 顺序即视觉优先级：暂停使用垫底（它是房间的「固定不可用」部分），
-            // 空闲、预约、在用依次盖上，临时离开最后（最需要被看到的临时态）。
-            // 服务端每张图里**只有对应状态的座位是亮的**，不叠就看不到那些座位。
+            // ── 底图 + 座位状态瓦片 ────────────────────────────────────────
+            //
+            // 布局刻意分成**两层 Box**、而不是一个 Box 里同时放图和瓦片：
+            //
+            //   外层 Box  → 尺寸 = 一张 16:9 底图的完整尺寸（fillMaxWidth，高度由比例决定）
+            //     ├─ AsyncImage 底图（free 图，铺满整层）
+            //     └─ 每个座位一个 AsyncImage，**只画这一个座位那一小块**
+            //
+            // 这样瓦片的百分比坐标与底图坐标系完全一致，不需要任何额外换算。
+            //
+            // ⚠️ 关键：瓦片用的是「整张图 + 负偏移裁剪」而不是「裁好的小图」——
+            // 和官方前端 `background-position` 的做法等价（见文件抬头说明）。
+            // Compose 里对应 `Alignment`/`ContentScale` 做不到任意偏移裁剪，
+            // 所以改用 `graphicsLayer` 的 `translationX/Y` + 父级 `clipToBounds`：
+            // 把整张图按 (-\pointX, -\pointY) 平移，再裁到瓦片大小，得到的就是那一块。
             if (images != null) {
-                listOfNotNull(
-                    images.close,
-                    images.free,
-                    images.book,
-                    images.use,
-                    images.leave,
-                ).forEach { url ->
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(url)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                // 底图用 free 图：它承载房间轮廓、桌子、地插、图例等全部背景元素
+                // （五张图的非座位区域完全一致，任选一张都行，free 语义最中性）
+                val baseUrl = images.free
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { imageH.toDp() })
+                ) {
+                    if (baseUrl != null) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(baseUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    // 每个座位按其 status 挑图，只显示该座位那一块
+                    val urls = remember(images) { images.byStatus() }
+                    mappable.forEach { seat ->
+                        val url = urls[seat.status] ?: return@forEach
+                        val px = seat.pointX!! / 100f * viewW
+                        val py = seat.pointY!! / 100f * imageH
+                        val pw = seat.width!! / 100f * viewW
+                        val ph = seat.height!! / 100f * imageH
+                        if (pw <= 0f || ph <= 0f) return@forEach
+
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = with(density) { px.toDp() },
+                                    y = with(density) { py.toDp() },
+                                )
+                                .size(
+                                    width = with(density) { pw.toDp() },
+                                    height = with(density) { ph.toDp() },
+                                )
+                                .clipToBounds()
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(url)
+                                    .crossfade(false)
+                                    .build(),
+                                contentDescription = null,
+                                // 整图按座位坐标反向平移 → 当前视窗里露出的正是该座位那一块。
+                                //
+                                // ⚠️ 必须用**显式尺寸**（width/height）而不是 `fillMaxWidth()`：
+                                // `fillMaxWidth` 会解析成**瓦片本身**的宽度约束（只有 pw 那么大），
+                                // 于是整张 1920 宽的图被压进几十像素宽 —— 图标横向严重压扁、
+                                // 还因为相对底图缩放不一致而看起来「错位」。
+                                modifier = Modifier
+                                    .size(
+                                        width = with(density) { viewW.toDp() },
+                                        height = with(density) { imageH.toDp() },
+                                    )
+                                    .graphicsLayer {
+                                        translationX = -px
+                                        translationY = -py
+                                    }
+                            )
+                        }
+                    }
                 }
             }
 
             // ── 盖掉服务端底图自带的「返回 Back」按钮 ──────────────────────
-            // `/api/seat/map` 的五张图里，右下角除了状态图例，还印着官方前端用的
+            // `/api/seat/map` 的图里，右下角除了状态图例，还印着官方前端用的
             // 「返回 Back」按钮图形（图片内容，不可点）。我们的页面已有自己的顶栏返回键，
             // 这个假按钮只会误导用户去点。直接裁图会破坏 16:9 比例，
             // 所以只把按钮那一小块（见 SERVER_BACK_BTN_*）涂成底图底色。
