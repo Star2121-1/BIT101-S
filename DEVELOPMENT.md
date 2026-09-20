@@ -142,8 +142,9 @@ Unresolved reference '鍗?'   （中文字符乱码导致编译失败）
     WorkManager 是为可延迟任务设计的，Doze / App Standby 会把执行推迟到分钟级，秒级抢座会失效
 - Token 过期自动登出：已实现 401 → 清除 session 逻辑，需联调验证
   - ✅ 代码路径已加固（401 一律识别为 `TOKEN_EXPIRED`、token 变化可被 UI 观察、
-    服务侧失效时终止在跑任务并提示重新登录），**真机联调仍待做**
-- ⏳ 全部功能仅经过编译与单元测试验证，**尚未真机联调**（模拟器到不了 seatlib，需真机 + 校园网）
+    服务侧失效时终止在跑任务并提示重新登录）
+- ✅ **真机联调已完成首轮**（2026-09-18/19）：预约 → 取消全链路在真机跑通，
+  全程零崩溃。剩余待验证项见 `ROADMAP.md` 的「真机验证清单」
 
 ---
 
@@ -183,14 +184,15 @@ class SeatViewModel @Inject constructor(
 
 ---
 
-## 测试结果（更新 2026-08-29）
+## 测试结果（更新 2026-09-18）
 
-- 构建：BUILD SUCCESSFUL in 55s
+- 构建：BUILD SUCCESSFUL
 - 真机：PDNP05J000120402（小米手机，Android 16，school WiFi）
 - API 直连 seatlib.bit.edu.cn 在真机上完全正常（HTTP 200）
 - Seat 页面 UI 正常：日期选择、校区下拉、楼层下拉、预约模式选择均工作
 - getSeatTree 返回 34 个节点（徐特立馆+中关村馆完整树）
-- 模拟器：API 无法访问（学校防火墙封锁 TCP 443 到 10.0.0.0/8），需通过真机调试
+- 模拟器：~~API 无法访问（学校防火墙封锁 TCP 443 到 10.0.0.0/8）~~
+  → 该结论已推翻，模拟器可正常访问 seatlib，见下方「已知问题」
 
 ---
 
@@ -198,11 +200,35 @@ class SeatViewModel @Inject constructor(
 
 ### 模拟器网络问题
 
+> ⚠️ **本节结论已被推翻（2026-09-18 实测）**，保留原文仅作对照：
+> 模拟器 `Pixel_6_API_34` 到 `seatlib.bit.edu.cn`（10.0.11.162:443）**TCP 建连成功**，
+> DNS 也能正确解析；对照组（关闭端口、不可达 IP）均超时，结论可信。
+> **模拟器可以用于联调。** 早期「连不上」的真相是
+> **seatlib 服务端 TLS 证书链不完整**（只发叶证书），客户端已加证书兜底，与防火墙无关。
+
 学校防火墙封锁了所有到内网 IP（10.0.0.0/8）的 TCP 443 端口。尝试过：
 - 路由器静态路由：未生效（Windows 防火墙优先）
 - Node.js HTTPS 代理（port 8443）：握手失败（TLS alert）
 
-**结论**：模拟器无法用于 seat 功能调试，必须使用真机 + school WiFi。
+**结论**：~~模拟器无法用于 seat 功能调试，必须使用真机 + school WiFi。~~
+→ 已推翻，见上方说明。
+
+### 构建环境的其他坑（2026-09-20 补记）
+
+- **shell 是 Cygwin**（不是 Git Bash）：盘符前缀必须用 `/cygdrive/c/...`；
+  Android SDK 在 `/cygdrive/c/Users/asus/AppData/Local/Android/Sdk/`。
+  `cmd //c` 不会执行、`taskkill //F` 报「无效参数」—— 杀进程请走 PowerShell
+  （`Stop-Process -Name qemu-system-x86_64 -Force`）。
+- **Gradle 缓存**：`C:\Users\asus\.gradle` 是 Cygwin 的映射盲区（bash 看不到），
+  清理缓存必须用 Windows 原生工具（PowerShell `Remove-Item`）。
+- **模拟器会「卡死成 offline」**：`qemu-system-x86_64` 进程还在，但 `adb shell`
+  全部挂起（`timeout 20 adb shell echo hi` 直接超时）。`adb kill-server` /
+  `adb reconnect offline` 都救不回来，**只能强杀后用 `-no-snapshot-load` 重启**。
+- **启动 Activity 的正确路径**是 `cn.bit101.android.features.MainActivity`
+  （不是 `cn.bit101.android.MainActivity`）；用错会被静默忽略、停在桌面。
+  查法：`adb shell cmd package resolve-activity --brief <包名>`。
+- 应用会把种子数据覆写：注入任务后若前台服务在跑，`RUNNING` 会被真实轮询推进成终态。
+  需要静态 UI 验证时先 `am force-stop` 再注入。
 
 ---
 
