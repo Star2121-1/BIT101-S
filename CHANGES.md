@@ -1,5 +1,37 @@
 # CHANGES
 
+## 2026-09-20 座位图四项体验修复
+
+### 1. 底图改为**五张状态图叠加**（此前只画了 free 一张）
+服务端 `/api/seat/map` 返回五张房间图（free/book/close/leave/use），每张图上**只有对应
+状态的座位是亮的**。早期只渲染了 `free`，导致被预约/在用/暂停的座位在图上完全不存在，
+看起来「整个房间全是空闲」，丢失了最关键的状态信息。
+
+改为按 `close → free → book → use → leave` 顺序叠加。实测（拉取五张原图逐像素比对）：
+**五张图的底部图例区完全一致**（同坐标同像素值），叠加不产生重影，因此**直接使用服务端
+自带的图例**，不再自绘（原先自绘的图例位置与随缩放漂移的服务端图例对不上，屏幕上出现两条）。
+
+### 2. 双指缩放改为**以双指中心为锚点**
+原先 `detectTransformGestures` 只累加 `pan` 与 `scale`，而变换原点是 `TransformOrigin(0,0)`，
+于是无论手指捏在哪里，视觉上都在**以左上角为中心**缩放。
+
+修正：接收 `centroid` 并按锚点不变式重算平移 ——
+记 `p = (centroid - offset) / scale`（变换前的视图坐标），则
+`新 offset = centroid - p × newScale = centroid - (centroid - offset) × realZoom`。
+单指平移时 `realZoom == 1`，退化为纯拖动。另外补上缩放后的平移钳制，避免拖出图外露白。
+
+### 3. 座位图页布局压缩
+| 位置 | 改动 |
+|---|---|
+| 顶栏 | `TopAppBar`（64dp 起）→ 自绘 48dp 栏，省出约 16~20dp |
+| 信息条 | 横向滚动（要左右滑动才看得到「空闲」「换区域」）→ `FlowRow` 自动换行，一屏全显 |
+| 底部操作条 | 从 `Column` 末尾移到 Scaffold 的 `bottomBar` 槽位，紧贴底边 |
+| 座位图区 | `weight(1f)` 撑满可视区；底图纵向铺满、零留白（用户选定） |
+
+### 4. 清理
+- 删除 `SeatColors.legendBackdrop`（自绘图例方案的遗留，已不需要）
+- `SeatMapCanvas` 的 `imageUrl` 参数改为 `images: SeatMapImages?`（叠图需要整组图）
+
 ## 2026-09-19 短信二次验证 + 模拟器端到端复验（M5 收尾）
 
 ### 1. 支持学校短信二次验证（复用官方 BIT-Login 库）

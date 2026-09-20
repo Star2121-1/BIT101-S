@@ -1,10 +1,12 @@
 package cn.bit101.android.features.seat.ui.screen
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -29,8 +31,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -57,7 +57,7 @@ import cn.bit101.android.features.seat.ui.component.SeatGrid
 import cn.bit101.android.features.seat.ui.component.SeatMapCanvas
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SeatMapScreen(
     mainController: MainController,
@@ -100,30 +100,107 @@ fun SeatMapScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        when (pickMode) {
-                            SeatPickMode.RESERVE -> "选择座位"
-                            SeatPickMode.MONITOR -> "选目标座位"
-                            SeatPickMode.PREFER -> "选偏好座位（按优先级）"
-                        }
+            // 顶栏自绘而非用 TopAppBar：默认 64dp 起步，在「内容已很紧」的座位图上
+            // 白占一大条（用户反馈「白字那栏占用比较大」）。这里压到 48dp。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primary)
+                    .statusBarsPadding()
+                    .height(48.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = {
+                    viewModel.resetPick()
+                    onBack()
+                }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        "返回",
+                        tint = MaterialTheme.colorScheme.onPrimary
                     )
-                },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        viewModel.resetPick()
-                        onBack()
-                    }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                }
+                Text(
+                    text = when (pickMode) {
+                        SeatPickMode.RESERVE -> "选择座位"
+                        SeatPickMode.MONITOR -> "选目标座位"
+                        SeatPickMode.PREFER -> "选偏好座位（按优先级）"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
-            )
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        // 底部操作条放 bottomBar 槽位，紧贴底边（放 Column 里会被内容推到半空）
+        bottomBar = {
+            if (isLoggedIn) {
+                if (isPicking) {
+                    PickerBottomBar(
+                        pickedSeats = pickedSeats,
+                        mode = pickMode,
+                        onClear = { viewModel.clearPickedSeats() },
+                        onConfirm = {
+                            if (pickMode == SeatPickMode.MONITOR && pickedSeats.isEmpty()) {
+                                scope.launch { snackbarHostState.showSnackbar("请点选一个要监控的座位") }
+                            } else {
+                                onBack()
+                            }
+                        }
+                    )
+                } else {
+                    ReserveBottomBar(
+                        selectedSeat = selectedSeat,
+                        isBusy = isBusy,
+                        onTasks = onNavigateToTasks,
+                        onCancel = {
+                            val seat = selectedSeat ?: return@ReserveBottomBar
+                            isBusy = true
+                            scope.launch {
+                                if (!viewModel.ensureSeatlibSession()) {
+                                    isBusy = false
+                                    snackbarHostState.showSnackbar("请重新授权座位系统后重试")
+                                    return@launch
+                                }
+                                val err = viewModel.cancelReservation(seat.id)
+                                isBusy = false
+                                if (err == null) {
+                                    snackbarHostState.showSnackbar("已取消座位 ${seat.no}")
+                                    selectedSeat = null
+                                } else {
+                                    snackbarHostState.showSnackbar("取消失败: $err")
+                                }
+                            }
+                        },
+                        onReserve = {
+                            val seat = selectedSeat ?: return@ReserveBottomBar
+                            isBusy = true
+                            scope.launch {
+                                if (!viewModel.ensureSeatlibSession()) {
+                                    isBusy = false
+                                    snackbarHostState.showSnackbar("请重新授权座位系统后重试")
+                                    return@launch
+                                }
+                                val result = viewModel.reserveSeat(seat.id, segId)
+                                isBusy = false
+                                if (result == null) {
+                                    snackbarHostState.showSnackbar(
+                                        "预约座位 ${seat.no} 成功！${signInHintFor(day)}"
+                                    )
+                                    selectedSeat = null
+                                    viewModel.refreshMyReservations()
+                                    onNavigateToTasks()
+                                } else {
+                                    snackbarHostState.showSnackbar("预约失败: $result")
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+        },
         modifier = modifier
     ) { innerPadding ->
         if (!isLoggedIn) {
@@ -151,21 +228,26 @@ fun SeatMapScreen(
         }
 
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            // 信息条：从「大卡片 + 图例行 + 已选行」压缩成一行 chips。
-            // 底图自带图例（服务端在图上画好了），所以不再重复一整套图例。
-            Row(
+            // 信息条：区域 / 时段 / 空闲数 / 换区域。
+            //
+            // ⚠️ 用 FlowRow 换行而不是横向滚动：原先 5 个 chip 排一行，
+            // 手机宽度装不下，用户必须**左右滑动才能看到「空闲」和「换区域」**，
+            // 关键信息被藏在屏幕外。改成自动换行后一屏全显（最多两行，仍比原来省高度）。
+            FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .horizontalScroll(rememberScrollState()),
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 InfoChip(seatState.areaName.ifBlank { "区域 $areaId" }, emphasized = true)
                 InfoChip("$day $startTime-$endTime")
                 InfoChip("空闲 $freeCount/${seatState.seats.size}")
                 if (mineCount > 0) InfoChip("我的 $mineCount")
-                TextButton(onClick = { viewModel.resetPick(); onBack() }) {
+                TextButton(
+                    onClick = { viewModel.resetPick(); onBack() },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
                     Text("换区域", style = MaterialTheme.typography.labelMedium)
                 }
             }
@@ -191,13 +273,13 @@ fun SeatMapScreen(
                         Text("该区域暂无座位数据", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     else -> {
-                        val imageUrl = seatState.images?.forStatus(SeatStatus.AVAILABLE)
                         val selectedIds = if (isPicking) pickedSeats.map { it.id }.toSet()
                         else selectedSeat?.let { setOf(it.id) } ?: emptySet()
-                        if (imageUrl != null && seatState.seats.all { it.hasMapPosition }) {
+                        // 只要有一张可用底图就走叠图路径（五张图按状态各画一层）
+                        if (seatState.images?.isEmpty == false && seatState.seats.all { it.hasMapPosition }) {
                             SeatMapCanvas(
                                 seats = seatState.seats,
-                                imageUrl = imageUrl,
+                                images = seatState.images,
                                 selectedIds = selectedIds,
                                 pickable = pickable,
                                 onSeatTap = { seat ->
@@ -227,69 +309,6 @@ fun SeatMapScreen(
                         }
                     }
                 }
-            }
-
-            if (isPicking) {
-                PickerBottomBar(
-                    pickedSeats = pickedSeats,
-                    mode = pickMode,
-                    onClear = { viewModel.clearPickedSeats() },
-                    onConfirm = {
-                        if (pickMode == SeatPickMode.MONITOR && pickedSeats.isEmpty()) {
-                            scope.launch { snackbarHostState.showSnackbar("请点选一个要监控的座位") }
-                        } else {
-                            onBack()
-                        }
-                    }
-                )
-            } else {
-                ReserveBottomBar(
-                    selectedSeat = selectedSeat,
-                    isBusy = isBusy,
-                    onTasks = onNavigateToTasks,
-                    onCancel = {
-                        val seat = selectedSeat ?: return@ReserveBottomBar
-                        isBusy = true
-                        scope.launch {
-                            if (!viewModel.ensureSeatlibSession()) {
-                                isBusy = false
-                                snackbarHostState.showSnackbar("请重新授权座位系统后重试")
-                                return@launch
-                            }
-                            val err = viewModel.cancelReservation(seat.id)
-                            isBusy = false
-                            if (err == null) {
-                                snackbarHostState.showSnackbar("已取消座位 ${seat.no}")
-                                selectedSeat = null
-                            } else {
-                                snackbarHostState.showSnackbar("取消失败: $err")
-                            }
-                        }
-                    },
-                    onReserve = {
-                        val seat = selectedSeat ?: return@ReserveBottomBar
-                        isBusy = true
-                        scope.launch {
-                            if (!viewModel.ensureSeatlibSession()) {
-                                isBusy = false
-                                snackbarHostState.showSnackbar("请重新授权座位系统后重试")
-                                return@launch
-                            }
-                            val result = viewModel.reserveSeat(seat.id, segId)
-                            isBusy = false
-                            if (result == null) {
-                                snackbarHostState.showSnackbar(
-                                    "预约座位 ${seat.no} 成功！${signInHintFor(day)}"
-                                )
-                                selectedSeat = null
-                                viewModel.refreshMyReservations()
-                                onNavigateToTasks()
-                            } else {
-                                snackbarHostState.showSnackbar("预约失败: $result")
-                            }
-                        }
-                    }
-                )
             }
         }
     }
