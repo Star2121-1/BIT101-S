@@ -169,10 +169,40 @@ Glance 的 UI 无法在 JVM 单测里跑，所以把聚合逻辑全抽进 `Widge
 - [x] `:features:widget:compileDebugKotlin` 通过
 - [x] `WidgetLogicTest` 25/25 通过
 - [x] `:features:seat:compileDebugKotlin` 通过（新增 publisher 后）
-- [ ] `assembleDebug` 全量验证 Hilt 图
-- [ ] 模拟器：桌面长按 → 添加组件 → 能看到 BIT101 组件
-- [ ] 添加后显示今日课程（需先同步过课表）
-- [ ] 点 `›` 切到 DDL 页、再切到座位页；页号在重绘后保留
-- [ ] App 内同步课表后组件内容更新
-- [ ] 杀进程后组件仍能重绘（验证 Holder 未就绪时的空态不崩）
-- [ ] 华为/小米等 ROM 上 WorkManager 是否被限流（已知风险）
+- [x] `assembleDebug` 全量构建成功（Hilt 图 / Manifest 合并）
+- [x] 模拟器：系统识别 provider（`dumpsys appwidget` 有 `BIT101WidgetReceiver`）
+- [x] 模拟器：选择器里显示「BIT101 课程日程 / 4 × 2 / 在桌面查看当日课程、待办 DDL 与座位预约」
+- [x] 模拟器：拖到桌面渲染正常（`●○○` 指示点 + 标题 + `‹ ›` + 「今日无课」）
+- [x] 模拟器：点 `›` 切页生效（`●○○ 课程 今日无课` → `○●○ DDL 暂无待办`）
+- [x] 模拟器：页号跨进程持久（`am force-stop` 后仍是 DDL 页）
+- [x] 模拟器：`WidgetRefreshWorker` 执行结果 SUCCESS
+- [x] 模拟器：全程无崩溃、无 ANR
+- [ ] 真机：厂商 ROM 对 WorkManager 的限流（已知风险）
+- [ ] 真机：跨零点自动换天
+- [ ] 真机：App 内同步课表后组件内容更新
+
+### ⚠️ 手工测试的坑：`am force-stop` 会让组件点击失灵
+
+用 adb 验证时如果执行过 `adb shell am force-stop <包名>`，**该组件上所有点击（含
+翻页按钮）会失效**，且 logcat 里连广播记录都没有 —— 因为 force-stop 使组件
+缓存的 RemoteViews 里那批 `PendingIntent` 作废，而 Launcher 仍在用缓存副本。
+
+这不是代码缺陷（重新绑定组件、或等一次真实重绘即恢复；真实用户极少
+force-stop）。**测组件交互时不要先 force-stop**；若必须，之后要重加组件。
+
+另注：`adb shell uiautomator dump` 读到的组件层级**会滞后于实际渲染**，
+翻页这类验证请以 `screencap` 截图为准，别只看 dump。
+
+### ⚠️ 本机 git 环境的坑（提交前必读）
+
+- **带斜杠的分支名无法用 `git branch` / `git update-ref` 创建**（返回 rc=0 但
+  不写文件），必须先 `mkdir -p .git/refs/heads/feature` 再手工
+  `echo <sha> > .git/refs/heads/feature/<name>`
+- **`git commit` 可能写入提交对象却不更新 ref**：表现为 `git log` 报
+  「your current branch has no commits yet」，但 `git fsck` 能看到
+  `dangling commit <sha>` —— 用该 sha 手工写回 ref 即可
+- 若出现「invalid sha1 pointer / bad object」，说明对象库被清空：
+  `git fetch origin --tags --force` 可从远端恢复（远端有则一定能恢复）
+- 失败的 `git checkout` 可能**清空整个工作区**，`git reset --hard HEAD` 可复原
+  （前提是改动都已提交）
+

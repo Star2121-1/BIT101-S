@@ -1,5 +1,59 @@
 # CHANGES
 
+## 2026-09-20 v1.6.0 桌面小组件（新增 `features/widget`）
+
+上游设想第 3/5 项「通过小组件在桌面显示课程日程」。**新功能，不影响既有页面**。
+
+### 显示内容
+
+三页，右上角 `‹ ›` 翻页 + `● ○ ○` 指示点（Glance 没有 Pager，横向滑动也会被
+桌面手势吃掉，故改用按钮）：
+
+| 页 | 内容 | 空态 |
+|---|------|------|
+| 课程 | 今日课程按节次升序（主行 1 条 + 次行 2 条） | 今日无课 |
+| DDL | 未完成项按到期升序，**已过期的仍显示**并标红 | 暂无待办 |
+| 座位 | 进行中的抢座任务，补已预约记录 | 暂无预约 |
+
+### 架构：单向数据桥，组件不依赖座位模块
+
+`features/widget` **不依赖** `features:seat`；座位侧 `SeatWidgetPublisher`
+主动把「要显示的行」写进 `SeatWidgetSnapshot`（SharedPreferences）。
+收益：组件进程拉起不会连带初始化座位模块的重依赖；没开座位功能时另两页照常。
+
+「尝试 N 次」这类字段怎么解释只有座位模块知道，故组装逻辑留在座位侧。
+
+### 三路刷新
+
+| 途径 | 触发 | 缺陷 |
+|------|------|------|
+| `WidgetUpdater.refresh()` | 业务侧显式调用 | 要求 App 前台跑过 |
+| `WidgetRefreshWorker`（WorkManager 30min） | 跨零点兜底 | 最小 15min，Doze 下可能几小时 |
+| `updatePeriodMillis` | 设为 **0**，不用 | 最小 30min 且不精确 |
+
+### 防住的坑（均有单测）
+
+- 周次按 `[n]` **完整标记**匹配 —— `contains("1")` 会让第 1 周命中 `[11]`/`[21]`
+- 教学周未知时**跳过**周次过滤 —— 宁可多显示，不能显示错的空态（用户会以为没同步）
+- 已过期 DDL 显示「已过期」而非负数剩余时间
+
+### 工程改动
+
+- 新增模块 `features/widget`（Glance 1.1.0 + work-runtime 2.9.0）
+- `app/build.gradle` 显式依赖 `features:widget` 与 `features:seat`
+  （`:features` 用 `implementation` 依赖子模块、不向上传递，而 `App.kt` 需要在
+  `Application.onCreate` 做启动接线）
+- `App.kt` 新增 `WidgetAppStartup.init()` 与 `SeatAppStartup.init()`，均内部容错
+
+### 验证
+
+模拟器实测：provider 注册 → 选择器显示「BIT101 课程日程 4×2」→ 拖到桌面渲染
+正常 → `›` 翻页生效（`●○○`→`○●○`）→ 杀进程后页号保持 → WorkManager 任务
+SUCCESS → 无崩溃无 ANR。单测 25/25，`assembleDebug` 通过。
+详见 [docs/widget.md](docs/widget.md)。
+
+---
+
 ## 2026-09-20 预约任务列表页体验优化（用户选 C 档：连结构一起调整）
 
 用户从三个选项中选定：**连结构一起调整** + 显示**尝试次数与最近尝试时间**

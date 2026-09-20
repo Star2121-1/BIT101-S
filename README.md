@@ -126,6 +126,21 @@ features/seat/
 任务执行链路：`SeatViewModel`（加/取消任务）→ `SeatTaskRepository`（状态 + 落盘）
 → `SeatMonitorService`（由任务流驱动，实际轮询）→ 结果通知。
 
+```
+features/widget/               # 桌面小组件（课程 / DDL / 座位 三页）
+├── WidgetLogic.kt             # 全部纯逻辑聚合（25 条单测）
+├── WidgetRepository.kt        # Room → WidgetLogic 取数
+├── BIT101Widget.kt            # Glance UI + 翻页 ActionCallback + 仓库 Holder
+├── SeatWidgetSnapshot.kt      # 座位 → 组件的单向数据桥
+├── WidgetRefreshWorker.kt     # WorkManager 兜底刷新 + WidgetUpdater
+└── WidgetAppStartup.kt        # Hilt EntryPoint 接线（组件由系统实例化）
+```
+
+⚠️ **`features/widget` 不依赖 `features:seat`** —— 由座位侧
+`SeatWidgetPublisher` 主动把快照写进 `SeatWidgetSnapshot`。这样组件进程拉起
+不会连带初始化座位模块的重依赖，没开座位功能时另两页照常显示。
+Glance 的 API 陷阱与验证清单见 **[docs/widget.md](docs/widget.md)**。
+
 ### 座位图渲染（易踩坑，改动前必读）
 
 `/api/seat/map` 返回的五张图（free/book/close/leave/use）**不是互补图层，
@@ -217,6 +232,7 @@ master（= 可发布状态，随时能打 APK）
 - [docs/seatlib-contract.md](docs/seatlib-contract.md) —— **seatlib 服务端契约与关键发现**
   （时段 id / 取消参数 / 单会话 / TLS 缺陷等，联调前必读）
 - [docs/upstream-feature-plan.md](docs/upstream-feature-plan.md) —— **上游设想的梳理与分支规划**
+- [docs/widget.md](docs/widget.md) —— **桌面小组件**的设计、Glance 陷阱与验证清单
 - [ROADMAP.md](ROADMAP.md) —— 路线图与真机验证清单
 - [DEVELOPMENT.md](DEVELOPMENT.md) —— 开发环境与构建细节
 - [CHANGES.md](CHANGES.md) —— 变更记录

@@ -2,7 +2,7 @@
 
 > 来源：`BIT101-Android`（上游只读参照仓库，`github.com/BIT101-dev/BIT101-Android`，默认分支 `main`）
 > 整理时间：2026-09-20
-> 状态：**调研完成，`feature/widget` 已开工**
+> 状态：**`feature/widget` 已完成并合入 master（v1.6.0）；下一项待选**
 
 ---
 
@@ -144,7 +144,7 @@
 
 ```
 master（= 可发布状态，随时能打 APK）
-  ├── feature/widget              桌面小组件          ← 已开工
+  ├── feature/widget              桌面小组件          ← 已完成，见 docs/widget.md
   ├── feature/schedule-edit       手动课程（覆盖层方案）
   ├── feature/security            Cookie 加密 + 生物识别
   └── feature/map-navigation      地图定位导航（最后做）
@@ -157,7 +157,7 @@ master（= 可发布状态，随时能打 APK）
 - 既有约定在后续所有分支中沿用：`SeatLog` 统一日志出口、
   纯逻辑抽 `*Logic` 便于单测、`testDebugUnitTest` 必须全绿。
 
-### 4.1 分支 A —— `feature/widget`（桌面小组件）← 已开工
+### 4.1 分支 A —— `feature/widget`（桌面小组件）✅ 已完成
 
 **为什么排第一**：唯一一个能独立交付、且用户每天都用得上的功能；
 与座位模块零耦合，不碰任何既有业务逻辑。
@@ -259,8 +259,8 @@ App 内刷新课表后组件同步更新。
 
 | 顺序 | 分支 | 理由 |
 |------|------|------|
-| 1 | `feature/widget` | 最快见效果、零耦合、用户感知最强 —— **已开工** |
-| 2 | `feature/schedule-edit` | 范围已收窄为「手动改课程」，核心是覆盖层设计 |
+| 1 | `feature/widget` | —— ✅ **已完成**（2026-09-20，v1.6.0，见 docs/widget.md） |
+| 2 | `feature/schedule-edit` | ← **下一项**。范围已收窄为「手动改课程」，核心是覆盖层设计 |
 | 3 | `feature/security` | 收益大但风险最高（Cookie 迁移可致全体掉登录态），放后面有回退空间 |
 | 4 | `feature/map-navigation` | 独立栈、难度最高，最后单独攻 |
 | — | ~~「手动添加日程」~~ | **上游已实现，我们已继承，无需再做** |
