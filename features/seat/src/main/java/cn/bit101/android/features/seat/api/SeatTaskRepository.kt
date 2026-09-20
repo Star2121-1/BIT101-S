@@ -107,6 +107,46 @@ class SeatTaskRepository @Inject constructor(
         persist()
     }
 
+    /**
+     * 记一次预约尝试：`attempts + 1`、`lastAttemptAt = 当前时刻`。
+     *
+     * 由 [cn.bit101.android.features.seat.SeatMonitorService] 在每轮轮询真正发出预约请求时调用。
+     * 存在的意义是给 UI 一个「后台还活着」的证据 —— 监控任务可能在系统杀进程、
+     * 退避等待、或网络断开时长时间没有结果，光看「运行中」三个字用户无法判断它是否还在干活。
+     *
+     * ⚠️ 终态任务不再累加（与 [updateStatus] / [cancel] 一致的防护）。
+     */
+    fun markAttempt(id: String) {
+        _tasks.update { tasks ->
+            tasks.map { task ->
+                if (task.id == id && !task.status.isTerminal) {
+                    task.copy(attempts = task.attempts + 1, lastAttemptAt = System.currentTimeMillis())
+                } else task
+            }
+        }
+        persist()
+    }
+
+    /** 清除所有终态（成功 / 失败 / 已取消）任务，返回清除条数。进行中的任务不受影响。 */
+    fun clearFinished(): Int {
+        val before = _tasks.value.size
+        _tasks.update { tasks -> tasks.filterNot { it.status.isTerminal } }
+        val removed = before - _tasks.value.size
+        if (removed > 0) persist()
+        return removed
+    }
+
+    /**
+     * 删除单条任务（长按菜单用）。
+     *
+     * 刻意不做「只能删终态」的限制：用户如果就是想扔掉一个在跑的任务，
+     * 直接删掉也应生效 —— 服务的收集器会发现该任务消失而终止对应协程。
+     */
+    fun remove(id: String) {
+        _tasks.update { tasks -> tasks.filterNot { it.id == id } }
+        persist()
+    }
+
     /** 终止所有在跑的任务并置为失败。用于认证失效这类无法继续的场景。 */
     fun stopAll(reason: String) {
         _tasks.update { tasks ->

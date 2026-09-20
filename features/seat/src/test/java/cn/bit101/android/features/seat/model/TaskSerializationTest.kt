@@ -26,7 +26,10 @@ class TaskSerializationTest {
             campusName = "中关村校区",
             floorName = "2层",
             areaName = "中文图书区",
-            message = "监控中"
+            message = "监控中",
+            createdAt = 1_756_000_000_000L,
+            attempts = 7,
+            lastAttemptAt = 1_756_000_120_000L
         )
 
     @Test
@@ -36,6 +39,28 @@ class TaskSerializationTest {
         val restored = deserializeTasks(serializeTasks(listOf(original)))
 
         assertEquals(listOf(original), restored)
+    }
+
+    @Test
+    fun `liveness fields round trip`() {
+        val original = sample()
+
+        val restored = deserializeTasks(serializeTasks(listOf(original))).single()
+
+        assertEquals(1_756_000_000_000L, restored.createdAt)
+        assertEquals(7, restored.attempts)
+        assertEquals(1_756_000_120_000L, restored.lastAttemptAt)
+    }
+
+    @Test
+    fun `legacy json without liveness fields falls back to zero`() {
+        // 升级前存下的任务没有这三个字段。必须回落 0 而不是抛异常，也不能变成当前时刻 ——
+        // 否则卡片上会显示「已等待 56 年」（由 1970 纪元算出）或凭空多出的等待时间
+        val restored = deserializeTasks("""[{"id":"legacy","mode":"MONITOR","status":"RUNNING"}]""").single()
+
+        assertEquals(0L, restored.createdAt)
+        assertEquals(0, restored.attempts)
+        assertEquals(0L, restored.lastAttemptAt)
     }
 
     @Test

@@ -188,4 +188,108 @@ class SeatTaskRepositoryTest {
 
         assertEquals(TaskStatus.RUNNING, repo.statusOf("1"))
     }
+
+    // ── 存活信息（attempts / lastAttemptAt）────────────────────────────────
+
+    @Test
+    fun `markAttempt increments attempts and stamps the time`() {
+        val repo = repository()
+        repo.add(task("1"))
+
+        repo.markAttempt("1")
+        repo.markAttempt("1")
+
+        val t = repo.tasks.value.single()
+        assertEquals(2, t.attempts)
+        assertTrue("lastAttemptAt 应被写入", t.lastAttemptAt > 0L)
+    }
+
+    @Test
+    fun `markAttempt is ignored for terminal tasks`() {
+        // 与 updateStatus / cancel 一致的防护：任务已经结束了就不该再涨计数，
+        // 否则已结束卡片上会显示一个一直在跳的数字，误导用户以为还在跑
+        val repo = repository()
+        repo.add(task("1"))
+        repo.updateStatus("1", TaskStatus.SUCCESS, "预约成功")
+
+        repo.markAttempt("1")
+
+        assertEquals(0, repo.tasks.value.single().attempts)
+        assertEquals(0L, repo.tasks.value.single().lastAttemptAt)
+    }
+
+    @Test
+    fun `markAttempt on unknown id is a no-op`() {
+        val repo = repository()
+        repo.add(task("1"))
+
+        repo.markAttempt("nope")
+
+        assertEquals(0, repo.tasks.value.single().attempts)
+    }
+
+    // ── 清理 ──────────────────────────────────────────────────────────────
+
+    @Test
+    fun `clearFinished removes only terminal tasks`() {
+        val repo = repository()
+        repo.add(task("running", TaskStatus.RUNNING))
+        repo.add(task("idle", TaskStatus.IDLE))
+        repo.add(task("success", TaskStatus.SUCCESS))
+        repo.add(task("failed", TaskStatus.FAILED))
+        repo.add(task("cancelled", TaskStatus.CANCELLED))
+
+        val removed = repo.clearFinished()
+
+        assertEquals(3, removed)
+        assertEquals(setOf("running", "idle"), repo.tasks.value.map { it.id }.toSet())
+    }
+
+    @Test
+    fun `clearFinished on a list with nothing to remove returns zero`() {
+        val repo = repository()
+        repo.add(task("running", TaskStatus.RUNNING))
+
+        assertEquals(0, repo.clearFinished())
+        assertEquals(1, repo.tasks.value.size)
+    }
+
+    @Test
+    fun `remove deletes a single task regardless of status`() {
+        // 刻意允许删进行中的任务：用户就是想扔掉它，服务的收集器会发现它消失而终止协程
+        val repo = repository()
+        repo.add(task("running", TaskStatus.RUNNING))
+        repo.add(task("done", TaskStatus.SUCCESS))
+
+        repo.remove("running")
+
+        assertEquals(listOf("done"), repo.tasks.value.map { it.id })
+    }
+
+    @Test
+    fun `remove on unknown id leaves the list untouched`() {
+        val repo = repository()
+        repo.add(task("1"))
+
+        repo.remove("nope")
+
+        assertEquals(listOf("1"), repo.tasks.value.map { it.id })
+    }
+
+    @Test
+    fun `cleared tasks are persisted so they do not come back after restart`() = runBlocking {
+        // 清除必须落盘，否则下次冷启动 loadOnce 又会把已删除的任务读回来
+        val store = FakeSeatTaskStore(serializeTasks(listOf(task("done", TaskStatus.SUCCESS))))
+        val repo = SeatTaskRepository(store)
+        repo.loadOnce()
+        assertEquals(1, repo.tasks.value.size)
+
+        repo.clearFinished()
+        // 落盘是异步的（pendingJson 收集器），让出一轮让写入完成
+        repeat(20) { kotlinx.coroutines.delay(10) }
+
+        val restored = SeatTaskRepository(store)
+        restored.loadOnce()
+        assertTrue("清除后重启不应恢复出已结束的任务", restored.tasks.value.isEmpty())
+    }
 }

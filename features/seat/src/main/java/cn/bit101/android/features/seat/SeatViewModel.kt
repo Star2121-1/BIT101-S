@@ -540,7 +540,9 @@ class SeatViewModel @Inject constructor(
             ReservationTask(
                 mode = mode, status = TaskStatus.RUNNING, areaId = areaId, seatNo = seatNo,
                 preferredSeats = preferredSeats,
-                reserveDate = reserveDate, campusName = campusName, floorName = floorName, areaName = areaName
+                reserveDate = reserveDate, campusName = campusName, floorName = floorName, areaName = areaName,
+                // 创建时刻用于卡片上算「已等待多久」，用户据此判断后台任务是否还在跑
+                createdAt = System.currentTimeMillis()
             )
         )
         // 把执行交给前台服务，退到后台 / 锁屏也能继续轮询
@@ -551,6 +553,12 @@ class SeatViewModel @Inject constructor(
         // 只改状态：服务的任务流收集器会发现该任务不再活跃并终止对应协程
         repository.cancel(taskId)
     }
+
+    /** 清除所有已结束（成功/失败/已取消）的任务，返回清除条数。 */
+    fun clearFinishedTasks(): Int = repository.clearFinished()
+
+    /** 删除单条任务。 */
+    fun removeTask(taskId: String) = repository.remove(taskId)
 
     /** 取消预约。返回 null 表示成功，否则返回错误信息。成功后按当前查看的日期与时段重新加载座位图。 */
     suspend fun cancelReservation(seatId: String): String? {

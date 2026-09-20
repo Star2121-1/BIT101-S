@@ -215,6 +215,9 @@ class SeatMonitorService : Service() {
             }
 
             repository.updateStatus(task.id, TaskStatus.RUNNING, "发现空闲座位 ${target.no}，正在预约…")
+            // 记录「尝试了一次」：这是后台服务还活着的直接证据（UI 上显示尝试次数与最近尝试时间）。
+            // 放在 confirmSeat 之前 —— 只要真的发出了预约请求就算一次，无论成败。
+            repository.markAttempt(task.id)
             val confirm = seatApi.confirmSeat(target.id, params.segmentId)
             if (confirm.isSuccess && confirm.getOrNull() == true) {
                 repository.updateStatus(task.id, TaskStatus.SUCCESS, "预约成功，座位 ${target.no}")

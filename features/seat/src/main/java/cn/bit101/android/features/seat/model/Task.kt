@@ -19,6 +19,15 @@ enum class TaskStatus {
 }
 
 /**
+ * 任务是不是「还在进行」。
+ *
+ * 用于列表排序与分组：进行中的必须浮在最上面，终态沉底折叠。
+ * 与 [isTerminal] 互为反面，但语义分开写更好读（一个描述「还会变吗」，一个描述「现在还在跑吗」）。
+ */
+val TaskStatus.isActive: Boolean
+    get() = this == TaskStatus.IDLE || this == TaskStatus.RUNNING
+
+/**
  * 终态：不会再发生变化的任务状态。
  *
  * 存在意义是防止「已结束的任务被改回运行中」：认证失效时仓储会把在跑的任务一次性置为
@@ -49,7 +58,28 @@ data class ReservationTask(
     val campusName: String = "",
     val floorName: String = "",
     val areaName: String = "",
-    val message: String = ""
+    val message: String = "",
+    /**
+     * 任务创建时刻（epoch millis）。
+     *
+     * 用于在卡片上显示「已等待多久」—— 监控/优先任务是后台长跑，用户最想知道
+     * 「它到底还在不在干活」。0 表示未知（老数据缺字段），UI 侧会隐藏该行。
+     */
+    val createdAt: Long = 0L,
+    /**
+     * 已尝试预约的次数（每次轮询真正发出预约请求算一次）。
+     *
+     * 这是「后台还活着」最直接的证据：数字在涨 = 服务在跑。
+     * 老数据缺字段时回落 0。
+     */
+    val attempts: Int = 0,
+    /**
+     * 最近一次尝试的时刻（epoch millis）。0 表示还没尝试过 / 老数据缺字段。
+     *
+     * 与 [attempts] 配合：次数不动 + 最近尝试很旧 → 服务可能已被系统杀掉，
+     * 用户可以据此判断要不要重开。
+     */
+    val lastAttemptAt: Long = 0L
 )
 
 // ---------- 持久化：任务列表 <-> JSON（供 SeatTaskStore 使用） ----------
@@ -69,6 +99,9 @@ fun ReservationTask.toJson(): JSONObject = JSONObject().apply {
     put("floorName", floorName)
     put("areaName", areaName)
     put("message", message)
+    put("createdAt", createdAt)
+    put("attempts", attempts)
+    put("lastAttemptAt", lastAttemptAt)
 }
 
 /** 反序列化单个任务；未知枚举值回落到安全的默认值，避免脏数据导致崩溃。 */
@@ -88,7 +121,12 @@ fun JSONObject.toReservationTask(): ReservationTask = ReservationTask(
     campusName = optString("campusName"),
     floorName = optString("floorName"),
     areaName = optString("areaName"),
-    message = optString("message")
+    message = optString("message"),
+    // 老数据没有这三个字段：optLong/optInt 缺省回落 0，UI 侧据此隐藏相应行，
+    // 不会出现「1970 年」这种鬼时间
+    createdAt = optLong("createdAt", 0L),
+    attempts = optInt("attempts", 0),
+    lastAttemptAt = optLong("lastAttemptAt", 0L)
 )
 
 /** 序列化任务列表；失败时返回空串（调用方按「无任务」处理，不覆盖已有内容需自行判断）。 */
