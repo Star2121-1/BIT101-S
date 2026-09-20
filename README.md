@@ -186,10 +186,37 @@ CAS 响应解析（含 `member` 为对象/数组两种形态）。
 
 ---
 
+## 分支开发流程
+
+本仓库已启用「**一个较大功能模块 = 一个分支**」的流程：
+
+```
+master（= 可发布状态，随时能打 APK）
+  ├── feature/widget              桌面小组件
+  ├── feature/schedule-edit       手动日程 + 手动课程（覆盖层方案）
+  ├── feature/security            Cookie 加密 + 生物识别
+  └── feature/map-navigation      地图定位导航（最后做）
+```
+
+约定：
+
+- 分支**独立完成、独立验证**（编译 + 单测 + 模拟器/真机实测）后合回 `master`。
+- 合并前在 `master` 打 tag 作为回退点（当前基线为 `v1.5.3`）。
+- **版本号只在合并回 `master` 时改**（根 `build.gradle` 的 `versions` 块），
+  分支内不动 —— 避免多分支并行时冲突。
+- 座位模块的既有约定在后续所有开发中沿用：`SeatLog` 统一日志出口、
+  纯逻辑抽 `*Logic` 便于单测、`testDebugUnitTest` 必须全绿。
+
+各分支的详细设计、可行性评估与执行顺序见
+**[docs/upstream-feature-plan.md](docs/upstream-feature-plan.md)**。
+
+---
+
 ## 相关文档
 
 - [docs/seatlib-contract.md](docs/seatlib-contract.md) —— **seatlib 服务端契约与关键发现**
   （时段 id / 取消参数 / 单会话 / TLS 缺陷等，联调前必读）
+- [docs/upstream-feature-plan.md](docs/upstream-feature-plan.md) —— **上游设想的梳理与分支规划**
 - [ROADMAP.md](ROADMAP.md) —— 路线图与真机验证清单
 - [DEVELOPMENT.md](DEVELOPMENT.md) —— 开发环境与构建细节
 - [CHANGES.md](CHANGES.md) —— 变更记录
