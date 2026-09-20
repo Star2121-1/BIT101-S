@@ -68,12 +68,19 @@ class SeatTaskRepository @Inject constructor(
         if (loaded) return@withLock
         val restored = deserializeTasks(store.tasks.get())
         loaded = true
-        if (restored.isEmpty()) return@withLock
+        if (restored.isEmpty()) {
+            // 存储为空，但内存里可能已有先到的任务（add 早于 loadOnce）：
+            // 标记载入完成后必须补一次落盘，否则这些任务只活在内存里。
+            persist()
+            return@withLock
+        }
         // 合并而非覆盖：载入期间可能已有新任务被加入内存
         _tasks.update { current ->
             if (current.isEmpty()) restored
             else current + restored.filterNot { r -> current.any { it.id == r.id } }
         }
+        // 合并结果回写，让「磁盘上的旧任务 + 内存里的新任务」成为新的持久化基线
+        persist()
     }
 
     fun add(task: ReservationTask) {
@@ -112,7 +119,20 @@ class SeatTaskRepository @Inject constructor(
         persist()
     }
 
+    /**
+     * 把当前内存列表排入落盘队列。
+     *
+     * ⚠️ **未载入时直接跳过**：`loadOnce()` 之前内存里只有本次进程刚新增的任务，
+     * 此时写盘会用「不完整的内存列表」把存储里已有的历史任务整片抹掉 ——
+     * 之后 `loadOnce()` 读回来自然就只剩新任务了。
+     *
+     * 这是真实缺陷（不是测试洁癖）：`add()` 与 `loadOnce()` 可能来自不同协程
+     * （ViewModel 建任务 / 服务恢复任务），谁先跑到并不确定。
+     * 跳过不写盘是安全的 —— `loadOnce()` 完成后会由后续的 `persist()` 补齐，
+     * 且载入本身不会丢内存里的任务（见 [loadOnce] 的合并逻辑）。
+     */
     private fun persist() {
+        if (!loaded) return
         pendingJson.value = serializeTasks(_tasks.value)
     }
 }

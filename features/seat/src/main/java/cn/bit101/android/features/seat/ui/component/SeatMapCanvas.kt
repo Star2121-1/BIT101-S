@@ -9,9 +9,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -26,19 +25,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import androidx.core.graphics.drawable.toBitmap
+import coil.imageLoader
 import coil.request.ImageRequest
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatMapImages
 import cn.bit101.android.features.seat.model.SeatStatus
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.hypot
 
 /**
@@ -132,83 +142,47 @@ fun SeatMapCanvas(
         ) {
             // ── 底图 + 座位状态瓦片 ────────────────────────────────────────
             //
-            // 布局刻意分成**两层 Box**、而不是一个 Box 里同时放图和瓦片：
+            // 布局刻意分成**两层**：底图画在一张 Canvas 上，座位瓦片画在同一张
+            // Canvas 的后续绘制里（不是每个座位一个 composable）。
             //
-            //   外层 Box  → 尺寸 = 一张 16:9 底图的完整尺寸（fillMaxWidth，高度由比例决定）
-            //     ├─ AsyncImage 底图（free 图，铺满整层）
-            //     └─ 每个座位一个 AsyncImage，**只画这一个座位那一小块**
+            // ⚠️⚠️ 为什么**不用「每座位一个 AsyncImage」**（曾这么做，引入 ANR）：
+            // 一个区域常有 100+ 座位，每座位一个 `AsyncImage` 意味着
+            //   · 100+ 个 composable 节点 + 100+ 个 graphicsLayer/clipToBounds
+            //   · 100+ 次网络请求（每次都是同一张 1920×1080 的大图）
+            //   · 100+ 份 1920×1080 解码位图常驻（单份 ARGB_8888 约 8MB）
+            // 实测 103 座位区域进入时**主线程阻塞 5 秒触发 ANR**。
             //
-            // 这样瓦片的百分比坐标与底图坐标系完全一致，不需要任何额外换算。
-            //
-            // ⚠️ 关键：瓦片用的是「整张图 + 负偏移裁剪」而不是「裁好的小图」——
-            // 和官方前端 `background-position` 的做法等价（见文件抬头说明）。
-            // Compose 里对应 `Alignment`/`ContentScale` 做不到任意偏移裁剪，
-            // 所以改用 `graphicsLayer` 的 `translationX/Y` + 父级 `clipToBounds`：
-            // 把整张图按 (-\pointX, -\pointY) 平移，再裁到瓦片大小，得到的就是那一块。
+            // 正确做法（也是官方前端的做法）：**每个状态只取一张图**（最多 5 张），
+            // 下载/解码各一次，然后在 Canvas 上逐座位做 `drawImage` 的
+            // `srcOffset/srcSize` 裁剪 —— 一次性画完，无额外节点、无重复解码。
             if (images != null) {
                 // 底图用 free 图：它承载房间轮廓、桌子、地插、图例等全部背景元素
                 // （五张图的非座位区域完全一致，任选一张都行，free 语义最中性）
-                val baseUrl = images.free
+                val bitmaps = rememberLoadedSeatMaps(images)
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(with(density) { imageH.toDp() })
                 ) {
-                    if (baseUrl != null) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(baseUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    // 每个座位按其 status 挑图，只显示该座位那一块
                     val urls = remember(images) { images.byStatus() }
-                    mappable.forEach { seat ->
-                        val url = urls[seat.status] ?: return@forEach
-                        val px = seat.pointX!! / 100f * viewW
-                        val py = seat.pointY!! / 100f * imageH
-                        val pw = seat.width!! / 100f * viewW
-                        val ph = seat.height!! / 100f * imageH
-                        if (pw <= 0f || ph <= 0f) return@forEach
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val cw = size.width
+                        val ch = size.width * IMAGE_BASE_HEIGHT / IMAGE_BASE_WIDTH
 
-                        Box(
-                            modifier = Modifier
-                                .offset(
-                                    x = with(density) { px.toDp() },
-                                    y = with(density) { py.toDp() },
-                                )
-                                .size(
-                                    width = with(density) { pw.toDp() },
-                                    height = with(density) { ph.toDp() },
-                                )
-                                .clipToBounds()
-                        ) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(url)
-                                    .crossfade(false)
-                                    .build(),
-                                contentDescription = null,
-                                // 整图按座位坐标反向平移 → 当前视窗里露出的正是该座位那一块。
-                                //
-                                // ⚠️ 必须用**显式尺寸**（width/height）而不是 `fillMaxWidth()`：
-                                // `fillMaxWidth` 会解析成**瓦片本身**的宽度约束（只有 pw 那么大），
-                                // 于是整张 1920 宽的图被压进几十像素宽 —— 图标横向严重压扁、
-                                // 还因为相对底图缩放不一致而看起来「错位」。
-                                modifier = Modifier
-                                    .size(
-                                        width = with(density) { viewW.toDp() },
-                                        height = with(density) { imageH.toDp() },
-                                    )
-                                    .graphicsLayer {
-                                        translationX = -px
-                                        translationY = -py
-                                    }
-                            )
+                        // ① 先铺底图（free）
+                        bitmaps[SeatStatus.AVAILABLE]
+                            ?.let { drawImageFit(it, cw, ch) }
+
+                        // ② 再按状态逐座位裁一块贴上去
+                        mappable.forEach { seat ->
+                            val bmp = bitmaps[seat.status] ?: return@forEach
+                            val x = seat.pointX!! / 100f * cw
+                            val y = seat.pointY!! / 100f * ch
+                            val w = seat.width!! / 100f * cw
+                            val h = seat.height!! / 100f * ch
+                            if (w <= 0f || h <= 0f) return@forEach
+                            drawSeatTile(bmp, x, y, w, h, cw, ch)
                         }
                     }
                 }
@@ -304,6 +278,88 @@ fun SeatMapCanvas(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.TopCenter).padding(8.dp)
+            )
+        }
+    }
+}
+
+/**
+ * 把服务端的五张状态图各自下载/解码**一次**，返回「状态 → 位图」。
+ *
+ * ⚠️ 这是修 ANR 的关键：早期给每个座位建一个 `AsyncImage`，103 个座位就是 103 次
+ * 请求 + 103 份 1920×1080 解码位图，主线程直接卡死 5 秒。改为在这里**按状态去重**后，
+ * 最多只有 5 张图、5 次请求、5 份位图，后续全部复用。
+ *
+ * 用 Coil 的 `ImageLoader.execute` 而不是 `AsyncImage`：我们要拿到 `ImageBitmap`
+ * 交给 Canvas 绘制，而不是让 Coil 自己去渲染一个 composable。
+ *
+ * 加载失败（或预览环境）时该状态对应 `null`，绘制阶段会跳过该状态 —— 底图仍是 free 图，
+ * 不会整片空白。
+ */
+@Composable
+private fun rememberLoadedSeatMaps(images: SeatMapImages): Map<SeatStatus, ImageBitmap> {
+    val context = LocalContext.current
+    val loader = context.imageLoader
+
+    // 预览环境（Android Studio）里没有真实网络，直接给空表，避免组合期网络请求
+    if (LocalInspectionMode.current) return emptyMap()
+
+    val byStatus = remember(images) { images.byStatus() }
+
+    return produceState(initialValue = emptyMap(), byStatus) {
+        val loaded = withContext(Dispatchers.IO) {
+            byStatus.mapValues { (_, url) ->
+                runCatching {
+                    val request = ImageRequest.Builder(context)
+                        .data(url)
+                        .allowHardware(false) // Canvas 绘制需读像素，禁用硬件位图更稳
+                        .build()
+                    loader.execute(request).drawable?.toBitmap()?.asImageBitmap()
+                }.getOrNull()
+            }.filterValues { it != null }.mapValues { it.value!! }
+        }
+        value = loaded
+    }.value
+}
+
+/** 把一张服务端图按「铺满 (cw, ch) 的 16:9 区域」绘制（服务端图恒 1920×1080，即 1:1 铺满）。 */
+private fun DrawScope.drawImageFit(bmp: ImageBitmap, cw: Float, ch: Float) {
+    drawImage(
+        image = bmp,
+        srcOffset = IntOffset.Zero,
+        srcSize = IntSize(bmp.width, bmp.height),
+        dstOffset = IntOffset.Zero,
+        dstSize = IntSize(cw.toInt(), ch.toInt()),
+    )
+}
+
+/**
+ * 从整张状态图里裁出**该座位那一小块**，贴到 `(x, y)`。
+ *
+ * 等价于官方前端的 `background-image` + `background-position: -px -py` ——
+ * 目标是「让整图按 (x, y) 对齐到左上角后，只露出座位那一个矩形」。
+ *
+ * 实现上用 `translate(-x, -y)` 把整图挪到目标位置，再用 `clipRect` 圈出座位矩形，
+ * 最后按整图尺寸（`cw × ch`）铺满绘制。**不能**直接把 dstSize 设成座位大小 ——
+ * 那会把整张图压进几十像素里（图标横向压扁，就是曾经的次生 bug）。
+ */
+private fun DrawScope.drawSeatTile(
+    bmp: ImageBitmap,
+    x: Float,
+    y: Float,
+    w: Float,
+    h: Float,
+    cw: Float,
+    ch: Float,
+) {
+    withTransform({ translate(-x, -y) }) {
+        clipRect(x, y, x + w, y + h) {
+            drawImage(
+                image = bmp,
+                srcOffset = IntOffset.Zero,
+                srcSize = IntSize(bmp.width, bmp.height),
+                dstOffset = IntOffset.Zero,
+                dstSize = IntSize(cw.toInt(), ch.toInt()),
             )
         }
     }
