@@ -53,9 +53,9 @@ import kotlin.math.hypot
  * （同坐标同像素值），叠加不会产生重影，直接用服务端自带的那条图例即可，无需自绘。
  *
  * 交互与实现要点：
- * - 底图是 **16:9 的横向房间图**。竖屏下宽度铺满后高度只占可视区约六成，上下留白是
- *   图片比例决定的必然结果（不是布局 bug）。初始让**整张图完整可见**并垂直居中，
- *   用户能看到房间轮廓与所选座位的相对位置 —— 底图的核心价值就是「认路」。
+ * - 底图是 **16:9 的横向房间图**。竖屏下若按宽度贴合，图高只占可视区约 1/3、上下留白巨大；
+ *   若纵向铺满又只能看到房间 1/3 宽。初始取 **1.8 倍折中**（见 [initialViewport]）：
+ *   图占屏高约 60%、左右仅裁掉约 10%，认路与看细节兼顾，用户可随时捏合调整。
  * - 双指缩放**以双指中心为锚点**（不是左上角）：锚点不动、其它位置按比例扩散，
  *   符合「捏合放大看细节」的直觉。
  * - 点按命中用**坐标换算**，而不是给每个座位放一个可点 Box ——
@@ -101,14 +101,14 @@ fun SeatMapCanvas(
             if (initialized || mappable.isEmpty() || viewW <= 0f || viewH <= 0f) return@LaunchedEffect
             initialized = true
 
-            // 初始缩放：**整张底图完整可见**并垂直居中。
+            // 初始视口：折中缩放 1.8 倍，图与视口双向居中（详见 initialViewport）。
             //
-            // 底图是 16:9（1920×1080）横图，竖屏可视区偏竖长，所以只能按**宽度**贴合
-            // （即 scale = 1，`imageH` 本就是这个比例下的自然高度），
-            // 高度方向必然留下上下留白 —— 这是图片比例决定的，不是布局缺陷。
-            // 曾按「纵向铺满、无留白」做过一版（用户先选了这个），实测反而更差：
-            // 图被放大到横向只能看到房间约 79%，认路时要一直左右拖，
-            // 且一进门就是放大态、失去整体空间感。改回整图可见。
+            // 演进过程（三轮，均依用户实测反馈）：
+            //   1. 原版 scale=1 贴宽度 → 16:9 横图在竖屏只占 1/3 高，上下留白约 620px，
+            //      图像「漂在灰底上」，用户反馈「布局有点奇怪」。
+            //   2. 改成纵向铺满（约 3 倍）→ 留白没了，但横向只能看到房间约 1/3 宽，
+            //      认路要一直左右拖，用户看后否决。
+            //   3. 回到整图可见 → 用户仍觉得奇怪（图太小），最终选定 1.8 倍折中。
             val init = initialViewport(viewW, viewH)
             scale = init.scale
             offsetX = init.offsetX
@@ -262,17 +262,27 @@ private fun distancePx(
 internal data class ViewportState(val scale: Float, val offsetX: Float, val offsetY: Float)
 
 /**
- * 初始视口：**整张底图完整可见**（按宽度贴合，故 `scale == 1`），垂直居中、水平贴左。
+ * 初始视口：折中缩放 [INITIAL_SCALE]（1.8 倍），图与视口**双向居中**。
  *
- * 底图恒为 16:9 横图，竖屏可视区更高，所以高度方向必然留白 —— 这是比例决定的。
- * `offsetY` 取负值（图比视口矮时）表示向下平移去做居中。
+ * 为什么不是 `scale = 1`（整图可见）：
+ * 底图恒为 16:9 横图，在竖屏上按宽度贴合时图高只占可视区约 **1/3**，
+ * 上下各留白近 620px（模拟器 1080×2400 实测），看起来像一张小图漂在灰底上。
+ * 折叠后的折中：放大到 1.8 倍，图占屏高约 60%、上下留白各降到约 250px，
+ * 横向只裁掉约 10%（1080×1.8=1944 vs 视口 1080，左右各裁 432px，
+ * 房间左右两侧本来就是纯色的「墙」，主体座位区完整保留）。
+ * 认路与看细节都不难受，且用户随时可捏合调整。
+ *
+ * 注意 `offsetX/offsetY` 取负值：图比视口大时要把图**往左上推**才能居中
+ * （平移量 = (视口 - 图) / 2，图更大时该值为负）。
  */
 internal fun initialViewport(viewW: Float, viewH: Float): ViewportState {
     val imageH = viewW * IMAGE_BASE_HEIGHT / IMAGE_BASE_WIDTH
+    val w = viewW * INITIAL_SCALE
+    val h = imageH * INITIAL_SCALE
     return ViewportState(
-        scale = 1f,
-        offsetX = 0f,
-        offsetY = (viewH - imageH) / 2f,
+        scale = INITIAL_SCALE,
+        offsetX = (viewW - w) / 2f,
+        offsetY = (viewH - h) / 2f,
     )
 }
 
@@ -324,6 +334,15 @@ internal fun applyTransform(
 
 private const val IMAGE_BASE_WIDTH = 1920f
 private const val IMAGE_BASE_HEIGHT = 1080f
+
+/**
+ * 初始缩放倍数（用户实测反馈后选定的折中值）。
+ *
+ * 1.0 = 整图可见但图只占屏高 1/3、上下留白巨大；3.0+ = 纵向铺满但只能看到房间 1/3 宽。
+ * 1.8 取中间：图占屏高约 60%，左右仅裁掉约 10%（详见 [initialViewport] 的说明）。
+ */
+private const val INITIAL_SCALE = 1.8f
+
 private const val MIN_SCALE = 0.8f
 private const val MAX_SCALE = 4f
 

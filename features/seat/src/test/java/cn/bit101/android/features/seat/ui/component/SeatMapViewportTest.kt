@@ -15,51 +15,57 @@ import org.junit.Test
 class SeatMapViewportTest {
 
     // 模拟机 Pixel 6 / API 34 竖屏的实测可视区（px）。底图按宽铺满时高 607.5px，
-    // 视口高 1244px（模拟器实测座位图区域高度）→ 上下各留白约 318px，符合真机表现。
+    // 视口高 1244px（模拟器实测座位图区域高度）。
+    // 初始 1.8 倍下：图 1944×1093.5 → 横向裁掉 864px（左右各 432），
+    // 纵向留白 (1244-1093.5)/2 ≈ 75px（远小于整图可见时的 318px）。
     // ⚠️ 视口高度刻意取得比「放大 2 倍后的图高」小：否则纵向永远走「居中」分支，
     // 纵向平移与锚点逻辑就测不到了（最初用 1600 就踩了这个坑）。
     private val viewW = 1080f
     private val viewH = 1244f
     private val imageH = viewW * 1080f / 1920f // 607.5f
 
-    // ── 初始视口：整图可见 ───────────────────────────────────────────────
+    // ── 初始视口：折中缩放 1.8 倍 ────────────────────────────────────────
 
     @Test
-    fun `初始视口为整图可见 宽度贴合 不缩放`() {
+    fun `初始视口为折中缩放 1_8 倍`() {
         val v = initialViewport(viewW, viewH)
-        assertEquals("整图可见时 scale 必须是 1（按宽度贴合）", 1f, v.scale, 1e-4f)
-        assertEquals("水平贴左，不留横向空档", 0f, v.offsetX, 1e-4f)
+        assertEquals("初始缩放应为 1.8 倍（整图可见与纵向铺满的折中）", 1.8f, v.scale, 1e-4f)
     }
 
     @Test
-    fun `初始视口垂直居中 上下留白相等`() {
+    fun `初始视口双向居中 四周留白对称`() {
         val v = initialViewport(viewW, viewH)
-        // offsetY = (viewH - imageH) / 2：图比视口矮时为正，表示整图向下推移居中
-        val expected = (viewH - imageH) / 2f
-        assertEquals(expected, v.offsetY, 1e-4f)
+        val w = viewW * v.scale
+        val h = imageH * v.scale
 
-        // 图上边到视口顶 = offsetY（图被下推到此处）
-        val topGap = v.offsetY
-        // 图下边到视口底 = viewH - (offsetY + imageH)
-        val bottomGap = viewH - (v.offsetY + imageH)
-        assertEquals("上下留白必须相等（居中）", topGap, bottomGap, 1e-3f)
-        assertTrue("留白应为正（图比视口矮）", topGap > 0f)
+        // 图比视口大时 offset 为负（图往左上推），且左右/上下位移量相等即为居中
+        assertEquals("横向应居中：offsetX = (viewW - w) / 2", (viewW - w) / 2f, v.offsetX, 1e-3f)
+        assertEquals("纵向应居中：offsetY = (viewH - h) / 2", (viewH - h) / 2f, v.offsetY, 1e-3f)
+
+        // 左右被裁掉的部分必须相等（对称裁切，否则会有「偏向一边」的观感）
+        val leftCut = -v.offsetX
+        val rightCut = (v.offsetX + w) - viewW
+        assertEquals("左右裁切量必须相等", leftCut, rightCut, 1e-2f)
     }
 
     @Test
-    fun `初始视口整图完整落入可视区`() {
+    fun `初始视口在折中缩放下的裁切比例符合预期`() {
         val v = initialViewport(viewW, viewH)
-        val left = v.offsetX
-        val right = v.offsetX + viewW * v.scale
-        val top = v.offsetY
-        val bottom = v.offsetY + imageH * v.scale
-        assertTrue("左边界不能越出屏幕左侧", left >= -1e-3f)
-        assertTrue("右边界不能越出屏幕右侧", right <= viewW + 1e-3f)
-        assertTrue("上边界不能越出屏幕顶部", top >= -1e-3f)
-        assertTrue("下边界不能越出可视区底部", bottom <= viewH + 1e-3f)
-        // 图比视口小（本用例）时必须是完整可见、不能有任何一边被裁
-        assertTrue("整图可见：图宽应等于视口宽", (right - left) <= viewW + 1e-3f)
-        assertTrue("整图可见：图高应不超过视口", (bottom - top) <= viewH + 1e-3f)
+        val w = viewW * v.scale
+        val h = imageH * v.scale
+
+        // 1.8 倍下：图宽 1944 > 视口 1080 → 横向必有裁切。
+        // 裁掉的是**图**的 22%（左右各 432px，即图宽的 11%），
+        // 而 432px 占**视口宽**的 40% —— 注意这两个分母不同，别混。
+        // 这里锁住「横向裁切不超过图宽的 25%」，防止将来误调到把房间主体都裁掉的激进值。
+        val cutEachSide = (w - viewW) / 2f
+        assertTrue("横向裁切不应超过图宽的 25%", cutEachSide < w * 0.25f)
+        assertTrue("横向应确有裁切（1.8 倍下不可避免）", cutEachSide > 0f)
+
+        // 纵向：图高 1093.5 vs 视口 1244 → 仍有留白，但应显著小于「整图可见」时的 318px
+        val verticalGap = (viewH - h) / 2f
+        assertTrue("纵向留白应为正（图仍矮于视口）", verticalGap > 0f)
+        assertTrue("纵向留白应小于整图可见时的 318px", verticalGap < 318f)
     }
 
     // ── 捏合缩放：以双指中心为锚点 ───────────────────────────────────────
