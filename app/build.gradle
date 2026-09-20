@@ -68,6 +68,14 @@ dependencies {
 
     implementation project(':features')
 
+    // ⚠️ 这两个是**显式**加的，不能只靠 `:features` 传递：
+    // features 用 `implementation` 依赖各子模块，对 app 不可见（compileKotlin 会报
+    // 「Unresolved reference」）。App.kt 需要在 Application.onCreate 里做一次启动接线
+    // （组件依赖注入 + 座位→组件的数据推送），必须在代码里能直接引用到它们。
+    // 之所以不改 features 为 `api`：那样会把整个子模块暴露给 :features 的所有下游，
+    // 面太大；显式声明把耦合限制在 app 一处。
+    implementation project(':features:widget')
+    implementation project(':features:seat')
 }
 
 // 开源声明生成配置

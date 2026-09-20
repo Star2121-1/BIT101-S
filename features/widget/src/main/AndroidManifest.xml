@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      桌面小组件。Glance 的 AppWidgetReceiver 通过 manifest 声明注册，
+      由系统在桌面添加组件时拉起（运行在 App 主进程）。
+    -->
+    <application>
+
+        <receiver
+            android:name="cn.bit101.android.features.widget.BIT101WidgetReceiver"
+            android:exported="false"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/bit101_widget_info" />
+        </receiver>
+
+    </application>
+
+</manifest>

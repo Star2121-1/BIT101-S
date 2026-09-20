@@ -60,6 +60,7 @@ dependencies {
     implementation project(':features:versions')
     implementation project(':features:web')
     implementation project(':features:seat')
+    implementation project(':features:widget')
 
     // 启动屏
     implementation "androidx.core:core-splashscreen:1.0.1"

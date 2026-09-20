@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  桌面小组件配置。
+
+  - updatePeriodMillis 设为 0：系统的最小周期也是 30 分钟且不精确，
+    我们改用 WorkManager + App 内数据变更时主动刷新（见 WidgetUpdater）。
+  - resizeMode 允许横向与纵向拉伸；minResizeHeight 保证至少能显示 3 行内容。
+  - widgetCategory=home_screen 只上桌面（不上锁屏，锁屏不需要，也避免隐私问题）。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="110dp"
+    android:previewImage="@drawable/widget_preview"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />
