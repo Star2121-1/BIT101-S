@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace 'cn.bit101.android.features.seat'
+    namespace 'cn.bit101.android.features.widget'
     compileSdk versions.compileSdk
 
     defaultConfig {
@@ -33,7 +33,7 @@ android {
     }
     buildFeatures {
         compose true
-        // 供 SeatLog 使用 BuildConfig.DEBUG 区分 debug/release（AGP 8 起 library 默认关闭）
+        // 供日志出口按 BuildConfig.DEBUG 开关（AGP 8 起 library 默认关闭）
         buildConfig true
     }
     packagingOptions {
@@ -46,26 +46,26 @@ android {
 dependencies {
     implementation project(':features:common')
     implementation project(':features:theme')
-    implementation project(':features:widget')
     implementation project(':config')
+    implementation project(':data')
 
     implementation "com.google.dagger:hilt-android:${versions.hilt}"
-    ksp "com.google.dagger:hilt-android-compiler:${versions.hilt}"
+    ksp "com.google.dagger:hilt-compiler:${versions.hilt}"
     implementation "androidx.hilt:hilt-navigation-compose:1.1.0"
 
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    // 桌面小组件。Glance 的代码只在 `provideGlance` 渲染组件时执行，
+    // App 正常浏览页面不加载它，所以对主流程无影响。
+    // ⚠️ 但它与 App **同进程**：Glance 会带入自己版本的 compose.runtime，
+    // 升级 Glance 前务必先看一下它要求的 Compose 版本，避免被动升/降级主工程的 Compose。
+    implementation "androidx.glance:glance-appwidget:1.1.0"
+    implementation "androidx.glance:glance-material3:1.1.0"
+
+    // 跨零点换天与数据变更后的兜底刷新（最小周期 15 分钟）
+    implementation "androidx.work:work-runtime-ktx:2.9.0"
+
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
-    implementation "com.google.accompanist:accompanist-webview:0.31.2-alpha"
-    // 座位底图来自服务端（/api/seat/map 给的 1920×1080 图），用 Coil 加载并按状态缓存
-    implementation "io.coil-kt:coil-compose:2.5.0"
 
-    // 学校统一身份认证（CAS）用 BIT101 官方库完成登录：它包含风控指纹、CSRF、
-    // URL 加密与短信二次验证的完整实现，比自行拼装可靠得多。库已在 App 内（:api 依赖），
-    // 这里只是让 seat 模块可以直接调用。
-    implementation 'com.github.BIT101-dev.BIT-Login:bit-login:v4.0.2'
-
-    // junit 已由根 build.gradle 的 subprojects 块统一加给所有 library 模块。
-    // org.json 必须显式提供真实实现：Android SDK 里的 org.json 在单元测试中是空壳，
-    // 会让 parseCasUser / serializeTasks 这类纯解析逻辑的测试全部失效。
-    testImplementation 'org.json:json:20231013'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 }

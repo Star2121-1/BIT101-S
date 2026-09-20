@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_label">BIT101 课程日程</string>
+    <string name="widget_description">在桌面查看当日课程、待办 DDL 与座位预约</string>
+
+    <!-- 小组件内的翻页/占位文案 -->
+    <string name="widget_page_course">今日课程</string>
+    <string name="widget_page_ddl">待办 DDL</string>
+    <string name="widget_page_seat">座位预约</string>
+    <string name="widget_prev">上一条</string>
+    <string name="widget_next">下一条</string>
+    <string name="widget_loading">加载中…</string>
+    <string name="widget_empty_course">今日无课</string>
+    <string name="widget_empty_ddl">暂无待办</string>
+    <string name="widget_empty_seat">暂无预约</string>
+</resources>
