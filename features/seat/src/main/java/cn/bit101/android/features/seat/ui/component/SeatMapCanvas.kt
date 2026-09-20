@@ -30,8 +30,6 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -44,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import coil.imageLoader
 import coil.request.ImageRequest
+import cn.bit101.android.features.seat.SeatLog
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatMapImages
 import cn.bit101.android.features.seat.model.SeatStatus
@@ -165,8 +164,22 @@ fun SeatMapCanvas(
                         .fillMaxWidth()
                         .height(with(density) { imageH.toDp() })
                 ) {
-                    val urls = remember(images) { images.byStatus() }
+                    val ready = bitmaps.isNotEmpty()
                     Canvas(modifier = Modifier.fillMaxSize()) {
+                        // ⚠️⚠️ **位图未就绪时什么都不画**（露出灰底 = 加载态）。
+                        //
+                        // 曾经的 bug：第一帧位图还在下载，103 个瓦片全部 `return@forEach`，
+                        // 只画出底图 free —— 而 free 图里**空闲座位是绿色、非空闲座位位置留白**，
+                        // 于是用户看到的是「满屏绿色座位」（实际大多是在用/已预约）。
+                        // 等图片加载完才重绘成正确画面，用户早就把「全绿」当成结果了。
+                        //
+                        // 日志实证：
+                        //   帧1 可定位=103 已画=0   缺位图=103   ← 半成品（全绿）
+                        //   帧3 已画=103 缺位图=0                 ← 正确
+                        //
+                        // 因此改成「全有或全无」：要么所有座位都按状态画对，要么整块留空等下一帧。
+                        if (!ready) return@Canvas
+
                         val cw = size.width
                         val ch = size.width * IMAGE_BASE_HEIGHT / IMAGE_BASE_WIDTH
 
@@ -260,8 +273,8 @@ fun SeatMapCanvas(
                         val pctY = (tap.y - offsetY) / scale / imageH * 100f
 
                         val inside = mappable.firstOrNull { s ->
-                            pctX >= s.pointX!! && pctX <= s.pointX!! + s.width!! &&
-                                pctY >= s.pointY!! && pctY <= s.pointY!! + s.height!!
+                            pctX >= s.pointX!! && pctX <= s.pointX + s.width!! &&
+                                pctY >= s.pointY!! && pctY <= s.pointY + s.height!!
                         }
                         val hit = inside ?: mappable.minByOrNull { s ->
                             distancePx(s, pctX, pctY, viewW, imageH, scale)
@@ -306,15 +319,17 @@ private fun rememberLoadedSeatMaps(images: SeatMapImages): Map<SeatStatus, Image
 
     val byStatus = remember(images) { images.byStatus() }
 
-    return produceState(initialValue = emptyMap(), byStatus) {
+            return produceState(initialValue = emptyMap(), byStatus) {
         val loaded = withContext(Dispatchers.IO) {
-            byStatus.mapValues { (_, url) ->
+            byStatus.mapValues { (status, url) ->
                 runCatching {
                     val request = ImageRequest.Builder(context)
                         .data(url)
                         .allowHardware(false) // Canvas 绘制需读像素，禁用硬件位图更稳
                         .build()
                     loader.execute(request).drawable?.toBitmap()?.asImageBitmap()
+                }.onFailure {
+                    SeatLog.w(TAG, "座位底图加载失败 status=$status url=$url: ${it.message}")
                 }.getOrNull()
             }.filterValues { it != null }.mapValues { it.value!! }
         }
@@ -337,11 +352,22 @@ private fun DrawScope.drawImageFit(bmp: ImageBitmap, cw: Float, ch: Float) {
  * 从整张状态图里裁出**该座位那一小块**，贴到 `(x, y)`。
  *
  * 等价于官方前端的 `background-image` + `background-position: -px -py` ——
- * 目标是「让整图按 (x, y) 对齐到左上角后，只露出座位那一个矩形」。
+ * 即「把整图按 (-x, -y) 平移后，只露出座位那一个矩形」。
  *
- * 实现上用 `translate(-x, -y)` 把整图挪到目标位置，再用 `clipRect` 圈出座位矩形，
- * 最后按整图尺寸（`cw × ch`）铺满绘制。**不能**直接把 dstSize 设成座位大小 ——
- * 那会把整张图压进几十像素里（图标横向压扁，就是曾经的次生 bug）。
+ * 实现上**直接用 `drawImage` 的 `srcOffset`/`srcSize` 做源图裁剪**：
+ * 服务端图恒 1920×1080，座位 `(x, y, w, h)` 是画布坐标，
+ * 按 `x / cw * bmp.width` 换算回源图像素即可。目标矩形就是座位矩形本身。
+ *
+ * ⚠️ 这里**刻意不用 `withTransform { translate(-x,-y) }` + `clipRect`**（曾这么做，
+ * 导致「每个座位都按状态画的覆盖层完全看不见」，底图 free 上那套『所有座位都是绿色』
+ * 的模样原样露出来，表现为**整个区域全是绿色可用座位**）：
+ * `withTransform` 里的 `clipRect(x, y, x+w, y+h)` **也会被同一个 translate 变换**，
+ * 于是实际裁剪区域变成了画布左上角的 `(0, 0, w, h)`，而图又被平移到 `(-x, -y)` 起画，
+ * 两者错开 —— 瓦片被裁没了。画布左上角还在视口外（初始 scale 1.8 时原点为负），
+ * 所以连错位的痕迹都看不到，只是「什么都没画上去」。
+ *
+ * ⚠️ 也不能把 `dstSize` 设成座位大小而 `srcSize` 仍取整图 ——
+ * 那会把整张 1920 宽的图压进几十像素里（图标横向压扁的次生 bug）。
  */
 private fun DrawScope.drawSeatTile(
     bmp: ImageBitmap,
@@ -352,17 +378,26 @@ private fun DrawScope.drawSeatTile(
     cw: Float,
     ch: Float,
 ) {
-    withTransform({ translate(-x, -y) }) {
-        clipRect(x, y, x + w, y + h) {
-            drawImage(
-                image = bmp,
-                srcOffset = IntOffset.Zero,
-                srcSize = IntSize(bmp.width, bmp.height),
-                dstOffset = IntOffset.Zero,
-                dstSize = IntSize(cw.toInt(), ch.toInt()),
-            )
-        }
-    }
+    if (cw <= 0f || ch <= 0f) return
+    // 画布坐标 → 源图像素（服务端图与画布同为 16:9，等比换算）
+    val sx = (x / cw * bmp.width).toInt()
+    val sy = (y / ch * bmp.height).toInt()
+    val sw = (w / cw * bmp.width).toInt().coerceAtLeast(1)
+    val sh = (h / ch * bmp.height).toInt().coerceAtLeast(1)
+
+    drawImage(
+        image = bmp,
+        srcOffset = IntOffset(
+            sx.coerceIn(0, (bmp.width - 1).coerceAtLeast(0)),
+            sy.coerceIn(0, (bmp.height - 1).coerceAtLeast(0)),
+        ),
+        srcSize = IntSize(
+            sw.coerceAtMost(bmp.width - sx.coerceAtLeast(0)),
+            sh.coerceAtMost(bmp.height - sy.coerceAtLeast(0)),
+        ),
+        dstOffset = IntOffset(x.toInt(), y.toInt()),
+        dstSize = IntSize((w.toInt()).coerceAtLeast(1), (h.toInt()).coerceAtLeast(1)),
+    )
 }
 
 /** 座位中心与触点的屏幕距离（像素）。 */
@@ -455,6 +490,8 @@ internal fun applyTransform(
 
 private const val IMAGE_BASE_WIDTH = 1920f
 private const val IMAGE_BASE_HEIGHT = 1080f
+
+private const val TAG = "SeatMapCanvas"
 
 /**
  * 初始缩放倍数（用户实测反馈后选定的折中值）。
