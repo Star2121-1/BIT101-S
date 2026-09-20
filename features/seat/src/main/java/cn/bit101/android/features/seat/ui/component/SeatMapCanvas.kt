@@ -101,18 +101,18 @@ fun SeatMapCanvas(
             if (initialized || mappable.isEmpty() || viewW <= 0f || viewH <= 0f) return@LaunchedEffect
             initialized = true
 
-            // 初始缩放：**纵向铺满可视区**（用户选择「无留白」）。
-            // 底图 16:9，竖屏可视区偏竖长，铺满高度必然要放大（scale > 1），
-            // 此时图宽超出屏幕、横向可拖动查看；初始位置对准**座位密集区**，
-            // 而不是水平居中 —— 房间左右两端常是空白，居中会让座位偏到一侧。
-            scale = (viewH / imageH).coerceIn(MIN_SCALE, MAX_SCALE)
-
-            val w = viewW * scale
-            val h = imageH * scale
-            val centerX = ((mappable.minOf { it.pointX!! } + mappable.maxOf { it.pointX!! + it.width!! }) / 200f) * viewW
-            offsetX = (viewW / 2f - centerX * scale)
-                .coerceIn(viewW - w, 0f)
-            offsetY = (viewH - h) / 2f
+            // 初始缩放：**整张底图完整可见**并垂直居中。
+            //
+            // 底图是 16:9（1920×1080）横图，竖屏可视区偏竖长，所以只能按**宽度**贴合
+            // （即 scale = 1，`imageH` 本就是这个比例下的自然高度），
+            // 高度方向必然留下上下留白 —— 这是图片比例决定的，不是布局缺陷。
+            // 曾按「纵向铺满、无留白」做过一版（用户先选了这个），实测反而更差：
+            // 图被放大到横向只能看到房间约 79%，认路时要一直左右拖，
+            // 且一进门就是放大态、失去整体空间感。改回整图可见。
+            val init = initialViewport(viewW, viewH)
+            scale = init.scale
+            offsetX = init.offsetX
+            offsetY = init.offsetY
         }
 
         Box(
@@ -149,6 +149,27 @@ fun SeatMapCanvas(
                 }
             }
 
+            // ── 盖掉服务端底图自带的「返回 Back」按钮 ──────────────────────
+            // `/api/seat/map` 的五张图里，右下角除了状态图例，还印着官方前端用的
+            // 「返回 Back」按钮图形（图片内容，不可点）。我们的页面已有自己的顶栏返回键，
+            // 这个假按钮只会误导用户去点。直接裁图会破坏 16:9 比例，
+            // 所以只把按钮那一小块（见 SERVER_BACK_BTN_*）涂成底图底色。
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val cw = size.width
+                val ch = size.width * IMAGE_BASE_HEIGHT / IMAGE_BASE_WIDTH
+                drawRect(
+                    color = SeatColors.serverBackButtonMask,
+                    topLeft = Offset(
+                        SERVER_BACK_BTN_LEFT / 100f * cw,
+                        SERVER_BACK_BTN_TOP / 100f * ch,
+                    ),
+                    size = Size(
+                        (SERVER_BACK_BTN_RIGHT - SERVER_BACK_BTN_LEFT) / 100f * cw,
+                        (SERVER_BACK_BTN_BOTTOM - SERVER_BACK_BTN_TOP) / 100f * ch,
+                    ),
+                )
+            }
+
             // 选中 / 我订的 标记画在最上层
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val cw = size.width
@@ -182,24 +203,15 @@ fun SeatMapCanvas(
                 // 缩放 / 拖动 —— 以双指中心为锚点
                 .pointerInput(Unit) {
                     detectTransformGestures { centroid, pan, zoom, _ ->
-                        val newScale = (scale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
-                        val realZoom = newScale / scale
-                        // 锚点不动：视图坐标 p 处的点在变换前后应保持同一屏幕位置。
-                        // 记 p = (centroid - offset) / scale（变换前的视图坐标），
-                        // 则新 offset = centroid - p * newScale = centroid - (centroid - offset) * realZoom。
-                        // 拖动分量照旧叠加（单指 pan 时 realZoom == 1，退化为纯平移）。
-                        //
-                        // 缩放后钳制平移范围：图比可视区小时居中，比可视区大时不允许拖出边界，
-                        // 否则会拖出一片空白（露出画布底色）。
-                        val nextX = centroid.x - (centroid.x - offsetX) * realZoom + pan.x
-                        val nextY = centroid.y - (centroid.y - offsetY) * realZoom + pan.y
-                        val w = viewW * newScale
-                        val h = imageH * newScale
-                        offsetX = if (w <= viewW) (viewW - w) / 2f
-                        else nextX.coerceIn(viewW - w, 0f)
-                        offsetY = if (h <= viewH) (viewH - h) / 2f
-                        else nextY.coerceIn(viewH - h, 0f)
-                        scale = newScale
+                        val next = applyTransform(
+                            scale = scale, offsetX = offsetX, offsetY = offsetY,
+                            centroidX = centroid.x, centroidY = centroid.y,
+                            panX = pan.x, panY = pan.y, zoom = zoom,
+                            viewW = viewW, viewH = viewH, imageH = imageH,
+                        )
+                        scale = next.scale
+                        offsetX = next.offsetX
+                        offsetY = next.offsetY
                     }
                 }
                 // 点按选中
@@ -246,10 +258,89 @@ private fun distancePx(
     return hypot(dx, dy)
 }
 
+/** 视口变换状态：缩放比例 + 平移偏移。抽出来是为了让几何逻辑可被单测覆盖。 */
+internal data class ViewportState(val scale: Float, val offsetX: Float, val offsetY: Float)
+
+/**
+ * 初始视口：**整张底图完整可见**（按宽度贴合，故 `scale == 1`），垂直居中、水平贴左。
+ *
+ * 底图恒为 16:9 横图，竖屏可视区更高，所以高度方向必然留白 —— 这是比例决定的。
+ * `offsetY` 取负值（图比视口矮时）表示向下平移去做居中。
+ */
+internal fun initialViewport(viewW: Float, viewH: Float): ViewportState {
+    val imageH = viewW * IMAGE_BASE_HEIGHT / IMAGE_BASE_WIDTH
+    return ViewportState(
+        scale = 1f,
+        offsetX = 0f,
+        offsetY = (viewH - imageH) / 2f,
+    )
+}
+
+/**
+ * 应用一次捏合/拖动，返回新的视口变换。
+ *
+ * **以双指中心（`centroidX/centroidY`）为锚点**缩放：变换前位于该点下方的图像点，
+ * 变换后仍停在该点（这是「捏合看细节」的核心不变式；早期只按左上角缩放，手感很怪）。
+ *
+ * 推导：设变换前手指下的视图坐标为 `p = (centroid - offset) / scale`，
+ * 要求 `centroid == offset' + p * scale'`，代入即得
+ * `offset' = centroid - (centroid - offset) * (scale' / scale)`。
+ * 拖动量 `pan` 直接叠加 —— 单指拖动时 `zoom == 1`，公式退化为纯平移。
+ *
+ * 结果会做边界钳制：图小于视口时居中，大于视口时不允许拖出边界，
+ * 否则会拖出一片空白、露出画布底色。
+ *
+ * 参数刻意用散开的 Float 而不是 `Offset`：这样纯 JVM 单测无需把 compose-ui
+ * 拖进 test classpath，几何逻辑可以被直接断言。
+ */
+internal fun applyTransform(
+    scale: Float,
+    offsetX: Float,
+    offsetY: Float,
+    centroidX: Float,
+    centroidY: Float,
+    panX: Float,
+    panY: Float,
+    zoom: Float,
+    viewW: Float,
+    viewH: Float,
+    imageH: Float,
+): ViewportState {
+    val newScale = (scale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
+    // 缩放被 MIN/MAX 截断时，实际生效的倍率要按截断后的比例算，否则锚点会漂移
+    val realZoom = newScale / scale
+
+    val nextX = centroidX - (centroidX - offsetX) * realZoom + panX
+    val nextY = centroidY - (centroidY - offsetY) * realZoom + panY
+
+    val w = viewW * newScale
+    val h = imageH * newScale
+    return ViewportState(
+        scale = newScale,
+        offsetX = if (w <= viewW) (viewW - w) / 2f else nextX.coerceIn(viewW - w, 0f),
+        offsetY = if (h <= viewH) (viewH - h) / 2f else nextY.coerceIn(viewH - h, 0f),
+    )
+}
+
 private const val IMAGE_BASE_WIDTH = 1920f
 private const val IMAGE_BASE_HEIGHT = 1080f
 private const val MIN_SCALE = 0.8f
 private const val MAX_SCALE = 4f
+
+/**
+ * 服务端底图右下角自带「返回 Back」按钮的范围（相对底图的百分比）。
+ *
+ * `/api/seat/map` 的图是给官方前端用的，右下角同时印了图例和这个按钮。客户端已有
+ * 自己的返回键，这个假按钮点了没反应、只会误导，故用底图底色（`(0,98,60)` 深绿）覆盖掉。
+ *
+ * 数值来自 2026-09-20 对 **1920×1080 原图**（`map_free.jpg`）的逐行像素扫描：
+ * 按钮外框在 x 1747~1920、y 960~1056 → 百分比 91.0~100% / 88.9~97.8%。
+ * 四边各留 1% 余量，避免残留边框。
+ */
+private const val SERVER_BACK_BTN_LEFT = 90.0f
+private const val SERVER_BACK_BTN_RIGHT = 100.0f
+private const val SERVER_BACK_BTN_TOP = 88.0f
+private const val SERVER_BACK_BTN_BOTTOM = 100.0f
 
 /** 手指落点与座位中心的宽容半径（超过即视为点空）。 */
 private const val TAP_SLOP_DP = 22f

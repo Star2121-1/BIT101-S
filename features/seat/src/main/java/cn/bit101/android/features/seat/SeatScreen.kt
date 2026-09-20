@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -62,7 +64,17 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
     // 座位图是详情页：不显示「预约 / 列表」切换（它自带返回），避免三层栏叠在一起
     val isDetailPage = currentRoute.startsWith("seat_map")
 
-    Scaffold { paddingValues ->
+    // 详情页（座位图）自己带 topBar/bottomBar，也自己处理系统栏。
+    //
+    // ⚠️ 这里必须显式吞掉系统栏 insets：本模块嵌在 `IndexScreen` 的 Scaffold 里，
+    // 而 App 全局底栏（80dp）**是用 `Modifier.padding(bottom=)` 给 NavHost 让位的**，
+    // 并没有消费 insets —— 于是内层 Scaffold 拿到的 contentWindowInsets 里
+    // 仍然带着导航栏高度，`paddingValues` 底部凭空多出约 48dp 空白。
+    // 之前只能靠「叠一个 Card 盖上去」缓解（底栏看着还是浮在半空）。
+    // 置零后由内层自己（TopAppBar / statusBarsPadding / bottomBar）负责系统栏，底部贴边。
+    Scaffold(
+        contentWindowInsets = if (isDetailPage) WindowInsets(0) else ScaffoldDefaults.contentWindowInsets
+    ) { paddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             if (!isDetailPage) {
                 SeatSectionTabs(

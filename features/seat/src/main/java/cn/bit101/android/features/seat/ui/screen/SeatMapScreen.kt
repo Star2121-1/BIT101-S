@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -41,6 +42,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -101,20 +103,28 @@ fun SeatMapScreen(
     Scaffold(
         topBar = {
             // 顶栏自绘而非用 TopAppBar：默认 64dp 起步，在「内容已很紧」的座位图上
-            // 白占一大条（用户反馈「白字那栏占用比较大」）。这里压到 48dp。
+            // 白占一大条（用户反馈「白字那栏占用比较大」）。
+            //
+            // 高度压到 40dp（原 48dp）：48dp 是 Material 的**可点击区下限**，
+            // 但那条蓝边里只有一个 48dp 的 IconButton 需要它，标题文字不需要。
+            // 现在整条 40dp，返回键自己撑到 40dp（仍 ≥ 36dp 的可点下限），
+            // 视觉上蓝边明显变窄，且不牺牲可用性。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.primary)
                     .statusBarsPadding()
-                    .height(48.dp)
+                    .height(TOP_BAR_HEIGHT)
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = {
-                    viewModel.resetPick()
-                    onBack()
-                }) {
+                IconButton(
+                    onClick = {
+                        viewModel.resetPick()
+                        onBack()
+                    },
+                    modifier = Modifier.size(TOP_BAR_HEIGHT)
+                ) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         "返回",
@@ -127,7 +137,7 @@ fun SeatMapScreen(
                         SeatPickMode.MONITOR -> "选目标座位"
                         SeatPickMode.PREFER -> "选偏好座位（按优先级）"
                     },
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onPrimary
                 )
@@ -154,7 +164,7 @@ fun SeatMapScreen(
                     ReserveBottomBar(
                         selectedSeat = selectedSeat,
                         isBusy = isBusy,
-                        onTasks = onNavigateToTasks,
+                        onTaskList = onNavigateToTasks,
                         onCancel = {
                             val seat = selectedSeat ?: return@ReserveBottomBar
                             isBusy = true
@@ -175,6 +185,15 @@ fun SeatMapScreen(
                             }
                         },
                         onReserve = {
+                            // 未选座位时按钮不可用（enabled=false），灰态点击不会有任何反馈，
+                            // 用户会以为「点了没反应」。这里让按钮在无选中时也保持可点，
+                            // 点下去弹一句轻提示说明要先选座位 —— 比禁用更清楚。
+                            if (selectedSeat == null) {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("请先在图上点选一个座位")
+                                }
+                                return@ReserveBottomBar
+                            }
                             val seat = selectedSeat ?: return@ReserveBottomBar
                             isBusy = true
                             scope.launch {
@@ -236,9 +255,9 @@ fun SeatMapScreen(
             FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 InfoChip(seatState.areaName.ifBlank { "区域 $areaId" }, emphasized = true)
                 InfoChip("$day $startTime-$endTime")
@@ -246,7 +265,8 @@ fun SeatMapScreen(
                 if (mineCount > 0) InfoChip("我的 $mineCount")
                 TextButton(
                     onClick = { viewModel.resetPick(); onBack() },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    modifier = Modifier.height(26.dp)
                 ) {
                     Text("换区域", style = MaterialTheme.typography.labelMedium)
                 }
@@ -319,6 +339,9 @@ private fun signInHintFor(day: String): String =
     if (day == java.time.LocalDate.now().toString()) "请在 60 分钟内刷卡签到"
     else "请在当日 9:00 前刷卡签到"
 
+/** 座位图页顶栏高度。压到 40dp 让那条蓝色栏明显变窄（详见 topBar 处的说明）。 */
+private val TOP_BAR_HEIGHT = 40.dp
+
 @Composable
 private fun InfoChip(text: String, emphasized: Boolean = false) {
     Card(
@@ -346,10 +369,11 @@ private fun PickerBottomBar(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        // 同 ReserveBottomBar：贴底的工具栏用直角，圆角会露出背景显得「浮着」
+        shape = RectangleShape,
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = when {
@@ -387,22 +411,25 @@ private fun PickerBottomBar(
 private fun ReserveBottomBar(
     selectedSeat: Seat?,
     isBusy: Boolean,
-    onTasks: () -> Unit,
+    onTaskList: () -> Unit,
     onCancel: () -> Unit,
     onReserve: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        // ⚠️ 不要用圆角：这一条在 `bottomBar` 槽位里、已贴到屏幕底边，
+        // 圆角会让左右两下角露出背景，看起来像「浮在半空的一张小卡片」，
+        // 而不是贴底的工具栏（用户反馈「任务列表所在栏的位置还是有点高，下面还有空隙」）。
+        shape = RectangleShape,
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Button(
-                onClick = onTasks,
+                onClick = onTaskList,
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -423,7 +450,9 @@ private fun ReserveBottomBar(
             } else {
                 Button(
                     onClick = onReserve,
-                    enabled = selectedSeat != null && !isBusy,
+                    // 无选中座位时**不禁用**：灰按钮点下去毫无反馈，容易被当成卡住。
+                    // 保持可点、由 onReserve 弹提示说明「请先在图上点选一个座位」。
+                    enabled = !isBusy,
                     modifier = Modifier.weight(1.5f),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,

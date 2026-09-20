@@ -25,6 +25,14 @@ internal object SeatColors {
     /** 选中态。不属于任何座位状态，是独立的交互高亮。 */
     val selected = Color(0xFF1565C0)
 
+    /**
+     * 覆盖服务端底图自带「返回 Back」按钮用的底色。
+     *
+     * 取值 `(0, 98, 60)` 是底图图例带的**深绿背景**实测值 —— 用它涂掉那个假按钮后
+     * 与周围完全融合，看不出补丁痕迹。
+     */
+    val serverBackButtonMask = Color(0xFF00623C)
+
     fun of(status: SeatStatus): Color = when (status) {
         SeatStatus.AVAILABLE -> available
         SeatStatus.RESERVED -> reserved
