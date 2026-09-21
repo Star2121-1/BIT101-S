@@ -49,6 +49,8 @@ import cn.bit101.android.features.user.UserScreen
 import cn.bit101.android.features.versions.UpdateDialog
 import cn.bit101.android.features.versions.VersionDialog
 import cn.bit101.android.features.web.WebScreen
+import cn.bit101.android.config.setting.base.PageShowOnNav
+import cn.bit101.android.config.setting.base.toPageData
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
 
 @Composable
@@ -100,6 +102,21 @@ internal fun MainApp() {
     val autoDetectUpgrade by vm.autoDetectUpgradeFlow.collectAsState(initial = false)
     if (autoDetectUpgrade) {
         UpdateDialog()
+    }
+
+    // 桌面小组件的「登录」按钮等入口可能带着**顶层路由**（如 login）进来。
+    // bottom-nav 的页面路由（seat 等）由 IndexScreen 处理，这里只管顶层的。
+    // ⚠️ IndexScreen 对它不认识的路由不会 consume（见其 LaunchedEffect），
+    //    所以两条观察链不会互相抢。
+    val pendingGoto by GotoRequest.route.collectAsState()
+    LaunchedEffect(pendingGoto) {
+        val route = pendingGoto ?: return@LaunchedEffect
+        val isPageRoute = PageShowOnNav.allPages.any { it.toPageData().value == route }
+        if (isPageRoute) return@LaunchedEffect
+        if (NavDestConfig.fromRoute(route) != null) {
+            navController.navigate(route)
+            GotoRequest.consume()
+        }
     }
 
     NavHost(

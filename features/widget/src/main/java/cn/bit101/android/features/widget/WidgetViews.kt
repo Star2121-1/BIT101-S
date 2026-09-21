@@ -100,14 +100,16 @@ internal object WidgetViews {
     private data class RowViews(
         @IdRes val row: Int,
         @IdRes val main: Int,
+        /** 第 2 行容器（时间 + 地点，靠右）；两者都空时整行隐藏 */
+        @IdRes val meta: Int,
         @IdRes val time: Int,
         @IdRes val trail: Int,
     )
 
     private val ROWS = listOf(
-        RowViews(R.id.row_0, R.id.row_0_main, R.id.row_0_time, R.id.row_0_trail),
-        RowViews(R.id.row_1, R.id.row_1_main, R.id.row_1_time, R.id.row_1_trail),
-        RowViews(R.id.row_2, R.id.row_2_main, R.id.row_2_time, R.id.row_2_trail),
+        RowViews(R.id.row_0, R.id.row_0_main, R.id.row_0_meta, R.id.row_0_time, R.id.row_0_trail),
+        RowViews(R.id.row_1, R.id.row_1_main, R.id.row_1_meta, R.id.row_1_time, R.id.row_1_trail),
+        RowViews(R.id.row_2, R.id.row_2_main, R.id.row_2_meta, R.id.row_2_time, R.id.row_2_trail),
     )
 
     // ------------------------------------------------------------------ 页签
@@ -151,29 +153,38 @@ internal object WidgetViews {
         page: WidgetPage?,
         rowLimit: Int,
     ) {
+        // 动作键（登录 / 立即预约）由纯逻辑决定，这里只负责画
+        val action = page?.let { WidgetLogic.actionOf(it, rowLimit) }
+
+        // 未登录 → 整页换成「未登录 + 登录按钮」。
+        // 本地库里的数据可能是几天前同步的，会话已失效时继续展示会让人以为数据是新的。
+        if (page?.loginPrompt != null) {
+            rv.setViewVisibility(R.id.widget_empty, View.VISIBLE)
+            rv.setTextViewText(R.id.widget_empty, page.loginPrompt)
+            rv.setViewVisibility(R.id.widget_rows, View.GONE)
+            bindAction(context, rv, appWidgetId, action)
+            return
+        }
+
         val lines = buildList {
             page?.primary?.let { add(it to true) }
             page?.secondary.orEmpty().forEach { add(it to false) }
         }.take(rowLimit.coerceAtLeast(1))
 
-        // 「立即预约」只在**有余位**时出现：它排在内容行下面，
-        // 行数占满时硬塞会被裁掉半截，不如不显示（用户仍可点页签进 App）。
-        val showAction = page?.kind == PageKind.SEAT && lines.size < rowLimit
-
         if (lines.isEmpty()) {
-            // 4×2 高度下「暂无预约」+ 按钮会超出可视区，此时**让位给按钮** ——
+            // 矮组件下「暂无预约」+ 按钮会超出可视区，此时**让位给按钮** ——
             // 能一键去抢座比多显示那四个字有用
-            val compact = showAction && rowLimit < MAX_ROWS
+            val compact = action != null && rowLimit < MAX_ROWS
             rv.setViewVisibility(R.id.widget_empty, if (compact) View.GONE else View.VISIBLE)
             rv.setTextViewText(R.id.widget_empty, page?.emptyText ?: "暂无内容")
             rv.setViewVisibility(R.id.widget_rows, View.GONE)
-            bindAction(context, rv, appWidgetId, showAction)
+            bindAction(context, rv, appWidgetId, action)
             return
         }
 
         rv.setViewVisibility(R.id.widget_empty, View.GONE)
         rv.setViewVisibility(R.id.widget_rows, View.VISIBLE)
-        bindAction(context, rv, appWidgetId, showAction)
+        bindAction(context, rv, appWidgetId, action)
 
         ROWS.forEachIndexed { i, row ->
             val line = lines.getOrNull(i)
@@ -193,26 +204,28 @@ internal object WidgetViews {
             )
             rv.setTextColor(row.main, bodyColor(context, widgetLine))
 
+            // 第 2 行（时间 + 地点，靠右）：两者都空时整行隐藏，否则留一条空行白占高度
+            val hasMeta = widgetLine.time.isNotBlank() || widgetLine.trail.isNotBlank()
+            rv.setViewVisibility(row.meta, if (hasMeta) View.VISIBLE else View.GONE)
             rv.setTextViewText(row.time, widgetLine.time)
             rv.setTextColor(row.time, timeColor(context, widgetLine))
-
             rv.setTextViewText(row.trail, widgetLine.trail)
         }
     }
 
-    /** 绑定「立即预约」键。显示与否由 [show] 决定（没有余位时隐藏）。 */
+    /** 绑定底部动作键；显示与否由 [action] 决定（文案与跳转目标也在里面）。 */
     private fun bindAction(
         context: Context,
         rv: RemoteViews,
         appWidgetId: Int,
-        show: Boolean,
+        action: WidgetAction?,
     ) {
-        rv.setViewVisibility(R.id.widget_action, if (show) View.VISIBLE else View.GONE)
-        if (!show) return
-        rv.setTextViewText(R.id.widget_action, "立即预约")
+        rv.setViewVisibility(R.id.widget_action, if (action != null) View.VISIBLE else View.GONE)
+        if (action == null) return
+        rv.setTextViewText(R.id.widget_action, action.label)
         rv.setOnClickPendingIntent(
             R.id.widget_action,
-            reservePendingIntent(context, appWidgetId),
+            gotoPendingIntent(context, appWidgetId, action.route),
         )
     }
 
@@ -316,22 +329,30 @@ internal object WidgetViews {
         )
 
     /**
-     * 座位页的「立即预约」：打开 App 并直接落在座位页。
+     * 打开 App 并直接落在 [route] 指定的页面（`"seat"` / `"login"` 等）。
      *
      * ⚠️ 用**类名字符串**而不是 `MainActivity::class.java`：
      * `MainActivity` 在 `:features` 聚合模块，而 `:features` 又依赖 `:features:widget`，
      * widget 直接引用它会形成循环依赖。`setClassName` 用运行时包名，
      * debug 变体（`…android.debug`）也能落到同一个类上。
      *
-     * 目标页取 [toPageData] 的 route（`"seat"`），与 `PageShowOnNav` 保持一致，
-     * 两边不用各写一份魔法字符串；extra 的 key 与 `MainActivity.EXTRA_GOTO` 相同。
+     * ⚠️ `data` 里必须带 [route]：PendingIntent 的唯一性只看 `requestCode` +
+     * `filterEquals`，**不比 extras** —— 只靠 extras 区分目标的话，
+     * 「登录」和「立即预约」会被判成同一个 PendingIntent 互相覆盖。
+     *
+     * extra 的 key 与 `MainActivity.EXTRA_GOTO` 相同；页面路由与 `PageShowOnNav`
+     * 同源、登录路由用 `AppRoutes.LOGIN`，两边不用各写一份魔法字符串。
      */
-    private fun reservePendingIntent(context: Context, appWidgetId: Int): PendingIntent {
+    private fun gotoPendingIntent(
+        context: Context,
+        appWidgetId: Int,
+        route: String,
+    ): PendingIntent {
         val intent = Intent().apply {
             setClassName(context.packageName, MAIN_ACTIVITY_CLASS)
-            putExtra(GOTO_EXTRA, PageShowOnNav.Seat.toPageData().value)
+            putExtra(GOTO_EXTRA, route)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            data = Uri.parse("bit101://goto/seat/$appWidgetId")
+            data = Uri.parse("bit101://goto/$route/$appWidgetId")
         }
         return PendingIntent.getActivity(
             context,
@@ -368,6 +389,6 @@ internal object WidgetViews {
     /** 与 `MainActivity.EXTRA_GOTO` 保持一致（跨模块，注释互相指向）。 */
     private const val GOTO_EXTRA = "bit101_goto"
 
-    /** `cn.bit101.android.features.MainActivity` —— 见 [reservePendingIntent] 的说明。 */
+    /** `cn.bit101.android.features.MainActivity` —— 见 [gotoPendingIntent] 的说明。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"
 }

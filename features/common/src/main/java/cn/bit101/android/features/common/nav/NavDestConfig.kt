@@ -3,6 +3,7 @@ package cn.bit101.android.features.common.nav
 import androidx.navigation.NamedNavArgument
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import cn.bit101.android.config.setting.base.AppRoutes
 
 sealed interface NavDestConfig {
     val route: String
@@ -44,7 +45,9 @@ sealed interface NavDestConfig {
     }
 
     data object Login : NavDestConfig {
-        override val route: String = "login"
+        // ⚠️ 路由字符串统一来自 AppRoutes（:config）—— 桌面小组件的「登录」按钮
+        //    也用它，两边必须同源（组件不能依赖 :features，见 AppRoutes 的说明）
+        override val route: String = AppRoutes.LOGIN
         override val arguments: List<NamedNavArgument> = emptyList()
     }
 

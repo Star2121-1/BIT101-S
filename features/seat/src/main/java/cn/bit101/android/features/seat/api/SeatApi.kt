@@ -37,6 +37,7 @@ import javax.inject.Singleton
 class SeatApi @Inject constructor(
     seatHttp: SeatHttp,
     private val seatLoginStatus: SeatLoginStatus,
+    private val autoLogin: SeatAutoLogin,
 ) {
 
     companion object {
@@ -114,6 +115,40 @@ class SeatApi @Inject constructor(
         return text
     }
 
+    /**
+     * 需要认证的调用统一走它：**会话失效时自动续期一次并重试**。
+     *
+     * 这是「登录一次之后不要再打扰用户」的关键一环 —— 之前会话一过期，
+     * 取消/预约立刻失败并把内部信号（`TOKEN_EXPIRED`）直接甩给用户。
+     *
+     * ⚠️ 之所以用 suspend 包装而不是沿用 `runCatching`：续期本身是挂起操作，
+     * 而 `runCatching` 的 lambda 不是 suspend，无法在其中调用续期。
+     *
+     * 只重试**一次**：续期成功后仍失败说明是别的问题（比如服务端规则拒绝），
+     * 再试只会掩盖真实错误。
+     */
+    private suspend fun <T> authed(block: suspend () -> T): Result<T> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(block())
+        } catch (first: Throwable) {
+            if (first.message != TOKEN_EXPIRED && first.cause?.message != TOKEN_EXPIRED) {
+                return@withContext Result.failure(first)
+            }
+            SeatLog.w(TAG, "session expired, trying silent renew")
+            val renewed = runCatching { autoLogin.renew() }.getOrNull()
+            if (renewed.isNullOrBlank()) {
+                // 续期失败（无凭据 / 二次验证 / 限流冷却中）→ 交由上层引导手动登录
+                return@withContext Result.failure(first)
+            }
+            token = renewed
+            try {
+                Result.success(block())
+            } catch (second: Throwable) {
+                Result.failure(second)
+            }
+        }
+    }
+
     suspend fun getSeatTree(date: String): Result<List<SeatTreeNode>> = withContext(Dispatchers.IO) {
         runCatching {
             val json = JSONObject(post("/api/Seat/tree", jsonBody(JSONObject().put("date", date))))
@@ -173,30 +208,27 @@ class SeatApi @Inject constructor(
     }
 
     /** 「我的预约」（有效记录）。数据源与取消预约一致。 */
-    suspend fun getMyReservations(): Result<List<ReservationRecord>> = withContext(Dispatchers.IO) {
-        runCatching {
-            val body = jsonBody(JSONObject().put("type", "1"))
-            val json = JSONObject(post("/api/index/subscribe", body))
-            parseReservations(json.optJSONArray("data") ?: JSONArray())
-        }
+    suspend fun getMyReservations(): Result<List<ReservationRecord>> = authed {
+        val body = jsonBody(JSONObject().put("type", "1"))
+        val json = JSONObject(post("/api/index/subscribe", body))
+        parseReservations(json.optJSONArray("data") ?: JSONArray())
     }
 
-    suspend fun confirmSeat(seatId: String, segment: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        runCatching {
-            // seat_id 必须是数字（服务端按 int 处理；字符串形态未验证通过）
-            val seatIdNum = seatId.toLongOrNull() ?: seatId.trim().toLongOrNull()
-                ?: throw IOException("座位 id 非法: $seatId")
-            val body = jsonBody(
-                JSONObject().apply { put("seat_id", seatIdNum); put("segment", segment) }
-            )
-            val json = JSONObject(post("/api/Seat/confirm", body))
-            val code = json.intOrZero("code")
-            if (code != 1) {
-                seatAuthFailure(code, json.errorText())?.let { throw it }
-                throw IOException("预约失败: ${json.errorText()}")
-            }
-            true
+    suspend fun confirmSeat(seatId: String, segment: String): Result<Boolean> = authed {
+        // seat_id 必须是数字（服务端按 int 处理；字符串形态未验证通过）
+        val seatIdNum = seatId.toLongOrNull() ?: seatId.trim().toLongOrNull()
+            ?: throw IOException("座位 id 非法: $seatId")
+        val body = jsonBody(
+            JSONObject().apply { put("seat_id", seatIdNum); put("segment", segment) }
+        )
+        val json = JSONObject(post("/api/Seat/confirm", body))
+        val code = json.intOrZero("code")
+        // ⚠️ 不要在这里拼「预约失败: 」前缀 —— UI 会再拼一次，变成双重前缀（真机见过）
+        if (code != 1) {
+            seatAuthFailure(code, json.errorText())?.let { throw it }
+            throw IOException(json.errorText())
         }
+        true
     }
 
     /**
@@ -206,27 +238,31 @@ class SeatApi @Inject constructor(
      * 不是座位 id —— 传座位 id 恒返回「操作失败」（2026-09-18 真实请求实测：
      * 预约 3427299 用 seat_id 取消失败，用 `{"id":"3427299"}` 取消成功）。
      */
-    suspend fun cancelSeat(seatId: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        runCatching {
-            val recordId = getMyReservations().getOrNull()
-                ?.firstOrNull { it.seatId == seatId && it.isActive }?.id
-                ?: getMyReservations().getOrNull()?.firstOrNull { it.seatId == seatId }?.id
-                ?: throw IOException("未找到该座位的有效预约记录")
-            cancelReservation(recordId).getOrElse { throw it }
-        }
+    /**
+     * 按座位 id 取消（座位图上的取消入口）。
+     *
+     * ⚠️ 要先把座位 id 换成**预约记录 id**。此前这里用 `getOrNull()` 吞掉了
+     * 「拉预约列表失败」的真实原因，一律报成「未找到预约记录」——
+     * 方向完全指错，网络/会话问题都被伪装成数据问题。现在让真实异常浮出来。
+     */
+    suspend fun cancelSeat(seatId: String): Result<Boolean> = authed {
+        val reservations = getMyReservations().getOrThrow()
+        val recordId = reservations.firstOrNull { it.seatId == seatId && it.isActive }?.id
+            ?: reservations.firstOrNull { it.seatId == seatId }?.id
+            ?: throw IOException("没有这个座位的预约记录，请到「我的预约」里核对")
+        cancelReservation(recordId).getOrElse { throw it }
     }
 
     /** 按**预约记录 id** 取消。 */
-    suspend fun cancelReservation(recordId: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        runCatching {
-            val body = jsonBody(JSONObject().put("id", recordId))
-            val json = JSONObject(post("/api/Space/cancel", body))
-            val code = json.intOrZero("code")
-            if (code != 1) {
-                seatAuthFailure(code, json.errorText())?.let { throw it }
-                throw IOException("取消失败: ${json.errorText()}")
-            }
-            true
+    suspend fun cancelReservation(recordId: String): Result<Boolean> = authed {
+        val body = jsonBody(JSONObject().put("id", recordId))
+        val json = JSONObject(post("/api/Space/cancel", body))
+        val code = json.intOrZero("code")
+        // ⚠️ 不要拼「取消失败: 」前缀 —— UI 会再拼一次，变成双重前缀（真机见过）
+        if (code != 1) {
+            seatAuthFailure(code, json.errorText())?.let { throw it }
+            throw IOException(json.errorText())
         }
+        true
     }
 }

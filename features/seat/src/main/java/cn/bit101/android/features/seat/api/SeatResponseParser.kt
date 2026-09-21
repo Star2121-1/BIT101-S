@@ -54,6 +54,31 @@ internal fun seatAuthFailure(code: Int, message: String): IOException? =
     else null
 
 /**
+ * 把内部异常翻译成**给用户看的话**。
+ *
+ * ⚠️ 内部信号（如 [SeatApi.TOKEN_EXPIRED]）绝不能原样漏到 UI ——
+ * 那是给代码看的常量，用户看到「取消失败： TOKEN_EXPIRED」只会更困惑
+ * （2026-09-21 真机实际出现过）。
+ *
+ * 另外两层兜底：
+ * - `HTTP 5xx: xxx` → 归为网络/服务端异常（原文里的响应体对用户毫无意义）
+ * - JSON 解析失败 → 服务端返回了非 JSON（如 HTML 错误页），同样要说人话
+ *
+ * @param fallback 连异常都没有时的兜底话术
+ */
+internal fun seatErrorText(e: Throwable?, fallback: String = "未知错误"): String {
+    val raw = e?.message?.takeIf { it.isNotBlank() } ?: return fallback
+    return when {
+        raw == SeatApi.TOKEN_EXPIRED || e.cause?.message == SeatApi.TOKEN_EXPIRED ->
+            "座位系统登录已失效，请重新登录"
+        raw.startsWith("HTTP ") -> "网络异常（${raw.substringBefore(':').trim()}），请稍后重试"
+        raw.contains("converted to JSONObject") || raw.contains("无法转换为") ->
+            "服务端返回异常，请稍后重试"
+        else -> raw
+    }
+}
+
+/**
  * 解析 `/api/Seat/tree` 的 `data`，按 children 递归展平为节点列表。
  * 实测层级：校区(type=0) → 楼层(type=0) → 区域(type=1)。
  */

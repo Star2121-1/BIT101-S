@@ -2,6 +2,8 @@ package cn.bit101.android.features.widget
 
 import android.content.Context
 import cn.bit101.android.config.setting.base.CourseScheduleSettings
+import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.config.user.base.SeatLoginStatus
 import cn.bit101.android.data.repo.base.CoursesRepo
 import cn.bit101.android.data.repo.base.DDLScheduleRepo
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -23,6 +25,8 @@ class WidgetRepository @Inject constructor(
     private val coursesRepo: CoursesRepo,
     private val ddlRepo: DDLScheduleRepo,
     private val courseScheduleSettings: CourseScheduleSettings,
+    private val loginStatus: LoginStatus,
+    private val seatLoginStatus: SeatLoginStatus,
 ) {
 
     /**
@@ -62,6 +66,13 @@ class WidgetRepository @Inject constructor(
 
         val seatLines = runCatching { SeatWidgetSnapshot.read(context) }.getOrDefault(emptyList())
 
+        // 登录态（与 App 内对应页面的门禁同一来源）。
+        // ⚠️ 读取失败时按「已登录」处理（fail-open）：显示可能过期的数据，
+        //    也好过把一个明明登录着的用户挡在「未登录」提示外面。
+        val bit101LoggedIn = runCatching { loginStatus.status.get() }.getOrDefault(true)
+        val seatLoggedIn = runCatching { seatLoginStatus.token.get() }
+            .getOrNull()?.isNotBlank() ?: true
+
         return WidgetLogic.build(
             courses = courses,
             ddls = ddls,
@@ -72,6 +83,8 @@ class WidgetRepository @Inject constructor(
             weekday = today.dayOfWeek.value,
             limit = limit,
             timeTable = timeTable,
+            bit101LoggedIn = bit101LoggedIn,
+            seatLoggedIn = seatLoggedIn,
         )
     }
 

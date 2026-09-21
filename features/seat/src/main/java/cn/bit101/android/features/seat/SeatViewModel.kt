@@ -9,6 +9,7 @@ import cn.bit101.android.features.seat.api.SeatHttp
 import cn.bit101.android.features.seat.api.SeatSession
 import cn.bit101.android.features.seat.api.SeatSmsChallenge
 import cn.bit101.android.features.seat.api.SeatTaskRepository
+import cn.bit101.android.features.seat.api.seatErrorText
 import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.Seat
@@ -518,9 +519,7 @@ class SeatViewModel @Inject constructor(
         val e = result.exceptionOrNull()
         // 会话失效时清空 token 并终止任务，UI 回到登录门禁（否则下次仍拿着死 token 请求）
         handleApiError(e)
-        return if (e?.message == SeatApi.TOKEN_EXPIRED || e?.cause?.message == SeatApi.TOKEN_EXPIRED)
-            "登录已失效，请重新授权座位系统"
-        else e?.message ?: "预约失败，未知错误"
+        return seatErrorText(e, "预约失败，未知错误")
     }
 
     fun addTask(
@@ -574,7 +573,11 @@ class SeatViewModel @Inject constructor(
 
     private suspend fun finishCancel(result: Result<Boolean>): String? {
         if (result.isFailure || result.getOrNull() != true) {
-            return result.exceptionOrNull()?.message ?: "取消失败，未知错误"
+            val e = result.exceptionOrNull()
+            // ⚠️ 与预约路径一致：会话失效要清 token，UI 才能回到登录门禁。
+            //    此前取消路径漏了这一步 —— 死 token 一直留着，每次取消都失败。
+            handleApiError(e)
+            return seatErrorText(e, "取消未完成")
         }
         // 规则规定每天限取消 2 次，服务端无计数接口 → 本地按天累计，仅用于提示
         markCancelUsed()

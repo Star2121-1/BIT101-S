@@ -17,41 +17,55 @@
         <item name="android:textSize">15sp</item>
     </style>
 
-    <!-- 一行内容：左侧主体占满，右侧 trail 自适应 -->
+    <!-- 一行内容 = 两行式：
+         第 1 行「标记 + 课程名」（独占全宽，可换行到 2 行）
+         第 2 行「时间 + 地点」（靠右，见 WidgetRowMeta） -->
     <style name="WidgetRow">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:orientation">horizontal</item>
-        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">vertical</item>
     </style>
 
+    <!-- 课程名：独占全宽。允许换行到 2 行 ——
+         窄组件下「计算机系统导论」这类名字不再被截成一个字（真机 2026-09-21 实测）。
+         仍保留 ellipsize 兜底超长名。 -->
     <style name="WidgetRowMain">
-        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_weight">1</item>
-        <item name="android:maxLines">1</item>
+        <item name="android:maxLines">2</item>
         <item name="android:ellipsize">end</item>
         <item name="android:textSize">15sp</item>
     </style>
 
-    <style name="WidgetRowTrail">
-        <item name="android:layout_width">wrap_content</item>
+    <!-- 第 2 行：时间 + 地点，整体靠右。
+         ⚠️ 时间与地点都为空时整行由代码隐藏（否则留一条空行占高度）。 -->
+    <style name="WidgetRowMeta">
+        <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginStart">6dp</item>
-        <item name="android:maxLines">1</item>
-        <item name="android:textSize">12sp</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">end</item>
     </style>
 
     <!-- 上课时间：`09:55-12:20`，比教室稍显眼一点（用正文色而非次要色） -->
     <style name="WidgetRowTime">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginStart">8dp</item>
         <item name="android:maxLines">1</item>
         <item name="android:textSize">12sp</item>
     </style>
 
-    <!-- 座位页的「立即预约」按钮：胶囊底 + 强调色文字 -->
+    <!-- 教室 / 剩余时间 -->
+    <style name="WidgetRowTrail">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">8dp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <!-- 座位页的「立即预约 / 登录」按钮：胶囊底 + 强调色文字 -->
     <style name="WidgetAction">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">34dp</item>

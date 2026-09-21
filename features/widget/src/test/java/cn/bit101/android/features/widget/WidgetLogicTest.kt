@@ -1,5 +1,6 @@
 package cn.bit101.android.features.widget
 
+import cn.bit101.android.config.setting.base.AppRoutes
 import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
@@ -403,11 +404,12 @@ class WidgetLogicTest {
             limit = 3,
             timeTable = t,
         )
-        // 14:12 时第 6-7 节正在上，窗口应该以它开头（而不是停在上午的早课）
-        assertEquals("计算机系统导论", page.primary?.main)
-        assertEquals(ClassState.ONGOING, page.primary?.highlight)
-        assertEquals(1, page.secondary.size)
-        assertEquals("开源软件开发", page.secondary[0].main)
+        // 4 门课放不下 3 行 → 开窗，且以正在上的那节为中心：
+        // 早课被挤出窗口（用户不想在下午看早课），但前后的课都在
+        assertEquals("操作系统", page.primary?.main)
+        assertEquals("计算机系统导论", page.secondary[0].main)
+        assertEquals(ClassState.ONGOING, page.secondary[0].highlight)
+        assertEquals("开源软件开发", page.secondary[1].main)
     }
 
     /**
@@ -443,13 +445,14 @@ class WidgetLogicTest {
 
     @Test
     fun `高度决定行数，且不会超出布局能放下的行数`() {
-        // 4×3（180dp）→ 3 行；拖矮到 4×2（110dp）→ 2 行；再矮 → 1 行
-        assertEquals(3, WidgetLogic.rowsForHeight(180))
-        assertEquals(3, WidgetLogic.rowsForHeight(140))
-        assertEquals(2, WidgetLogic.rowsForHeight(139))
+        // 4×3（上报 193dp）→ 3 行；拖矮到 4×2（110dp）→ 2 行；再矮 → 1 行
+        // ⚠️ 两行式行（课程名 + 时间/地点）每行更高，阈值与单行版不同
+        assertEquals(3, WidgetLogic.rowsForHeight(193))
+        assertEquals(3, WidgetLogic.rowsForHeight(145))
+        assertEquals(2, WidgetLogic.rowsForHeight(144))
         assertEquals(2, WidgetLogic.rowsForHeight(110))
-        assertEquals(2, WidgetLogic.rowsForHeight(100))
-        assertEquals(1, WidgetLogic.rowsForHeight(99))
+        assertEquals(2, WidgetLogic.rowsForHeight(95))
+        assertEquals(1, WidgetLogic.rowsForHeight(94))
         // 系统没给尺寸（部分 ROM 不写 options）：按完整行数渲染，宁可多显示
         assertEquals(3, WidgetLogic.rowsForHeight(0))
         assertEquals(3, WidgetLogic.rowsForHeight(-1))
@@ -500,5 +503,118 @@ class WidgetLogicTest {
         )
         assertEquals("计算机系统导论", page.primary?.main)
         assertTrue(page.secondary.isEmpty())
+    }
+
+    // ---------------------------------------- 显示窗口（2026-09-21 真机反馈修正）
+
+    /**
+     * 真机场景：下午看组件，当天 3 门课只看到 1 门。
+     * 旧版「窗口从当前那节开始往后取」把上过的课全切掉了 ——
+     * 用户要的是「看到当天的课」，高亮只是标记，不是筛选。
+     */
+    @Test
+    fun `当天的课放得下就全部显示，同时高亮正在上的那节`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        val courses = listOf(
+            course(name = "操作系统", start = 3, end = 5),
+            course(name = "计算机系统导论", start = 6, end = 7),
+            course(name = "开源软件开发", start = 8, end = 10),
+        )
+        // 16:26：8-10 节（15:15-17:40）正在上 —— 旧版此时只剩这 1 门
+        val page = WidgetLogic.coursePage(
+            courses = courses, week = 3, weekday = 3,
+            now = LocalTime.of(16, 26), timeTable = t,
+        )
+        assertEquals("操作系统", page.primary?.main)
+        assertEquals(2, page.secondary.size)
+        assertEquals("开源软件开发", page.secondary[1].main)
+        assertEquals(ClassState.ONGOING, page.secondary[1].highlight)
+        assertNull(page.primary?.highlight)
+    }
+
+    @Test
+    fun `课多到放不下时以焦点为中心开窗`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        val courses = (1..6).map {
+            course(name = "课$it", start = it * 2 - 1, end = it * 2)
+        }
+        // 12:00：第 5 节（11:35-12:20）正在上，属于第 3 门课
+        val page = WidgetLogic.coursePage(
+            courses = courses, week = 3, weekday = 3,
+            now = LocalTime.of(12, 0), limit = 3, timeTable = t,
+        )
+        // 窗口以焦点为中心：显示第 2、3、4 门，焦点（第 3 门）落在中间
+        assertEquals(3, page.secondary.size + 1)
+        assertEquals("课2", page.primary?.main)
+        assertNull(page.primary?.highlight)
+        assertEquals("课3", page.secondary[0].main)
+        assertEquals(ClassState.ONGOING, page.secondary[0].highlight)
+        assertEquals("课4", page.secondary[1].main)
+    }
+
+    // ---------------------------------------- 登录引导（2026-09-21 新增）
+
+    @Test
+    fun `未登录时课程页整页换成登录引导`() {
+        val page = WidgetLogic.coursePage(
+            courses = listOf(course()), week = 3, weekday = 3, loggedIn = false,
+        )
+        assertNull(page.primary)
+        assertEquals("未登录 BIT101", page.loginPrompt)
+    }
+
+    @Test
+    fun `未登录时座位页提示未登录座位系统`() {
+        val page = WidgetLogic.seatPage(lines = emptyList(), loggedIn = false)
+        assertEquals("未登录座位系统", page.loginPrompt)
+    }
+
+    @Test
+    fun `登录后不再显示引导`() {
+        val page = WidgetLogic.coursePage(
+            courses = listOf(course()), week = 3, weekday = 3, loggedIn = true,
+        )
+        assertNull(page.loginPrompt)
+        assertEquals("高等数学", page.primary?.main)
+    }
+
+    @Test
+    fun `未登录的动作键是登录且课程页去登录页`() {
+        val page = WidgetLogic.coursePage(
+            courses = listOf(course()), week = 3, weekday = 3, loggedIn = false,
+        )
+        val action = WidgetLogic.actionOf(page, rowLimit = 3)
+        assertEquals("登录", action?.label)
+        assertEquals(AppRoutes.LOGIN, action?.route)
+    }
+
+    @Test
+    fun `座位页未登录的动作键也去座位页而不是立即预约`() {
+        val page = WidgetLogic.seatPage(lines = emptyList(), loggedIn = false)
+        val action = WidgetLogic.actionOf(page, rowLimit = 3)
+        assertEquals("登录", action?.label)
+        assertEquals("seat", action?.route)
+    }
+
+    @Test
+    fun `座位页已登录且有余位时显示立即预约`() {
+        val page = WidgetLogic.seatPage(
+            lines = listOf(WidgetLine(lead = "座位 001", main = "进行中")),
+            limit = 3,
+            loggedIn = true,
+        )
+        val action = WidgetLogic.actionOf(page, rowLimit = 3)
+        assertEquals("立即预约", action?.label)
+        assertEquals("seat", action?.route)
+    }
+
+    @Test
+    fun `座位页内容占满时不显示动作键`() {
+        val page = WidgetLogic.seatPage(
+            lines = (1..3).map { WidgetLine(lead = "座位 00$it", main = "进行中") },
+            limit = 3,
+            loggedIn = true,
+        )
+        assertNull(WidgetLogic.actionOf(page, rowLimit = 3))
     }
 }
