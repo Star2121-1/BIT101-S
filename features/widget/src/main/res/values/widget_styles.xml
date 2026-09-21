@@ -42,4 +42,27 @@
         <item name="android:textSize">12sp</item>
     </style>
 
+    <!-- 上课时间：`09:55-12:20`，比教室稍显眼一点（用正文色而非次要色） -->
+    <style name="WidgetRowTime">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">8dp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <!-- 座位页的「立即预约」按钮：胶囊底 + 强调色文字 -->
+    <style name="WidgetAction">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">34dp</item>
+        <item name="android:layout_marginTop">12dp</item>
+        <item name="android:background">@drawable/widget_action_background</item>
+        <item name="android:gravity">center</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:paddingStart">18dp</item>
+        <item name="android:paddingEnd">18dp</item>
+        <item name="android:textColor">@color/widget_tab_selected_text</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
 </resources>

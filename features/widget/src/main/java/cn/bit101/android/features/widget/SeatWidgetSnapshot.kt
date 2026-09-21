@@ -12,9 +12,10 @@ import android.content.SharedPreferences
  * - 反过来让 `features:seat` 在状态变化时**写入这份快照**，组件只读。
  *   座位模块可选地调用，组件在没有座位模块时也能正常显示另外两页。
  *
- * 存储用普通 SharedPreferences 而非 DataStore：小组件的 `AppWidgetProvider`
- * 运行在主进程，读取时机是 `provideGlance`（协程可用但 SharedPreferences
- * 同步读更简单、更快，且这里的数据不含敏感信息 —— 只有座位号与时间）。
+ * 存储用普通 SharedPreferences 而非 DataStore：[WidgetViews] 的渲染发生在
+ * `AppWidgetProvider` 的广播回调里，需要**同步**取数；SharedPreferences 读已有缓存、
+ * 毫秒级返回，而 DataStore 是挂起的，会把渲染拖成一个异步流程。
+ * 这里的数据也不含敏感信息 —— 只有座位号与时间。
  */
 object SeatWidgetSnapshot {
 

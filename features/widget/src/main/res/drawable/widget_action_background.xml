@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「立即预约」按钮底：胶囊形 + 选中页签同款底色 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_tab_selected_bg" />
+    <corners android:radius="17dp" />
+</shape>

@@ -130,9 +130,12 @@ features/seat/
 
 ```
 features/widget/               # 桌面小组件（课程 / DDL / 座位 三页）
-├── WidgetLogic.kt             # 全部纯逻辑聚合（25 条单测）
-├── WidgetRepository.kt        # Room → WidgetLogic 取数
-├── BIT101Widget.kt            # Glance UI + 翻页 ActionCallback + 仓库 Holder
+├── WidgetLogic.kt             # 全部纯逻辑聚合：周次/节次/高亮/行数档位（32 条单测）
+├── WidgetRepository.kt        # Room + 设置 → WidgetLogic 取数
+├── WidgetViews.kt             # WidgetData → RemoteViews（页签/行/按钮 + PendingIntent）
+├── BIT101WidgetProvider.kt    # AppWidgetProvider：onUpdate / 点击广播 / 渲染
+├── WidgetPageStore.kt         # 每个实例记住当前页号（SharedPreferences）
+├── WidgetRepositoryHolder.kt  # 仓库 Holder + Hilt EntryPoint 兜底
 ├── SeatWidgetSnapshot.kt      # 座位 → 组件的单向数据桥
 ├── WidgetRefreshWorker.kt     # WorkManager 兜底刷新 + WidgetUpdater
 └── WidgetAppStartup.kt        # Hilt EntryPoint 接线（组件由系统实例化）
@@ -141,7 +144,10 @@ features/widget/               # 桌面小组件（课程 / DDL / 座位 三页�
 ⚠️ **`features/widget` 不依赖 `features:seat`** —— 由座位侧
 `SeatWidgetPublisher` 主动把快照写进 `SeatWidgetSnapshot`。这样组件进程拉起
 不会连带初始化座位模块的重依赖，没开座位功能时另两页照常显示。
-Glance 的 API 陷阱与验证清单见 **[docs/widget.md](docs/widget.md)**。
+
+⚠️ **渲染用传统 `RemoteViews`，不用 Glance** —— Glance 的 `update()` 对已存在的
+Session 不保证重跑渲染，点击后会「状态写了但画面不变」。踩坑全过程（含源码证据）
+与验证清单见 **[docs/widget.md](docs/widget.md)**。
 
 ### 座位图渲染（易踩坑，改动前必读）
 
@@ -218,7 +224,7 @@ master（= 可发布状态，随时能打 APK）
 约定：
 
 - 分支**独立完成、独立验证**（编译 + 单测 + 模拟器/真机实测）后合回 `master`。
-- 合并前在 `master` 打 tag 作为回退点（当前基线为 `v1.5.3`）。
+- 合并前在 `master` 打 tag 作为回退点（已有 `v1.5.3` 座位模块基线、`v1.6.0`/`v1.6.1` 组件）。
 - **版本号只在合并回 `master` 时改**（根 `build.gradle` 的 `versions` 块），
   分支内不动 —— 避免多分支并行时冲突。
 - 座位模块的既有约定在后续所有开发中沿用：`SeatLog` 统一日志出口、
