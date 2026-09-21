@@ -204,18 +204,19 @@ class WidgetLogicTest {
         assertEquals(listOf("明天的课"), choice.blocks.courseNames())
     }
 
-    /** 今天全是空档时看今天没有意义，直接看明天。 */
+    /** 2026-09-22 规则收窄：今天没课也不切明天，停在今天显示整段空闲。 */
     @Test
-    fun `今天没课时显示明天`() {
+    fun `今天没课时仍停在今天`() {
         val courses = listOf(course(name = "明天的课", weekday = 4, start = 3, end = 4))
 
         val choice = WidgetLogic.pickDay(courses, today, LocalTime.of(9, 0), firstDay)
 
-        assertTrue(choice.isTomorrow)
-        assertEquals(listOf("明天的课"), choice.blocks.courseNames())
+        assertFalse(choice.isTomorrow)
+        assertEquals(1, choice.blocks.size)
+        assertEquals(BlockKind.FREE, choice.blocks[0].kind)
     }
 
-    /** 明天也没课就别切了 —— 停在今天，至少能看到「今天全天没课」。 */
+    /** 明天没课就别切了 —— 停在今天，至少能看到「今天全天没课」。 */
     @Test
     fun `今天明天都没课时停在今天`() {
         val choice = WidgetLogic.pickDay(emptyList(), today, LocalTime.of(21, 0), firstDay)
@@ -320,6 +321,18 @@ class WidgetLogicTest {
         val page = WidgetLogic.coursePage(courses, today, now = null, firstDay = firstDay)
 
         assertEquals(listOf("高等数学"), page.courses().map { it.main })
+    }
+
+    /** 课程行可点（跳课表），空闲行不可点。 */
+    @Test
+    fun `课程行带 openRoute 空闲行不带`() {
+        val courses = listOf(course(name = "高等数学", weekday = 3, start = 1, end = 2))
+
+        val page = WidgetLogic.coursePage(courses, today, now = null, firstDay = firstDay)
+
+        assertEquals(2, page.items.size)
+        assertEquals("schedule", page.items[0].openRoute)
+        assertNull(page.items[1].openRoute)
     }
 
     @Test

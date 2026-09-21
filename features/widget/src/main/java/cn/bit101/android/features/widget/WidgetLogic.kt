@@ -110,6 +110,8 @@ data class WidgetLine(
     val highlight: ClassState? = null,
     /** 弱化显示（空闲时段用次要色，不与课程抢视觉） */
     val muted: Boolean = false,
+    /** 点这条打开 App 的哪个路由（如课表页 `"schedule"`）；null = 不可点 */
+    val openRoute: String? = null,
 )
 
 /**
@@ -317,13 +319,12 @@ object WidgetLogic {
     /**
      * 决定组件此刻显示哪一天。
      *
-     * 规则（2026-09-21 依用户反馈）：
-     * 1. **今天没有任何课** → 直接看明天（今天全是空档的话，看今天没有意义）
-     * 2. **现在已经过了今天的最后一个时段** → 看明天
-     * 3. 其余（含"还没到第一堂课"）→ 看今天，由 [scrollIndexOf] 决定滚到哪
+     * 规则（2026-09-22 依用户反馈收窄）：
+     * **只有「现在已经过了今天的最后一个时段」才切到明天**；
+     * 今天没课也不再切 —— 停在今天显示整段空闲（日期栏会写清是哪天）。
      *
      * ⚠️ 只有明天**有课**时才切过去 —— 否则会出现「今晚看明天，明天也是一片空白」，
-     * 不如停在今天（今天全天没课时至少能看到「空闲 08:00-20:55」）。
+     * 不如停在今天。
      */
     fun pickDay(
         courses: List<CourseScheduleEntity>,
@@ -335,18 +336,11 @@ object WidgetLogic {
         val todayBlocks = blocksOf(courses, today, firstDay, table)
         val tomorrow = today.plusDays(1)
 
-        fun tomorrowIfHasCourse(): DayChoice? {
-            val blocks = blocksOf(courses, tomorrow, firstDay, table)
-            return if (blocks.any { it.kind == BlockKind.COURSE }) {
-                DayChoice(tomorrow, isTomorrow = true, blocks)
-            } else null
-        }
-
-        if (todayBlocks.none { it.kind == BlockKind.COURSE }) {
-            return tomorrowIfHasCourse() ?: DayChoice(today, isTomorrow = false, todayBlocks)
-        }
         if (now != null && isAfterAll(todayBlocks, now, table)) {
-            return tomorrowIfHasCourse() ?: DayChoice(today, isTomorrow = false, todayBlocks)
+            val blocks = blocksOf(courses, tomorrow, firstDay, table)
+            if (blocks.any { it.kind == BlockKind.COURSE }) {
+                return DayChoice(tomorrow, isTomorrow = true, blocks)
+            }
         }
         return DayChoice(today, isTomorrow = false, todayBlocks)
     }
@@ -534,7 +528,7 @@ object WidgetLogic {
                 block.course.toLine(
                     state = if (focus?.first == courseNo) focus.second else null,
                     table = timeTable,
-                )
+                ).copy(openRoute = PageShowOnNav.Schedule.toPageData().value)
             } else {
                 freeLine(block, timeTable)
             }

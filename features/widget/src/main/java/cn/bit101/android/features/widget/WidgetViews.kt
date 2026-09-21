@@ -134,6 +134,28 @@ internal object WidgetViews {
         rv.setViewVisibility(R.id.widget_list, View.VISIBLE)
         // 直接定位到「现在」所处的时段（课程页）；其余页从头显示
         rv.setScrollPosition(R.id.widget_list, page.scrollTo.coerceAtLeast(0))
+
+        // 列表条目的点击模板（collection 的标准做法）：模板在这里挂一次，
+        // 条目里用 setOnClickFillInIntent 补 extras —— 只有带 fillInIntent 的条目可点。
+        rv.setPendingIntentTemplate(R.id.widget_list, listTapTemplate(context, appWidgetId))
+    }
+
+    /**
+     * 列表条目的点击模板：打开 App 并按条目自己的 [WidgetLine.openRoute] 跳页。
+     * extras 由条目的 fillInIntent 提供，没有 fillInIntent 的条目点了没反应。
+     */
+    private fun listTapTemplate(context: Context, appWidgetId: Int): PendingIntent {
+        val intent = Intent().apply {
+            setClassName(context.packageName, MAIN_ACTIVITY_CLASS)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            data = Uri.parse("bit101://goto/list/$appWidgetId")
+        }
+        return PendingIntent.getActivity(
+            context,
+            appWidgetId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun showEmpty(rv: RemoteViews, text: String) {
@@ -195,6 +217,15 @@ internal object WidgetViews {
         rv.setTextViewText(R.id.item_time, line.time)
         rv.setTextColor(R.id.item_time, timeColor(context, line))
         rv.setTextViewText(R.id.item_trail, line.trail)
+
+        // 课程条目点一下 → 打开 App 跳到课表页（extras 经列表的 PendingIntentTemplate 合并）。
+        // ⚠️ 组件里没有「双击」可用：条目只收一次点击，且滑动不会误触发点击。
+        line.openRoute?.let { route ->
+            rv.setOnClickFillInIntent(
+                R.id.item_root,
+                Intent().putExtra(GOTO_EXTRA, route),
+            )
+        }
         return rv
     }
 
