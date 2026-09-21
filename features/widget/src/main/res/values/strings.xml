@@ -13,4 +13,5 @@
     <string name="widget_empty_course">今日无课</string>
     <string name="widget_empty_ddl">暂无待办</string>
     <string name="widget_empty_seat">暂无预约</string>
+    <string name="widget_refresh">刷新</string>
 </resources>

@@ -2,21 +2,25 @@
 <!--
   桌面小组件配置。
 
+  - 4×3 尺寸。旧的 4×2 装不下放大后的字号（页签 + 3 行内容），
+    字号变大是用户明确要求的，所以整体放大一档。
+  - minWidth/minHeight 按 Android 官方换算表给：4 格 = 250dp、3 格 = 180dp。
+    Android 12+ 优先用 targetCell*，旧系统回落到 min*。
   - updatePeriodMillis 设为 0：系统的最小周期也是 30 分钟且不精确，
     我们改用 WorkManager + App 内数据变更时主动刷新（见 WidgetUpdater）。
-  - resizeMode 允许横向与纵向拉伸；minResizeHeight 保证至少能显示 3 行内容。
+  - resizeMode 允许横向与纵向拉伸。
   - widgetCategory=home_screen 只上桌面（不上锁屏，锁屏不需要，也避免隐私问题）。
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_description"
-    android:initialLayout="@layout/glance_default_loading_layout"
-    android:minWidth="180dp"
-    android:minHeight="110dp"
-    android:minResizeWidth="180dp"
-    android:minResizeHeight="110dp"
+    android:initialLayout="@layout/widget_root"
+    android:minWidth="250dp"
+    android:minHeight="180dp"
+    android:minResizeWidth="250dp"
+    android:minResizeHeight="180dp"
     android:previewImage="@drawable/widget_preview"
     android:resizeMode="horizontal|vertical"
     android:targetCellWidth="4"
-    android:targetCellHeight="2"
+    android:targetCellHeight="3"
     android:updatePeriodMillis="0"
     android:widgetCategory="home_screen" />

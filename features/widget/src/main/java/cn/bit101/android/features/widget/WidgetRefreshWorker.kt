@@ -1,7 +1,6 @@
 package cn.bit101.android.features.widget
 
 import android.content.Context
-import androidx.glance.appwidget.updateAll
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -36,10 +35,11 @@ class WidgetRefreshWorker(
     override suspend fun doWork(): Result {
         // 失败不重试：组件数据陈旧不是错误，下次周期到了自然会刷新。
         // 返回 retry 会让 WorkManager 在退避期内反复唤醒设备，得不偿失。
-        runCatching {
-            // updateAll 只重绘组件，数据由 provideGlance 自己重新读（见该方法的说明）
-            BIT101Widget().updateAll(applicationContext)
-        }
+        //
+        // 用 renderAllNow（而不是异步的 requestRenderAll）：
+        // 在 Worker 自己的协程里同步渲染完再返回，避免 doWork 返回后协程被收走、
+        // 渲染半途夭折。单次渲染是「读一次 Room + 构建布局 + 下发」，百毫秒级。
+        runCatching { BIT101WidgetProvider.renderAllNow(applicationContext) }
         return Result.success()
     }
 
@@ -88,16 +88,12 @@ class WidgetRefreshWorker(
 object WidgetUpdater {
 
     /**
-     * 立即刷新所有组件实例。
+     * 刷新所有组件实例。
      *
-     * ⚠️ 必须在**协程**里调用（`updateAll` 是 suspend）。
-     * 调用方若在 ViewModel：`viewModelScope.launch { WidgetUpdater.refresh(context) }`。
-     *
-     * ⚠️ `updateAll(context)` **不接受数据参数** —— 它只是通知系统重绘，
-     * 真正的数据由 `provideGlance` 自己重新拉取。所以这里**不需要**先 `load()`：
-     * 多拉一次纯属浪费（Room 查询 + 可能的 IO）。
+     * 走 [BIT101WidgetProvider.requestRenderAll]：读一次本地数据 → 构建 RemoteViews →
+     * `AppWidgetManager.updateAppWidget()`，同步下发。这里不等待完成，调用方不必是协程。
      */
-    suspend fun refresh(context: Context) {
-        runCatching { BIT101Widget().updateAll(context.applicationContext) }
+    fun refresh(context: Context) {
+        runCatching { BIT101WidgetProvider.requestRenderAll(context) }
     }
 }

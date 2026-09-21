@@ -1,5 +1,120 @@
 # CHANGES
 
+## 2026-09-21 v1.6.1 桌面小组件界面重做（依真机反馈）
+
+真机（NP05J）试用后反馈：字体太小不好看、翻页按钮太小点不中、
+**切到后两页就回不去了**、没有刷新入口。逐条处理。
+
+### 0. ⭐ 渲染方案重写：弃用 Glance，改回传统 RemoteViews
+
+**这是本轮最关键的改动**，其它几项都是它的附属。
+
+排查「切过去回不来」时发现：点击回调**执行了**、页号**写入成功了**
+（可直接读存储验证），`update()` 也**没抛异常**，但 `provideGlance`
+**一次都没被调用** —— 渲染压根没发生，界面停在旧内容上。
+
+读 Glance 源码确认了原因：
+
+```kotlin
+// GlanceAppWidget.kt
+internal suspend fun update(context, appWidgetId, options) {
+    sessionManager.runWithLock {
+        if (!isSessionRunning(...)) { startSession(...); return@runWithLock }
+        session.updateGlance()          // ← 只是发一个事件
+    }
+}
+// AppWidgetSession.kt
+suspend fun updateGlance() { sendEvent(UpdateGlanceState) }
+```
+
+`update()` 只负责**驱动 Session**，真正的重绘交给**异步的 Session 事件循环**
+（跑在 WorkManager 的 `SessionWorker` 里）。对**已经存在的 Session**，
+这条路径不保证重新执行 `provideGlance` —— 日志里 `SessionWorker` 报了 SUCCESS，
+画面却没变。
+
+**升级 Glance 1.1.1 无效**；把页号从 Glance state 改存普通 SharedPreferences
+也无效（排除「state 被缓存」的猜测）。
+
+于是改为 **`AppWidgetProvider` + `RemoteViews`**：点击回调里读数据 →
+构建 RemoteViews → `AppWidgetManager.updateAppWidget()`。
+**同步 API，调用即生效**，中间没有任何异步层。
+
+- 新增 `BIT101WidgetProvider`（onUpdate / onReceive / onDeleted）
+- 新增 `WidgetViews`（RemoteViews 构建 + PendingIntent）
+- 新增 `res/layout/widget_root.xml`、`widget_styles.xml`、页签/卡片背景 drawable
+- 删除 `BIT101Widget.kt`（Glance 实现）、移除 glance 依赖
+- 附带修正：`WidgetPageStore`（页号，SharedPreferences）、
+  `WidgetRepositoryHolder` 独立成文件并支持用 `@EntryPoint` 兜底取仓库
+
+⚠️ **PendingIntent 的 `data` 必须唯一**：唯一性只看 `requestCode` +
+`Intent.filterEquals`，而 **filterEquals 不比较 extras** —— 只靠 extras 区分
+目标页会让几个页签被判成同一个 PendingIntent 互相覆盖。
+
+### 1. 交互重做：`‹ ›` 小箭头 → 顶部三页签 + 刷新键
+
+旧版的 `‹`/`›` 是 16sp 字符 + 8dp padding，实际触摸区约 **36×20dp**，
+远小于 Android 规范的 48dp 最小值，两个箭头还紧挨着 —— 真机上极难点中，
+「回不去」就是这么来的。
+
+新布局：`[课程][DDL][座位]  刷新`
+
+| 元素 | 尺寸 | 行为 |
+|------|------|------|
+| 页签 ×3 | 各 ≈ (宽 − 48dp) / 3，高 36dp | **点哪页去哪页**，不必逐页翻 |
+| 刷新 | 48dp × 36dp | 立即重读本地库并重绘 |
+
+每个页签的 `PendingIntent` 用**各自的 `data`**
+（`bit101://page/<appWidgetId>/<page>`）来区分 —— 见开头第 0 节的说明。
+
+### 2. 字号整体放大（用户主诉）
+
+| 位置 | 旧 | 新 |
+|------|----|----|
+| 主行 | 14sp | **16sp** |
+| 次行 | 12sp | **14sp** |
+| 行首标记 / 行尾 | 10sp | **13sp** |
+| 空态文案 | 12sp | **15sp** |
+
+组件尺寸相应从 **4×2 改为 4×3**（minWidth 180→250dp，minHeight 110→180dp），
+否则放不下「页签 + 3 行」。
+
+### 3. 新增刷新键
+
+`RefreshAction` → 重读 Room 并重绘。⚠️ **只重读本地库、不联网** ——
+组件始终不联网，真正的数据同步由 App 负责。
+
+点击后同步重绘：`WidgetViews.build()` → `AppWidgetManager.updateAppWidget()`。
+
+### 4. 组件不再依赖「App 是否被打开过」
+
+`WidgetRepositoryHolder.ensureRepository()`：取不到仓库时用 Hilt `@EntryPoint`
+现取一次。以前必须先手动打开 App 组件才有数据，现在系统拉起组件进程时
+（`Application.onCreate` 跑完）就能自己拿到。
+
+### 5. 兼容性加固（为其他 ROM 铺路）
+
+- **`previewImage` 由 vector 改为 PNG 位图** —— 部分 ROM（尤其华为）的组件
+  选择器只渲染位图，矢量会显示成空白。新增
+  `res/drawable-xxhdpi/widget_preview.png`（750×540，4×3 版式）
+- **刷新键不用 `↻` / `⟳` 字符**：部分系统字体缺这两个字形，会渲染成豆腐块
+  （生成预览图时已实际撞上），改用中文「刷新」
+- `consumer-rules.pro` 里记了一条历史教训：Glance 用
+  `Class.forName(className)` 反射实例化回调，**一旦开 R8 混淆点击就静默失效**。
+  改 RemoteViews 后不需要 keep 规则（Provider 由 manifest 引用、点击走显式
+  Intent），但这段注释留着提醒「别在组件里按类名反射」
+
+### 未做：鸿蒙适配（结论是做不到）
+
+真机反馈「华为鸿蒙 6 添加不了组件」。查证后确认这不是适配问题：
+HarmonyOS 5/6 移除 AOSP，桌面卡片是 **ArkTS 服务卡片（Form）**；
+APK 只能跑在卓易通/出境易的**兼容容器**里，容器不是鸿蒙桌面，
+**没有任何机制**把 `AppWidget` 挂上去（HarmonyOS 7 连容器都会去掉）。
+
+要出卡片只能另做鸿蒙原生应用。完整分析见
+[docs/widget.md](docs/widget.md) 的「平台限制」一节。
+
+---
+
 ## 2026-09-20 v1.6.0 桌面小组件（新增 `features/widget`）
 
 上游设想第 3/5 项「通过小组件在桌面显示课程日程」。**新功能，不影响既有页面**。

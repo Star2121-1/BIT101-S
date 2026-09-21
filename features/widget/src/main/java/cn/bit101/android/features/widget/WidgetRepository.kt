@@ -1,7 +1,6 @@
 package cn.bit101.android.features.widget
 
 import android.content.Context
-import androidx.glance.appwidget.updateAll
 import cn.bit101.android.config.setting.base.CourseScheduleSettings
 import cn.bit101.android.data.repo.base.CoursesRepo
 import cn.bit101.android.data.repo.base.DDLScheduleRepo
@@ -63,10 +62,10 @@ class WidgetRepository @Inject constructor(
     /**
      * 供 App 内部（课表同步、DDL 同步后）调用的刷新触发器。
      *
-     * 组件不在前台，只能靠 `updateAll` 通知系统重绘；数据由 `provideGlance` 自己重读。
+     * 组件不在前台，只能主动通知系统重绘；数据由 Provider 重新读一遍。
      */
-    suspend fun refresh() {
-        runCatching { BIT101Widget().updateAll(context) }
+    fun refresh() {
+        runCatching { BIT101WidgetProvider.requestRenderAll(context) }
     }
 
     private companion object {

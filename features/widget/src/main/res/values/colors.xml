@@ -1,4 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  组件配色。
+
+  ⚠️ 不用 `?attr/colorSurface` 这类主题属性：RemoteViews 在宿主（桌面）进程里
+  被 inflate，主题不一定是我们 App 的，取不到正确的值，可能渲染成黑色。
+  这里写固定色值（Material3 baseline 亮色），保证任何桌面下都一致。
+-->
 <resources>
+
+    <!-- 卡片背景 -->
+    <color name="widget_surface">#FFFBFE</color>
+
+    <!-- 强调色（页签选中、行首标记、刷新键） -->
+    <color name="widget_accent">#6750A4</color>
+
+    <!-- 选中页签的底色 -->
+    <color name="widget_tab_selected_bg">#EADDFF</color>
+
+    <!-- 选中页签的文字色 -->
+    <color name="widget_tab_selected_text">#21005D</color>
+
+    <!-- 未选中页签的文字色 -->
+    <color name="widget_tab_text">#49454F</color>
+
+    <!-- 正文 -->
+    <color name="widget_text_primary">#1C1B1F</color>
+
+    <!-- 次要文字（trail、空态） -->
+    <color name="widget_text_secondary">#49454F</color>
+
+    <!-- 紧急（DDL 已过期 / 24h 内到期） -->
+    <color name="widget_urgent">#D3302F</color>
+
     <color name="widget_preview_bg">#FF9A57</color>
+
 </resources>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 组件预览图占位（部分启动器会读，缺失会导致预览空白） -->
+<!-- 组件卡片背景：白底 + 圆角。RemoteViews 的 background 必须是 drawable。 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
+    <solid android:color="@color/widget_surface" />
     <corners android:radius="16dp" />
-    <solid android:color="#FF9A57" />
 </shape>

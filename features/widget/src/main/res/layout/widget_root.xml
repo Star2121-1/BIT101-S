@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  组件根布局（RemoteViews）。
+
+  ⚠️ 约束（RemoteViews 的限制，不是疏忽）：
+  - 只能用 LinearLayout / FrameLayout / RelativeLayout / GridLayout
+  - 不支持 ConstraintLayout、自定义 View、Compose
+  - `android:background` 要用 drawable 资源
+  - 点击必须由代码 `setOnClickPendingIntent()` 绑定，不能在 XML 里写 onClick
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <!-- 页签行：课程 / DDL / 座位 / 刷新 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tab_0"
+            style="@style/WidgetTab" />
+
+        <TextView
+            android:id="@+id/tab_1"
+            style="@style/WidgetTab" />
+
+        <TextView
+            android:id="@+id/tab_2"
+            style="@style/WidgetTab" />
+
+        <TextView
+            android:id="@+id/tab_refresh"
+            android:layout_width="48dp"
+            android:layout_height="36dp"
+            android:gravity="center"
+            android:maxLines="1"
+            android:text="@string/widget_refresh"
+            android:textColor="@color/widget_accent"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- 空态文案 -->
+    <TextView
+        android:id="@+id/widget_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:maxLines="1"
+        android:textColor="@color/widget_text_secondary"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <!-- 内容：主行 + 次行（次行不用时置为 gone） -->
+    <LinearLayout
+        android:id="@+id/widget_rows"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/row_0"
+            style="@style/WidgetRow">
+
+            <TextView
+                android:id="@+id/row_0_main"
+                style="@style/WidgetRowMain" />
+
+            <TextView
+                android:id="@+id/row_0_trail"
+                style="@style/WidgetRowTrail" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/row_1"
+            style="@style/WidgetRow"
+            android:layout_marginTop="6dp">
+
+            <TextView
+                android:id="@+id/row_1_main"
+                style="@style/WidgetRowMain" />
+
+            <TextView
+                android:id="@+id/row_1_trail"
+                style="@style/WidgetRowTrail" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/row_2"
+            style="@style/WidgetRow"
+            android:layout_marginTop="6dp">
+
+            <TextView
+                android:id="@+id/row_2_main"
+                style="@style/WidgetRowMain" />
+
+            <TextView
+                android:id="@+id/row_2_trail"
+                style="@style/WidgetRowTrail" />
+        </LinearLayout>
+    </LinearLayout>
+
+</LinearLayout>

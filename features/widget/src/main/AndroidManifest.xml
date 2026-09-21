@@ -2,13 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      桌面小组件。Glance 的 AppWidgetReceiver 通过 manifest 声明注册，
-      由系统在桌面添加组件时拉起（运行在 App 主进程）。
+      桌面小组件。用传统的 AppWidgetProvider（不是 Glance 的 GlanceAppWidgetReceiver）——
+      点击后直接 `AppWidgetManager.updateAppWidget()` 同步重绘，不经过任何异步 Session。
+      详见 WidgetViews 的类注释。
     -->
     <application>
 
         <receiver
-            android:name="cn.bit101.android.features.widget.BIT101WidgetReceiver"
+            android:name="cn.bit101.android.features.widget.BIT101WidgetProvider"
             android:exported="false"
             android:label="@string/widget_label">
             <intent-filter>

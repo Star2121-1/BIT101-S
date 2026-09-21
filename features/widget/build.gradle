@@ -53,12 +53,11 @@ dependencies {
     ksp "com.google.dagger:hilt-compiler:${versions.hilt}"
     implementation "androidx.hilt:hilt-navigation-compose:1.1.0"
 
-    // 桌面小组件。Glance 的代码只在 `provideGlance` 渲染组件时执行，
-    // App 正常浏览页面不加载它，所以对主流程无影响。
-    // ⚠️ 但它与 App **同进程**：Glance 会带入自己版本的 compose.runtime，
-    // 升级 Glance 前务必先看一下它要求的 Compose 版本，避免被动升/降级主工程的 Compose。
-    implementation "androidx.glance:glance-appwidget:1.1.0"
-    implementation "androidx.glance:glance-material3:1.1.0"
+    // 桌面小组件。用传统 RemoteViews 方案（不是 Glance）——
+    // 点击后能同步 `AppWidgetManager.updateAppWidget()` 重绘，
+    // 不经过 Glance 的异步 Session（那正是「点了没反应」的根因）。
+    // ⚠️ 代价：布局只能用 LinearLayout 一类的容器 + TextView，不能用 Compose。
+    // 详见 WidgetViews 的类注释。
 
     // 跨零点换天与数据变更后的兜底刷新（最小周期 15 分钟）
     implementation "androidx.work:work-runtime-ktx:2.9.0"
