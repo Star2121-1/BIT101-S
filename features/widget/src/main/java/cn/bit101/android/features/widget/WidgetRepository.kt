@@ -56,7 +56,7 @@ class WidgetRepository @Inject constructor(
             ddlRepo.getFutureDDL(now.minusDays(LOOKBACK_DAYS)).first()
         }.getOrDefault(emptyList())
 
-        val seatLines = runCatching { SeatWidgetSnapshot.read(context) }.getOrDefault(emptyList())
+        val seat = runCatching { SeatWidgetSnapshot.read(context) }.getOrDefault(SeatWidgetSnapshot.Snapshot())
 
         // 登录态（与 App 内对应页面的门禁同一来源）。
         // ⚠️ 读取失败时按「已登录」处理（fail-open）：显示可能过期的数据，
@@ -68,7 +68,7 @@ class WidgetRepository @Inject constructor(
         return WidgetLogic.build(
             courses = courses,
             ddls = ddls,
-            seatLines = seatLines,
+            seat = seat,
             today = today,
             now = now,
             firstDay = firstDay,

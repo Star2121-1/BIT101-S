@@ -154,7 +154,13 @@ internal object WidgetViews {
         rv.setTextViewText(R.id.widget_action, action.label)
         rv.setOnClickPendingIntent(
             R.id.widget_action,
-            gotoPendingIntent(context, appWidgetId, action.route),
+            // 「一键预约」走广播回到 Provider（在后台直接下单，不打开 App）；
+            // 其余动作打开 App 并跳到对应页面。
+            if (action.isQuickReserve) {
+                quickReservePendingIntent(context, appWidgetId, action.quickReserveTaskId.orEmpty())
+            } else {
+                gotoPendingIntent(context, appWidgetId, action.route)
+            },
         )
     }
 
@@ -306,6 +312,23 @@ internal object WidgetViews {
             BIT101WidgetProvider.ACTION_REFRESH,
             Uri.parse("bit101://refresh/$appWidgetId"),
         )
+
+    /**
+     * 「一键预约」：广播回 Provider，由座位模块的 [SeatWidgetBridge] 在后台直接下单。
+     *
+     * ⚠️ `data` 必须含 taskId：PendingIntent 唯一性不比 extras（见 [pagePendingIntent]），
+     * 否则不同任务的一键预约会互相覆盖成同一个。
+     */
+    private fun quickReservePendingIntent(
+        context: Context,
+        appWidgetId: Int,
+        taskId: String,
+    ): PendingIntent = broadcast(
+        context,
+        appWidgetId,
+        BIT101WidgetProvider.ACTION_QUICK_RESERVE,
+        Uri.parse("bit101://quick-reserve/$appWidgetId/$taskId"),
+    ) { putExtra(BIT101WidgetProvider.EXTRA_TASK_ID, taskId) }
 
     /**
      * 打开 App 并直接落在 [route] 指定的页面（`"seat"` / `"login"` 等）。

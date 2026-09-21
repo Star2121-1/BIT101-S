@@ -17,6 +17,9 @@ import dagger.hilt.components.SingletonComponent
 @InstallIn(SingletonComponent::class)
 interface WidgetEntryPoint {
     fun widgetRepository(): WidgetRepository
+
+    /** 组件「一键预约」要用的座位模块能力（由座位模块实现，见 `SeatWidgetBridge`）。 */
+    fun seatWidgetBridge(): SeatWidgetBridge
 }
 
 /**

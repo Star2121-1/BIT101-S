@@ -63,7 +63,9 @@ class BIT101WidgetProvider : AppWidgetProvider() {
         super.onReceive(context, intent)
 
         val action = intent.action ?: return
-        if (action != ACTION_SET_PAGE && action != ACTION_REFRESH) return
+        if (action != ACTION_SET_PAGE && action != ACTION_REFRESH && action != ACTION_QUICK_RESERVE) {
+            return
+        }
 
         val appWidgetId = intent.getIntExtra(
             AppWidgetManager.EXTRA_APPWIDGET_ID,
@@ -77,12 +79,21 @@ class BIT101WidgetProvider : AppWidgetProvider() {
         val pendingResult = goAsync()
         appScope.launch {
             try {
-                if (action == ACTION_SET_PAGE) {
-                    WidgetPageStore.write(
+                when (action) {
+                    ACTION_SET_PAGE -> WidgetPageStore.write(
                         context,
                         appWidgetId,
                         intent.getIntExtra(EXTRA_PAGE, 0),
                     )
+
+                    ACTION_QUICK_RESERVE -> quickReserve(context, appWidgetId, intent)
+
+                    ACTION_REFRESH -> {
+                        // 刷新时顺带拉一次「我的预约」—— 组件上显示的座位状态
+                        //（已预约/使用中/暂离）只有拉了数据才会变。
+                        SeatWidgetBridgeHolder.ensureBridge(context)
+                        WidgetRepositoryHolder.load(context)
+                    }
                 }
                 render(context.applicationContext, appWidgetId)
             } finally {
@@ -91,11 +102,38 @@ class BIT101WidgetProvider : AppWidgetProvider() {
         }
     }
 
+    /**
+     * 「一键预约」：在后台对目标座位直接下单，结果写进快照的提示里（60 秒内可见）。
+     *
+     * ⚠️ 先写「正在预约…」再发请求：网络慢的时候用户点完没有任何反馈，
+     * 会以为是按钮没反应而连点（confirmSeat 幂等，连点无害，但体验差）。
+     */
+    private suspend fun quickReserve(context: Context, appWidgetId: Int, intent: Intent) {
+        val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: return
+        val appContext = context.applicationContext
+
+        SeatWidgetSnapshot.writeNotice(appContext, "正在预约…")
+        render(appContext, appWidgetId)
+
+        val bridge = SeatWidgetBridgeHolder.ensureBridge(appContext)
+        val result = if (bridge == null) {
+            "请先打开 App 登录座位系统"
+        } else {
+            SeatWidgetBridgeHolder.invoke(taskId)
+        }
+        SeatWidgetSnapshot.writeNotice(
+            appContext,
+            result?.let { "预约失败：$it" } ?: "预约成功，请在时限内刷卡签到",
+        )
+    }
+
     companion object {
 
         const val ACTION_SET_PAGE = "cn.bit101.android.features.widget.SET_PAGE"
         const val ACTION_REFRESH = "cn.bit101.android.features.widget.REFRESH"
+        const val ACTION_QUICK_RESERVE = "cn.bit101.android.features.widget.QUICK_RESERVE"
         const val EXTRA_PAGE = "bit101_page"
+        const val EXTRA_TASK_ID = "bit101_task_id"
 
         /**
          * 渲染单个实例。

@@ -484,7 +484,7 @@ class WidgetLogicTest {
 
     @Test
     fun `座位页无数据时空态文案是暂无预约`() {
-        val page = WidgetLogic.seatPage(emptyList())
+        val page = WidgetLogic.seatPage(SeatWidgetSnapshot.Snapshot())
 
         assertTrue(page.isEmpty)
         assertEquals("暂无预约", page.emptyText)
@@ -498,7 +498,7 @@ class WidgetLogicTest {
             WidgetLine(lead = "监控", main = "座位 108", trail = "尝试 3 次"),
         )
 
-        val page = WidgetLogic.seatPage(lines)
+        val page = WidgetLogic.seatPage(SeatWidgetSnapshot.Snapshot(lines = lines))
 
         assertEquals(listOf("座位 051", "座位 108"), page.items.map { it.main })
         assertTrue(page.items.first().urgent)
@@ -511,7 +511,6 @@ class WidgetLogicTest {
         val data = WidgetLogic.build(
             courses = emptyList(),
             ddls = emptyList(),
-            seatLines = emptyList(),
             today = today,
             now = now,
             firstDay = firstDay,
@@ -529,7 +528,6 @@ class WidgetLogicTest {
         val data = WidgetLogic.build(
             courses = emptyList(),
             ddls = listOf(ddl(title = "要交的报告", time = now.plusHours(5))),
-            seatLines = emptyList(),
             today = today,
             now = now,
             firstDay = firstDay,
@@ -646,7 +644,7 @@ class WidgetLogicTest {
 
     @Test
     fun `未登录时座位页提示未登录座位系统`() {
-        val page = WidgetLogic.seatPage(lines = emptyList(), loggedIn = false)
+        val page = WidgetLogic.seatPage(snapshot = SeatWidgetSnapshot.Snapshot(), loggedIn = false)
         assertEquals("未登录座位系统", page.loginPrompt)
     }
 
@@ -673,7 +671,7 @@ class WidgetLogicTest {
 
     @Test
     fun `座位页未登录的动作键也去座位页而不是立即预约`() {
-        val page = WidgetLogic.seatPage(lines = emptyList(), loggedIn = false)
+        val page = WidgetLogic.seatPage(snapshot = SeatWidgetSnapshot.Snapshot(), loggedIn = false)
         val action = WidgetLogic.actionOf(page)
         assertEquals("登录", action?.label)
         assertEquals("seat", action?.route)
@@ -683,7 +681,9 @@ class WidgetLogicTest {
     @Test
     fun `座位页已登录时总是显示立即预约`() {
         val page = WidgetLogic.seatPage(
-            lines = (1..5).map { WidgetLine(lead = "座位 00$it", main = "进行中") },
+            snapshot = SeatWidgetSnapshot.Snapshot(
+                lines = (1..5).map { WidgetLine(lead = "座位 00$it", main = "进行中") },
+            ),
             loggedIn = true,
         )
         val action = WidgetLogic.actionOf(page)

@@ -27,8 +27,19 @@ data class ReservationRecord(
     val status: String = "",
     val statusName: String? = null,
 ) {
+    /**
+     * 预约时段的开始时刻；解析失败返回 null。
+     *
+     * ⚠️ 这是**预约时段**的开始，不是「实际刷卡签到时刻」——
+     * 服务端不返回后者，所以「已用时长」等推算都以此为准。
+     */
+    fun beginLocalTime(): LocalDateTime? = parseDateTime(beginTime)
+
+    /** 预约时段的结束时刻；解析失败返回 null。 */
+    fun endLocalTime(): LocalDateTime? = parseDateTime(endTime)
+
     private val beginLocal: LocalDateTime?
-        get() = parseDateTime(beginTime)
+        get() = beginLocalTime()
 
     /** 预约日期（用于判断是当日还是次日预约）。 */
     val reserveDate: LocalDate?

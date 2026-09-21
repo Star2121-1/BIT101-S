@@ -8,6 +8,7 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import cn.bit101.android.features.widget.SeatWidgetBridgeHolder
 
 /**
  * 座位模块在 App 启动时需要做的一次性接线。
@@ -33,6 +34,9 @@ object SeatAppStartup {
                 context.applicationContext,
                 SeatEntryPoint::class.java,
             )
+            // 组件的「一键预约」要经由 holder 找到座位侧实现 —— 必须在 App 启动时装好，
+            // 否则组件进程先被拉起时拿不到（holder 里是 null，只能提示用户先打开 App）。
+            SeatWidgetBridgeHolder.install(entryPoint.seatWidgetBridge())
             entryPoint.seatWidgetPublisher().start(appScope)
         }
         // 推送器起不来只影响桌面组件，不影响 App 主流程 —— 刻意吞掉异常。
@@ -44,4 +48,7 @@ object SeatAppStartup {
 @InstallIn(SingletonComponent::class)
 interface SeatEntryPoint {
     fun seatWidgetPublisher(): SeatWidgetPublisher
+
+    /** 组件「一键预约」的座位侧实现（绑定见 `SeatWidgetBridgeModule`）。 */
+    fun seatWidgetBridge(): cn.bit101.android.features.widget.SeatWidgetBridge
 }

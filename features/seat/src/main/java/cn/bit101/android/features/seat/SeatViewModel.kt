@@ -5,7 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.user.base.LoginStatus
 import cn.bit101.android.features.seat.api.SeatApi
+import cn.bit101.android.features.seat.api.SeatAutoLogin
 import cn.bit101.android.features.seat.api.SeatHttp
+import cn.bit101.android.features.seat.api.SeatReservationRepository
 import cn.bit101.android.features.seat.api.SeatSession
 import cn.bit101.android.features.seat.api.SeatSmsChallenge
 import cn.bit101.android.features.seat.api.SeatTaskRepository
@@ -67,6 +69,8 @@ class SeatViewModel @Inject constructor(
     private val seatHttp: SeatHttp,
     private val seatApi: SeatApi,
     private val seatSession: SeatSession,
+    private val reservationRepository: SeatReservationRepository,
+    private val autoLogin: SeatAutoLogin,
 ) : ViewModel() {
 
     companion object {
@@ -176,8 +180,19 @@ class SeatViewModel @Inject constructor(
                 // 只在「曾经有 token → 变空」时判定为失效，避免启动初期误报
                 if (hadToken) {
                     hadToken = false
-                    _isLoggedIn.value = false
-                    _authNotice.value = "登录已失效，请重新登录"
+                    // ⚠️ 先别急着把用户打回登录页 —— 学号密码已加密持久化，
+                    // 大多数情况能静默重登成功（v1.6.4 修「老要重新授权」）。
+                    // renew 内部有限流与超时保护，失败自然落回下面的失效提示。
+                    viewModelScope.launch {
+                        val renewed = runCatching { autoLogin.renew() }.getOrNull()
+                        if (renewed != null) {
+                            seatApi.token = renewed
+                            onAuthSuccess()
+                        } else {
+                            _isLoggedIn.value = false
+                            _authNotice.value = "登录已失效，请重新登录"
+                        }
+                    }
                 }
             }
         }
@@ -266,14 +281,15 @@ class SeatViewModel @Inject constructor(
     }
 
     // ── 「我的预约」（签到时限提醒 + 取消）────────────────────────────────
+    //
+    // 数据统一放在 [SeatReservationRepository]：组件的后台刷新与这里的 UI 刷新
+    // 看到的是**同一份**，不会出现「App 里显示已预约、组件上却是监控中」的分裂。
 
-    private val _myReservations = MutableStateFlow<List<ReservationRecord>>(emptyList())
-    val myReservations: StateFlow<List<ReservationRecord>> = _myReservations.asStateFlow()
+    val myReservations: StateFlow<List<ReservationRecord>> = reservationRepository.records
 
     fun refreshMyReservations() {
         viewModelScope.launch {
-            seatApi.getMyReservations()
-                .onSuccess { _myReservations.value = it }
+            reservationRepository.refresh()
                 .onFailure { SeatLog.d(TAG) { "load reservations failed: ${it.message}" } }
         }
     }
@@ -320,6 +336,15 @@ class SeatViewModel @Inject constructor(
 
     /** 检查 seatlib 会话；必要时打开 WebView 登录。返回 true 表示会话可用。 */
     suspend fun ensureSeatlibSession(): Boolean {
+        // ⚠️ token 为空 ≠ 一定要人工登录：先试静默续期（cookie → 持久化凭据）。
+        // 之前这里直接判死，是「老要重新授权」的根因之一 —— 会话一旦被清就永远要人工。
+        if (seatApi.token.isEmpty()) {
+            runCatching { autoLogin.renew() }.getOrNull()?.let {
+                seatApi.token = it
+                onAuthSuccess()
+                return true
+            }
+        }
         if (seatApi.token.isNotEmpty()) return true
         val result = seatSession.authenticateSeatlib()
         if (result.isSuccess) {

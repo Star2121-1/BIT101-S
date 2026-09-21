@@ -96,6 +96,9 @@ fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, mod
     // 「已结束」分组默认收起
     var showFinished by remember { mutableStateOf(false) }
 
+    // 座位预约规则弹窗
+    var showRules by remember { mutableStateOf(false) }
+
     // 每秒重算一次相对时间（已等待 / 最近尝试 / 倒计时 / 更新时间）。
     // 用一个 tick 驱动而不是各处各自 LaunchedEffect，避免多份定时器不同步。
     var nowTick by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -298,9 +301,23 @@ fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, mod
                         }
                     }
                 }
+
+                // ── 规则入口（放列表末尾：想看的人才点，不占预约信息的视线）──────
+                item {
+                    TextButton(
+                        onClick = { showRules = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("查看座位预约规则", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
 
             PullToRefreshContainer(state = pullState, modifier = Modifier.align(Alignment.TopCenter))
+        }
+
+        if (showRules) {
+            SeatRulesDialog(onDismiss = { showRules = false })
         }
     }
 

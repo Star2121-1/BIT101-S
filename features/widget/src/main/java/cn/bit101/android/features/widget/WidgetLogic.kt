@@ -52,20 +52,34 @@ data class WidgetPage(
      * 初次渲染时列表滚动到第几条。课程页用来直接定位到「现在」所处的时段。
      */
     val scrollTo: Int = 0,
+
+    /**
+     * 座位页专用：**可立即下单的目标任务 id**。
+     *
+     * 由座位侧随快照推来（见 `SeatWidgetSnapshot.Snapshot`），非空时底部按钮
+     * 从「立即预约」变成「一键预约」。组件自己不理解座位状态，只透传。
+     */
+    val quickReserveTaskId: String? = null,
 ) {
     val isEmpty: Boolean get() = items.isEmpty()
 }
 
 /**
- * 页面底部的动作键：显示什么文字、点了去哪。
+ * 页面底部的动作键：显示什么文字、点了做什么。
  *
  * [route] 是 App 侧的路由：页面路由取 `PageShowOnNav.toPageData().value`（如 `"seat"`），
  * 登录页取 `AppRoutes.LOGIN`（`"login"`）。
+ *
+ * [quickReserveTaskId] 非 null 时**优先于 [route]**：点按钮直接在后台对
+ * 该任务的目标座位下单，**不打开 App**（2026-09-21 用户选定）。
  */
 data class WidgetAction(
     val label: String,
     val route: String,
-)
+    val quickReserveTaskId: String? = null,
+) {
+    val isQuickReserve: Boolean get() = quickReserveTaskId != null
+}
 
 enum class PageKind(val label: String) {
     /** 当日课程（含空闲时段） */
@@ -404,7 +418,7 @@ object WidgetLogic {
     fun build(
         courses: List<CourseScheduleEntity>,
         ddls: List<DDLScheduleEntity>,
-        seatLines: List<WidgetLine>,
+        seat: SeatWidgetSnapshot.Snapshot = SeatWidgetSnapshot.Snapshot(),
         today: LocalDate,
         now: LocalDateTime,
         firstDay: LocalDate?,
@@ -422,7 +436,7 @@ object WidgetLogic {
                 loggedIn = bit101LoggedIn,
             ),
             ddlPage(ddls, now, loggedIn = bit101LoggedIn),
-            seatPage(seatLines, loggedIn = seatLoggedIn),
+            seatPage(seat, loggedIn = seatLoggedIn),
         )
     )
 
@@ -456,14 +470,21 @@ object WidgetLogic {
     /**
      * 该页底部的动作键；不需要时返回 null。
      *
-     * 优先级：**登录引导 > 立即预约** —— 未登录时给「立即预约」没有意义。
+     * 优先级：**登录引导 > 一键预约 > 立即预约** —— 未登录时后两者都没有意义。
      *
-     * ⚠️ 列表可滚动后不再需要「有余位才显示」的判断：
-     * 动作键固定在列表下方，不会被内容挤掉。
+     * 「一键预约」在座位页**存在可立即下单的目标**（监控/优先任务带着座位目标）时出现：
+     * 点了直接在后台预约，不打开 App。语义是"别等了，现在就约"——
+     * 不是"检测到空位"（监控任务发现空位会立刻自动下单，等用户点来不及）。
      */
     fun actionOf(page: WidgetPage): WidgetAction? = when {
         page.loginPrompt != null ->
             WidgetAction(label = "登录", route = loginRoute(page.kind))
+        page.kind == PageKind.SEAT && page.quickReserveTaskId != null ->
+            WidgetAction(
+                label = "一键预约",
+                route = PageShowOnNav.Seat.toPageData().value,
+                quickReserveTaskId = page.quickReserveTaskId,
+            )
         page.kind == PageKind.SEAT ->
             WidgetAction(
                 label = "立即预约",
@@ -663,14 +684,17 @@ object WidgetLogic {
     /**
      * 座位预约页。
      *
-     * 行由座位模块组装后传入（见 [SeatWidgetSnapshot]）。这里只做空态兜底 ——
-     * 座位模块状态由它自己的仓库持有，小组件不重复实现那套逻辑。
+     * 行由座位模块组装后随快照推来（见 [SeatWidgetSnapshot]）——
+     * 「已预约待签到 / 使用中 / 暂离 / 监控中」的判定都在座位侧的
+     * `SeatStatusLogic` 里，组件只负责显示，**不重复实现那套规则**。
      *
-     * ⚠️ 未登录时**整页换成登录引导**：座位页的动作键（立即预约）在未登录时
+     * @param snapshot 座位侧推来的快照（含显示行、可一键预约的目标、最近一次操作结果）
+     *
+     * ⚠️ 未登录时**整页换成登录引导**：座位页的动作键（一键/立即预约）在未登录时
      * 没有意义，且不登录也拉不到任何预约数据。
      */
     fun seatPage(
-        lines: List<WidgetLine>,
+        snapshot: SeatWidgetSnapshot.Snapshot,
         loggedIn: Boolean = true,
     ): WidgetPage {
         if (!loggedIn) {
@@ -681,11 +705,17 @@ object WidgetLogic {
                 loginPrompt = loginPromptOf(PageKind.SEAT, loggedIn = false),
             )
         }
+        // 「一键预约」的结果提示放在最上面（60 秒后自动消失，见 SeatWidgetSnapshot）。
+        // 不用弹窗/横幅：组件没有弹窗，列表首行是最不打扰又一定看得到的位置。
+        val noticeLine = snapshot.activeNotice()?.let {
+            WidgetLine(lead = "提示", main = it, muted = true)
+        }
         return WidgetPage(
             kind = PageKind.SEAT,
             title = PageKind.SEAT.label,
-            items = lines.take(MAX_ITEMS),
+            items = (listOfNotNull(noticeLine) + snapshot.lines).take(MAX_ITEMS),
             emptyText = "暂无预约",
+            quickReserveTaskId = snapshot.quickReserveTaskId,
         )
     }
 
