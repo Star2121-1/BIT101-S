@@ -37,15 +37,21 @@ internal object WidgetRepositoryHolder {
      * 取数据。取不到时返回「加载中…」的空数据 —— 组件显示空态即可，
      * **绝不抛异常**（异常会让组件渲染失败、显示成一片空白，且用户看不到任何提示）。
      *
-     * @param limit 每页最多显示几行，由组件当前高度决定（见 [WidgetViews.rowsForHeight]）
+     * ⚠️ 这个方法会被**两条路径**调用：
+     * 1. `BIT101WidgetProvider.render()` —— 构建根视图（页签 / 底部说明 / 动作键 / 滚动位置）
+     * 2. `WidgetListService` 的 `RemoteViewsFactory.onDataSetChanged()` —— 构建列表条目
+     *
+     * 两条路径各自读一遍数据，属于可接受的小额重复：把结果塞进 adapter 的 Intent
+     * 传过去虽然省一次查询，但要让 [WidgetLine] 可序列化，且组件被系统持久化恢复时
+     * 类名变更会导致反序列化失败。宁可多查一次。
      */
-    suspend fun load(context: Context, limit: Int = 3): WidgetData =
-        runCatching { ensureRepository(context)?.load(limit = limit) }.getOrNull()
+    suspend fun load(context: Context): WidgetData =
+        runCatching { ensureRepository(context)?.load() }.getOrNull()
             ?: loadingWidgetData()
 
     private fun loadingWidgetData() = WidgetData(
         pages = PageKind.entries.map { kind ->
-            WidgetPage(kind = kind, title = kind.label, primary = null, emptyText = "加载中…")
+            WidgetPage(kind = kind, title = kind.label, items = emptyList(), emptyText = "加载中…")
         }
     )
 }

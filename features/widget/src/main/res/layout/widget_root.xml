@@ -8,22 +8,22 @@
   - `android:background` 要用 drawable 资源
   - 点击必须由代码 `setOnClickPendingIntent()` 绑定，不能在 XML 里写 onClick
 
+  ## 内容区为什么是 ListView（2026-09-21 改造）
+
+  旧版是写死的 3 个 LinearLayout 行，行数还得跟着组件高度降档：
+  - 用户想看「一天的全部行程」（课程 + 空闲），3 行根本放不下
+  - 于是改成 **RemoteViews collection**：`ListView` + `RemoteViewsService`，
+    条目由 `WidgetListService` 的 factory 提供，用户可上下滚动看全天。
+
+  ⚠️ 注意：RemoteViews 的滚动**只能**用 collection 机制（ListView / StackView /
+  AdapterViewFlipper），把内容塞进 ScrollView 是无效的 —— RemoteViews 不支持。
+
   ## 一行为什么是「两行式」（2026-09-21 依真机反馈重做）
 
   旧版单行是 `[节次+课程名] [上课时间] [教室]` 三者同行：
-  - 组件拖窄后，课程名（weight=1 却被 wrap_content 的兄弟挤压）被截成一个字（「开…」）
-  - 用户明确要求：课程名独占一行、时间+地点放第二行靠右
-
-  新结构：
-      ▶ 3-5节 操作系统              ← 第 1 行：标记 + 课程名（独占全宽，可换行）
-                09:55-12:20 理教楼406 ← 第 2 行：时间 + 地点，靠右
-
-  ⚠️ 第 2 行（row_*_meta）在「时间与地点都为空」时由代码隐藏，
-  否则会留一条空行白白占高度（DDL/座位页的时间列常为空）。
-
-  ⚠️ 内容区（widget_body）用 `weight=1 + center_vertical` 填满页签以下的剩余空间
-  并**垂直居中**：组件默认 4×3，直接顶部对齐会在底部留下一大片空白，
-  看起来像没渲染完。居中后上下留白均匀，高度拖到任何值都不会"内容挤在一角"。
+  - 组件拖窄后，课程名被挤成「开…」
+  - 结构改为：第 1 行「标记 + 课程名」独占全宽可换行，第 2 行「时间 + 地点」靠右
+    （条目布局见 widget_item.xml）
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -62,107 +62,51 @@
             android:textSize="13sp" />
     </LinearLayout>
 
-    <!-- 内容区：填满剩余高度并把内容垂直居中（见文件头说明） -->
+    <!-- 内容区：填满页签以下的剩余高度。
+         ⚠️ 列表用 weight=1 + height=0dp，这样它能拿到确定高度并自行滚动；
+        若写 wrap_content，ListView 会试图撑开到全部条目高度，滚动失效。 -->
     <LinearLayout
         android:id="@+id/widget_body"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:gravity="center_vertical"
         android:orientation="vertical">
 
         <!-- 空态 / 未登录提示文案 -->
         <TextView
             android:id="@+id/widget_empty"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:maxLines="1"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:maxLines="2"
             android:textColor="@color/widget_text_secondary"
             android:textSize="15sp"
             android:visibility="gone" />
 
-        <!-- 内容：主行 + 次行（用不到的置为 gone）。
-             ⚠️ 顺序必须在动作按钮之前，按钮要落在内容下面。 -->
-        <LinearLayout
-            android:id="@+id/widget_rows"
+        <!-- 可滚动的内容列表（课程+空闲 / DDL / 座位）。条目的布局见 widget_item.xml -->
+        <ListView
+            android:id="@+id/widget_list"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <LinearLayout
-                android:id="@+id/row_0"
-                style="@style/WidgetRow">
-
-                <TextView
-                    android:id="@+id/row_0_main"
-                    style="@style/WidgetRowMain" />
-
-                <LinearLayout
-                    android:id="@+id/row_0_meta"
-                    style="@style/WidgetRowMeta">
-
-                    <TextView
-                        android:id="@+id/row_0_time"
-                        style="@style/WidgetRowTime" />
-
-                    <TextView
-                        android:id="@+id/row_0_trail"
-                        style="@style/WidgetRowTrail" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/row_1"
-                style="@style/WidgetRow"
-                android:layout_marginTop="8dp">
-
-                <TextView
-                    android:id="@+id/row_1_main"
-                    style="@style/WidgetRowMain" />
-
-                <LinearLayout
-                    android:id="@+id/row_1_meta"
-                    style="@style/WidgetRowMeta">
-
-                    <TextView
-                        android:id="@+id/row_1_time"
-                        style="@style/WidgetRowTime" />
-
-                    <TextView
-                        android:id="@+id/row_1_trail"
-                        style="@style/WidgetRowTrail" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/row_2"
-                style="@style/WidgetRow"
-                android:layout_marginTop="8dp">
-
-                <TextView
-                    android:id="@+id/row_2_main"
-                    style="@style/WidgetRowMain" />
-
-                <LinearLayout
-                    android:id="@+id/row_2_meta"
-                    style="@style/WidgetRowMeta">
-
-                    <TextView
-                        android:id="@+id/row_2_time"
-                        style="@style/WidgetRowTime" />
-
-                    <TextView
-                        android:id="@+id/row_2_trail"
-                        style="@style/WidgetRowTrail" />
-                </LinearLayout>
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- 座位页的「立即预约 / 登录」：点了打开 App 并跳到对应页面 -->
-        <TextView
-            android:id="@+id/widget_action"
-            style="@style/WidgetAction"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:divider="@color/widget_divider"
+            android:dividerHeight="1dp"
+            android:listSelector="@android:color/transparent"
+            android:scrollbars="none"
             android:visibility="gone" />
     </LinearLayout>
+
+    <!-- 底部说明：课程页显示「今天 · 9月21日 周一 · 第3周」。
+         ⚠️ 不能省 —— 晚上组件会自动切到明天，不标日期会被当成 bug。 -->
+    <TextView
+        android:id="@+id/widget_footer"
+        style="@style/WidgetFooter"
+        android:visibility="gone" />
+
+    <!-- 座位页的「立即预约 / 登录」：点了打开 App 并跳到对应页面 -->
+    <TextView
+        android:id="@+id/widget_action"
+        style="@style/WidgetAction"
+        android:visibility="gone" />
 
 </LinearLayout>

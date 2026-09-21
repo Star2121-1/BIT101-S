@@ -38,6 +38,12 @@
     <!-- 即将上课：橙色 -->
     <color name="widget_class_upcoming">#E8710A</color>
 
+    <!-- 列表分隔线（ListView 的 divider） -->
+    <color name="widget_divider">#1FCAC4D0</color>
+
+    <!-- 当前时段所在条目的底色：淡淡的选中色块，配合文字色一起强调 -->
+    <color name="widget_item_highlight_bg">#1AEADDFF</color>
+
     <color name="widget_preview_bg">#FF9A57</color>
 
 </resources>

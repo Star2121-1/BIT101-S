@@ -20,6 +20,20 @@
                 android:resource="@xml/bit101_widget_info" />
         </receiver>
 
+        <!--
+          可滚动列表的数据源（RemoteViews collection）。
+
+          ⚠️ `exported="true"` + `BIND_REMOTEVIEWS` 权限是这一套机制的**标准写法**：
+          桌面（宿主）运行在别的进程，必须跨进程 bind 这个服务才能取到条目视图；
+          而 `android:permission` 把调用方限制在持有该权限者（系统/桌面），
+          第三方应用拿不到，所以放开 exported 并不会带来暴露面。
+          少了任一条都会导致「列表一片空白」且只在宿主进程留一行 Permission Denial。
+        -->
+        <service
+            android:name="cn.bit101.android.features.widget.WidgetListService"
+            android:exported="true"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
     </application>
 
 </manifest>

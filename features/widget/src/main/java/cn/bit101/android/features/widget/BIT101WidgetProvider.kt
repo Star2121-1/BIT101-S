@@ -132,12 +132,12 @@ class BIT101WidgetProvider : AppWidgetProvider() {
         }
 
         private suspend fun render(context: Context, appWidgetId: Int) {
-            // 行数随组件高度变：数据与布局用同一个 limit，避免「取 3 行画 2 行」
-            val limit = WidgetViews.rowsForHeight(context, appWidgetId)
-            val data = WidgetRepositoryHolder.load(context, limit)
-            val remoteViews = WidgetViews.build(context, appWidgetId, data, rowLimit = limit)
-            AppWidgetManager.getInstance(context)
-                .updateAppWidget(appWidgetId, remoteViews)
+            val data = WidgetRepositoryHolder.load(context)
+            val manager = AppWidgetManager.getInstance(context)
+            manager.updateAppWidget(appWidgetId, WidgetViews.build(context, appWidgetId, data))
+            // ⚠️ 必须显式通知列表数据变了：只 updateAppWidget 的话，ListView 会沿用
+            // 缓存的旧条目，表现为「页签切了但内容还是上一页的」。
+            manager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_list)
         }
 
         private fun appWidgetIds(context: Context): IntArray =

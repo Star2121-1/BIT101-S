@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  可滚动列表的一条（课程 / 空闲 / DDL / 座位）。
+
+  ⚠️ 这是 RemoteViews collection 的**条目**布局，由 `WidgetListService` 的
+  factory 通过 `getViewAt()` 逐条构建。约束与根布局相同（只能 LinearLayout 系）。
+
+  两行式结构（依真机反馈，课程名不能再被挤成「开…」）：
+      ▶ 3-5节 操作系统              ← 第 1 行：标记 + 课程名（独占全宽，可换行到 2 行）
+                09:55-12:20 理教楼406 ← 第 2 行：时间 + 地点，靠右
+
+  ⚠️ 第 2 行（item_meta）在「时间与地点都为空」时由代码隐藏，
+  否则会留一条空行白白占高度（DDL/座位页的时间列常为空）。
+
+  ⚠️ 条目内的 id 与根布局不冲突即可 —— 每条 RemoteViews 是独立 inflate 的。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/item_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+
+    <TextView
+        android:id="@+id/item_main"
+        style="@style/WidgetItemMain" />
+
+    <LinearLayout
+        android:id="@+id/item_meta"
+        style="@style/WidgetItemMeta">
+
+        <TextView
+            android:id="@+id/item_time"
+            style="@style/WidgetItemTime" />
+
+        <TextView
+            android:id="@+id/item_trail"
+            style="@style/WidgetItemTrail" />
+    </LinearLayout>
+
+</LinearLayout>

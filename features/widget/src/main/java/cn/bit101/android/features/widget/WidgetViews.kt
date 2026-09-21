@@ -14,7 +14,6 @@ import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import androidx.annotation.ColorRes
-import androidx.annotation.IdRes
 import androidx.core.content.ContextCompat
 import cn.bit101.android.config.setting.base.PageShowOnNav
 import cn.bit101.android.config.setting.base.toPageData
@@ -42,42 +41,10 @@ internal object WidgetViews {
     /** 页签 id，顺序与 [PageKind.entries] 一致 */
     private val TAB_IDS = intArrayOf(R.id.tab_0, R.id.tab_1, R.id.tab_2)
 
-    /** 内容区行数上限（与 `widget_root.xml` 里的行数一致） */
-    const val MAX_ROWS = 3
-
-    /**
-     * 组件当前该显示几行 —— 由它的**实际高度**决定。
-     *
-     * 判定规则是纯逻辑，放在 [WidgetLogic.rowsForHeight] 里以便单测
-     * （这里只负责把系统给的尺寸读出来）。
-     *
-     * ## 为什么读 `OPTION_APPWIDGET_MIN_HEIGHT`
-     *
-     * 实测（2026-09-21，Pixel 6 API 34 + Pixel Launcher，日志已验证）：
-     * 4×3 组件在屏上的实际高度是 **343dp**，而系统上报的是
-     * `MIN_HEIGHT=193` / `MAX_HEIGHT=342` —— 即 **MAX 才等于实际高度**，
-     * MIN 是「用户能拖到的最小高度」这一侧的下界。
-     *
-     * 这里**故意仍取 MIN**：它是保守方向 —— 报小了最多少显示一行，
-     * 报大了会让 3 行内容挤进矮组件里被裁掉。而 4×3 下 193dp 与 342dp
-     * 都远超 3 行所需的 140dp 阈值，结果一致；用户把组件拖矮时 MIN 会随之下调，
-     * 正好触发降档。
-     *
-     * ⚠️ 若将来要改成读 MAX（想在矮组件里也塞 3 行），必须先在真机上
-     * 把组件拖到最小尺寸量一次，确认 3 行在最小高度下放得下（3 行约需 78dp）。
-     */
-    fun rowsForHeight(context: Context, appWidgetId: Int): Int {
-        val options = AppWidgetManager.getInstance(context).getAppWidgetOptions(appWidgetId)
-        // 拿不到（返回 0）时交给 rowsForHeight 走「完整行数」分支
-        val heightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0
-        return WidgetLogic.rowsForHeight(heightDp, MAX_ROWS)
-    }
-
     fun build(
         context: Context,
         appWidgetId: Int,
         data: WidgetData,
-        rowLimit: Int = MAX_ROWS,
     ): RemoteViews {
         val rv = RemoteViews(context.packageName, R.layout.widget_root)
 
@@ -91,26 +58,11 @@ internal object WidgetViews {
             R.id.tab_refresh,
             refreshPendingIntent(context, appWidgetId),
         )
-        renderBody(context, rv, appWidgetId, page, rowLimit)
+        renderFooter(rv, page)
+        renderBody(context, rv, appWidgetId, page)
 
         return rv
     }
-
-    /** 每行用到的控件 id */
-    private data class RowViews(
-        @IdRes val row: Int,
-        @IdRes val main: Int,
-        /** 第 2 行容器（时间 + 地点，靠右）；两者都空时整行隐藏 */
-        @IdRes val meta: Int,
-        @IdRes val time: Int,
-        @IdRes val trail: Int,
-    )
-
-    private val ROWS = listOf(
-        RowViews(R.id.row_0, R.id.row_0_main, R.id.row_0_meta, R.id.row_0_time, R.id.row_0_trail),
-        RowViews(R.id.row_1, R.id.row_1_main, R.id.row_1_meta, R.id.row_1_time, R.id.row_1_trail),
-        RowViews(R.id.row_2, R.id.row_2_main, R.id.row_2_meta, R.id.row_2_time, R.id.row_2_trail),
-    )
 
     // ------------------------------------------------------------------ 页签
 
@@ -146,71 +98,48 @@ internal object WidgetViews {
 
     // ------------------------------------------------------------------ 内容
 
+    private fun renderFooter(rv: RemoteViews, page: WidgetPage?) {
+        val text = page?.footer
+        rv.setViewVisibility(R.id.widget_footer, if (text.isNullOrBlank()) View.GONE else View.VISIBLE)
+        if (!text.isNullOrBlank()) rv.setTextViewText(R.id.widget_footer, text)
+    }
+
     private fun renderBody(
         context: Context,
         rv: RemoteViews,
         appWidgetId: Int,
         page: WidgetPage?,
-        rowLimit: Int,
     ) {
         // 动作键（登录 / 立即预约）由纯逻辑决定，这里只负责画
-        val action = page?.let { WidgetLogic.actionOf(it, rowLimit) }
+        val action = page?.let { WidgetLogic.actionOf(it) }
+        bindAction(context, rv, appWidgetId, action)
 
-        // 未登录 → 整页换成「未登录 + 登录按钮」。
-        // 本地库里的数据可能是几天前同步的，会话已失效时继续展示会让人以为数据是新的。
-        if (page?.loginPrompt != null) {
-            rv.setViewVisibility(R.id.widget_empty, View.VISIBLE)
-            rv.setTextViewText(R.id.widget_empty, page.loginPrompt)
-            rv.setViewVisibility(R.id.widget_rows, View.GONE)
-            bindAction(context, rv, appWidgetId, action)
+        // 列表的 adapter **总是**绑上：即便此刻是空态，切页签后也要能立刻显示内容，
+        // 而 adapter 只能随 RemoteViews 一起下发。
+        rv.setRemoteAdapter(appWidgetId, R.id.widget_list, listAdapterIntent(context, appWidgetId))
+
+        val prompt = page?.loginPrompt
+        if (prompt != null) {
+            // 未登录 → 整页换成「未登录 + 登录按钮」。
+            // 本地库里的数据可能是几天前同步的，会话已失效时继续展示会让人以为数据是新的。
+            showEmpty(rv, prompt)
             return
         }
-
-        val lines = buildList {
-            page?.primary?.let { add(it to true) }
-            page?.secondary.orEmpty().forEach { add(it to false) }
-        }.take(rowLimit.coerceAtLeast(1))
-
-        if (lines.isEmpty()) {
-            // 矮组件下「暂无预约」+ 按钮会超出可视区，此时**让位给按钮** ——
-            // 能一键去抢座比多显示那四个字有用
-            val compact = action != null && rowLimit < MAX_ROWS
-            rv.setViewVisibility(R.id.widget_empty, if (compact) View.GONE else View.VISIBLE)
-            rv.setTextViewText(R.id.widget_empty, page?.emptyText ?: "暂无内容")
-            rv.setViewVisibility(R.id.widget_rows, View.GONE)
-            bindAction(context, rv, appWidgetId, action)
+        if (page == null || page.items.isEmpty()) {
+            showEmpty(rv, page?.emptyText ?: "暂无内容")
             return
         }
 
         rv.setViewVisibility(R.id.widget_empty, View.GONE)
-        rv.setViewVisibility(R.id.widget_rows, View.VISIBLE)
-        bindAction(context, rv, appWidgetId, action)
+        rv.setViewVisibility(R.id.widget_list, View.VISIBLE)
+        // 直接定位到「现在」所处的时段（课程页）；其余页从头显示
+        rv.setScrollPosition(R.id.widget_list, page.scrollTo.coerceAtLeast(0))
+    }
 
-        ROWS.forEachIndexed { i, row ->
-            val line = lines.getOrNull(i)
-            if (line == null) {
-                rv.setViewVisibility(row.row, View.GONE)
-                return@forEachIndexed
-            }
-            val (widgetLine, isPrimary) = line
-            val emphasize = isPrimary || widgetLine.highlight != null
-
-            rv.setViewVisibility(row.row, View.VISIBLE)
-            rv.setTextViewText(row.main, lineText(context, widgetLine, emphasize))
-            rv.setTextViewTextSize(
-                row.main,
-                TypedValue.COMPLEX_UNIT_SP,
-                if (emphasize) 16f else 14f,
-            )
-            rv.setTextColor(row.main, bodyColor(context, widgetLine))
-
-            // 第 2 行（时间 + 地点，靠右）：两者都空时整行隐藏，否则留一条空行白占高度
-            val hasMeta = widgetLine.time.isNotBlank() || widgetLine.trail.isNotBlank()
-            rv.setViewVisibility(row.meta, if (hasMeta) View.VISIBLE else View.GONE)
-            rv.setTextViewText(row.time, widgetLine.time)
-            rv.setTextColor(row.time, timeColor(context, widgetLine))
-            rv.setTextViewText(row.trail, widgetLine.trail)
-        }
+    private fun showEmpty(rv: RemoteViews, text: String) {
+        rv.setViewVisibility(R.id.widget_empty, View.VISIBLE)
+        rv.setTextViewText(R.id.widget_empty, text)
+        rv.setViewVisibility(R.id.widget_list, View.GONE)
     }
 
     /** 绑定底部动作键；显示与否由 [action] 决定（文案与跳转目标也在里面）。 */
@@ -227,6 +156,40 @@ internal object WidgetViews {
             R.id.widget_action,
             gotoPendingIntent(context, appWidgetId, action.route),
         )
+    }
+
+    // ------------------------------------------------------------ 列表条目
+
+    /**
+     * 构建列表里的一条（由 [WidgetListService] 的 factory 逐条调用）。
+     *
+     * ⚠️ 这里必须用**固定色值**而不是主题属性：条目同样是在宿主（桌面）进程
+     * inflate 的，取不到我们 App 的主题。
+     */
+    internal fun buildItem(context: Context, line: WidgetLine): RemoteViews {
+        val rv = RemoteViews(context.packageName, R.layout.widget_item)
+        val emphasize = line.highlight != null
+
+        rv.setTextViewText(R.id.item_main, lineText(context, line, emphasize))
+        rv.setTextViewTextSize(
+            R.id.item_main,
+            TypedValue.COMPLEX_UNIT_SP,
+            if (emphasize) 16f else 15f,
+        )
+        // 当前时段给一层淡色块底 —— 光靠文字色在深色壁纸上不够醒目
+        rv.setInt(
+            R.id.item_root,
+            "setBackgroundResource",
+            if (emphasize) R.drawable.widget_item_highlight else 0,
+        )
+
+        // 第 2 行（时间 + 地点，靠右）：两者都空时整行隐藏，否则留一条空行白占高度
+        val hasMeta = line.time.isNotBlank() || line.trail.isNotBlank()
+        rv.setViewVisibility(R.id.item_meta, if (hasMeta) View.VISIBLE else View.GONE)
+        rv.setTextViewText(R.id.item_time, line.time)
+        rv.setTextColor(R.id.item_time, timeColor(context, line))
+        rv.setTextViewText(R.id.item_trail, line.trail)
+        return rv
     }
 
     /**
@@ -279,19 +242,20 @@ internal object WidgetViews {
         return s
     }
 
-    /** 正文颜色：正在上课绿、马上要上橙、DDL 紧急红、其余正文色。 */
+    /** 正文颜色：正在上课绿、马上要上橙、DDL 紧急红、空闲次要色、其余正文色。 */
     @ColorRes
     private fun bodyColorRes(line: WidgetLine): Int = when {
         line.highlight == ClassState.ONGOING -> R.color.widget_class_ongoing
         line.highlight == ClassState.UPCOMING -> R.color.widget_class_upcoming
         line.urgent -> R.color.widget_urgent
+        line.muted -> R.color.widget_text_secondary
         else -> R.color.widget_text_primary
     }
 
     private fun bodyColor(context: Context, line: WidgetLine) =
         color(context, bodyColorRes(line))
 
-    /** 时间列：跟着状态走色，普通行用次要色。 */
+    /** 时间列：跟着状态走色，普通行与空闲行用次要色。 */
     private fun timeColor(context: Context, line: WidgetLine) =
         color(
             context,
@@ -299,6 +263,21 @@ internal object WidgetViews {
         )
 
     // ------------------------------------------------------------ PendingIntent
+
+    /**
+     * 列表的 adapter Intent。
+     *
+     * ⚠️ 必须把 appWidgetId 放进 extras **并且**用 `toUri()` 生成唯一的 `data`：
+     * - extras 里带 id，factory 才知道该按哪个组件的页签取数据
+     * - `data` 不同，`filterEquals` 才判定为不同 Intent —— 否则多个组件实例会
+     *   共用同一个 RemoteViewsFactory，出现「两个组件内容一模一样」的怪象
+     *   （`toUri(URI_INTENT_SCHEME)` 会把 int extras 编码进 URI，正好满足这一点）
+     */
+    private fun listAdapterIntent(context: Context, appWidgetId: Int): Intent =
+        Intent(context, WidgetListService::class.java).apply {
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+        }
 
     /**
      * 页签点击。

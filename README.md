@@ -130,10 +130,11 @@ features/seat/
 
 ```
 features/widget/               # 桌面小组件（课程 / DDL / 座位 三页）
-├── WidgetLogic.kt             # 全部纯逻辑聚合：周次/节次/高亮/行数档位（32 条单测）
-├── WidgetRepository.kt        # Room + 设置 → WidgetLogic 取数
-├── WidgetViews.kt             # WidgetData → RemoteViews（页签/行/按钮 + PendingIntent）
+├── WidgetLogic.kt             # 全部纯逻辑聚合：周次/节次/全天行程/空闲合并/跨天（53 条单测）
+├── WidgetRepository.kt        # Room + 设置 + 登录态 → WidgetLogic 取数
+├── WidgetViews.kt             # WidgetData → RemoteViews（页签/条目/日期栏/按钮 + PendingIntent）
 ├── BIT101WidgetProvider.kt    # AppWidgetProvider：onUpdate / 点击广播 / 渲染
+├── WidgetListService.kt       # RemoteViewsService：可滚动列表的条目数据源
 ├── WidgetPageStore.kt         # 每个实例记住当前页号（SharedPreferences）
 ├── WidgetRepositoryHolder.kt  # 仓库 Holder + Hilt EntryPoint 兜底
 ├── SeatWidgetSnapshot.kt      # 座位 → 组件的单向数据桥
@@ -144,6 +145,11 @@ features/widget/               # 桌面小组件（课程 / DDL / 座位 三页�
 ⚠️ **`features/widget` 不依赖 `features:seat`** —— 由座位侧
 `SeatWidgetPublisher` 主动把快照写进 `SeatWidgetSnapshot`。这样组件进程拉起
 不会连带初始化座位模块的重依赖，没开座位功能时另两页照常显示。
+
+⚠️ **内容区是可滚动列表**（`ListView` + `WidgetListService`）——
+RemoteViews 不支持 ScrollView，想在组件里滚动只能用 collection 机制。
+`manifest` 里那个 service 必须 `exported="true"` + `BIND_REMOTEVIEWS`，
+且下发 RemoteViews 后要补 `notifyAppWidgetViewDataChanged()`，详见文档。
 
 ⚠️ **渲染用传统 `RemoteViews`，不用 Glance** —— Glance 的 `update()` 对已存在的
 Session 不保证重跑渲染，点击后会「状态写了但画面不变」。踩坑全过程（含源码证据）

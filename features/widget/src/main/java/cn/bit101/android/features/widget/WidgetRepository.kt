@@ -34,19 +34,11 @@ class WidgetRepository @Inject constructor(
      *
      * 各数据源**并行且容错**：任何一个失败都不应让整个组件空白 ——
      * 课表拉不到就显示空课程页，但 DDL 页仍应正常。故每项单独 try/catch。
-     *
-     * @param limit 每页最多显示几行。组件纵向可缩放，行数随之变化
-     *   （见 [WidgetLogic.rowsForHeight]）；数据与布局必须用**同一个** limit，
-     *   否则会出现「取了 3 行只画 2 行」或反之的浪费。
      */
-    suspend fun load(
-        now: LocalDateTime = LocalDateTime.now(),
-        limit: Int = 3,
-    ): WidgetData {
+    suspend fun load(now: LocalDateTime = LocalDateTime.now()): WidgetData {
         val today = now.toLocalDate()
 
         val firstDay = runCatching { courseScheduleSettings.firstDay.get() }.getOrNull()
-        val week = WidgetLogic.weekOf(firstDay, today)
 
         // ⚠️ 节次→时间用**课表设置里的时间表**，不是硬编码常量：
         //    用户可以自己编辑它（设置 → 课程表 → 时间表），学校改了作息也只需改设置。
@@ -79,9 +71,7 @@ class WidgetRepository @Inject constructor(
             seatLines = seatLines,
             today = today,
             now = now,
-            week = week,
-            weekday = today.dayOfWeek.value,
-            limit = limit,
+            firstDay = firstDay,
             timeTable = timeTable,
             bit101LoggedIn = bit101LoggedIn,
             seatLoggedIn = seatLoggedIn,
