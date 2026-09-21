@@ -6,9 +6,13 @@
     字号变大是用户明确要求的，所以整体放大一档。
   - minWidth/minHeight 按 Android 官方换算表给：4 格 = 250dp、3 格 = 180dp。
     Android 12+ 优先用 targetCell*，旧系统回落到 min*。
+  - **minResizeHeight 只给 110dp（2 格）**：允许把组件拖矮到约一半高度。
+    拖矮后内容行数由 `WidgetLogic.rowsForHeight()` 按实际高度自动降档
+    （≥140dp → 3 行、≥100dp → 2 行、再矮 → 1 行），不会把内容压成一团。
+    再往下（1 格 = 40dp）页签加一行内容根本放不下，故不开放。
   - updatePeriodMillis 设为 0：系统的最小周期也是 30 分钟且不精确，
     我们改用 WorkManager + App 内数据变更时主动刷新（见 WidgetUpdater）。
-  - resizeMode 允许横向与纵向拉伸。
+  - resizeMode 允许横向与纵向拉伸（纵横都可拖）。
   - widgetCategory=home_screen 只上桌面（不上锁屏，锁屏不需要，也避免隐私问题）。
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
@@ -17,7 +21,7 @@
     android:minWidth="250dp"
     android:minHeight="180dp"
     android:minResizeWidth="250dp"
-    android:minResizeHeight="180dp"
+    android:minResizeHeight="110dp"
     android:previewImage="@drawable/widget_preview"
     android:resizeMode="horizontal|vertical"
     android:targetCellWidth="4"

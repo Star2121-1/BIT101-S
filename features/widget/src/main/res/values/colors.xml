@@ -32,6 +32,12 @@
     <!-- 紧急（DDL 已过期 / 24h 内到期） -->
     <color name="widget_urgent">#D3302F</color>
 
+    <!-- 正在上课：绿色 -->
+    <color name="widget_class_ongoing">#1E8E3E</color>
+
+    <!-- 即将上课：橙色 -->
+    <color name="widget_class_upcoming">#E8710A</color>
+
     <color name="widget_preview_bg">#FF9A57</color>
 
 </resources>

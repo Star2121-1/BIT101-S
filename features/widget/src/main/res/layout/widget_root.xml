@@ -7,6 +7,14 @@
   - 不支持 ConstraintLayout、自定义 View、Compose
   - `android:background` 要用 drawable 资源
   - 点击必须由代码 `setOnClickPendingIntent()` 绑定，不能在 XML 里写 onClick
+
+  一行内容的结构：`[标记+课程名] [上课时间] [教室]`
+  时间单独占一列 —— 塞进课程名里会被省略号吃掉。
+
+  ⚠️ 内容区（widget_body）用 `weight=1 + center_vertical` 填满页签以下的剩余空间
+  并**垂直居中**：组件默认 4×3，而内容（3 行）只占约 82dp，直接顶部对齐会在
+  底部留下一大片空白，看起来像没渲染完。居中后上方下方留白均匀，高度被拖到
+  任何值都不会出现"内容挤在一角"。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -45,65 +53,93 @@
             android:textSize="13sp" />
     </LinearLayout>
 
-    <!-- 空态文案 -->
-    <TextView
-        android:id="@+id/widget_empty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:maxLines="1"
-        android:textColor="@color/widget_text_secondary"
-        android:textSize="15sp"
-        android:visibility="gone" />
-
-    <!-- 内容：主行 + 次行（次行不用时置为 gone） -->
+    <!-- 内容区：填满剩余高度并把内容垂直居中（见文件头说明） -->
     <LinearLayout
-        android:id="@+id/widget_rows"
+        android:id="@+id/widget_body"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
         android:orientation="vertical">
 
+        <!-- 空态文案 -->
+        <TextView
+            android:id="@+id/widget_empty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="15sp"
+            android:visibility="gone" />
+
+        <!-- 内容：主行 + 次行（用不到的置为 gone）。
+             ⚠️ 顺序必须在「立即预约」之前，按钮要落在内容下面。 -->
         <LinearLayout
-            android:id="@+id/row_0"
-            style="@style/WidgetRow">
+            android:id="@+id/widget_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/row_0_main"
-                style="@style/WidgetRowMain" />
+            <LinearLayout
+                android:id="@+id/row_0"
+                style="@style/WidgetRow">
 
-            <TextView
-                android:id="@+id/row_0_trail"
-                style="@style/WidgetRowTrail" />
+                <TextView
+                    android:id="@+id/row_0_main"
+                    style="@style/WidgetRowMain" />
+
+                <TextView
+                    android:id="@+id/row_0_time"
+                    style="@style/WidgetRowTime" />
+
+                <TextView
+                    android:id="@+id/row_0_trail"
+                    style="@style/WidgetRowTrail" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/row_1"
+                style="@style/WidgetRow"
+                android:layout_marginTop="6dp">
+
+                <TextView
+                    android:id="@+id/row_1_main"
+                    style="@style/WidgetRowMain" />
+
+                <TextView
+                    android:id="@+id/row_1_time"
+                    style="@style/WidgetRowTime" />
+
+                <TextView
+                    android:id="@+id/row_1_trail"
+                    style="@style/WidgetRowTrail" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/row_2"
+                style="@style/WidgetRow"
+                android:layout_marginTop="6dp">
+
+                <TextView
+                    android:id="@+id/row_2_main"
+                    style="@style/WidgetRowMain" />
+
+                <TextView
+                    android:id="@+id/row_2_time"
+                    style="@style/WidgetRowTime" />
+
+                <TextView
+                    android:id="@+id/row_2_trail"
+                    style="@style/WidgetRowTrail" />
+            </LinearLayout>
         </LinearLayout>
 
-        <LinearLayout
-            android:id="@+id/row_1"
-            style="@style/WidgetRow"
-            android:layout_marginTop="6dp">
-
-            <TextView
-                android:id="@+id/row_1_main"
-                style="@style/WidgetRowMain" />
-
-            <TextView
-                android:id="@+id/row_1_trail"
-                style="@style/WidgetRowTrail" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/row_2"
-            style="@style/WidgetRow"
-            android:layout_marginTop="6dp">
-
-            <TextView
-                android:id="@+id/row_2_main"
-                style="@style/WidgetRowMain" />
-
-            <TextView
-                android:id="@+id/row_2_trail"
-                style="@style/WidgetRowTrail" />
-        </LinearLayout>
+        <!-- 座位页的「立即预约」：点了打开 App 并跳到座位页 -->
+        <TextView
+            android:id="@+id/widget_action"
+            style="@style/WidgetAction"
+            android:visibility="gone" />
     </LinearLayout>
 
 </LinearLayout>

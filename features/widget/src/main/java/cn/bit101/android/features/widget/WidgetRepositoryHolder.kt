@@ -36,9 +36,12 @@ internal object WidgetRepositoryHolder {
     /**
      * 取数据。取不到时返回「加载中…」的空数据 —— 组件显示空态即可，
      * **绝不抛异常**（异常会让组件渲染失败、显示成一片空白，且用户看不到任何提示）。
+     *
+     * @param limit 每页最多显示几行，由组件当前高度决定（见 [WidgetViews.rowsForHeight]）
      */
-    suspend fun load(context: Context): WidgetData =
-        runCatching { ensureRepository(context)?.load() }.getOrNull() ?: loadingWidgetData()
+    suspend fun load(context: Context, limit: Int = 3): WidgetData =
+        runCatching { ensureRepository(context)?.load(limit = limit) }.getOrNull()
+            ?: loadingWidgetData()
 
     private fun loadingWidgetData() = WidgetData(
         pages = PageKind.entries.map { kind ->

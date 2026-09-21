@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
@@ -26,6 +27,7 @@ import cn.bit101.android.features.component.WithLoginStatus
 import cn.bit101.android.features.gallery.GalleryScreen
 import cn.bit101.android.features.map.MapScreen
 import cn.bit101.android.features.schedule.ScheduleScreen
+import cn.bit101.android.features.GotoRequest
 import cn.bit101.android.features.seat.SeatScreen
 import cn.bit101.android.features.user.UserScreen
 import cn.bit101.android.features.web.WebScreen
@@ -74,7 +76,28 @@ internal fun IndexScreen(
 
     val navController = rememberNavController()
 
-    val startRoute = PageShowOnNav.Schedule.toString()
+    // 桌面组件的「立即预约」等入口可能带着「打开后去哪一页」的请求进来
+    val pendingGoto by GotoRequest.route.collectAsState()
+
+    // ⚠️ 起始页用 remember 固化首次取值：pendingGoto 随后会被 consume 成 null，
+    //    若直接读它，NavHost 的 startDestination 会跟着变、整张导航图被重建，
+    //    用户会看到页面莫名重置。
+    val startRoute = remember {
+        pendingGoto?.let { PageShowOnNav.getPage(it)?.toString() }
+            ?: PageShowOnNav.Schedule.toString()
+    }
+
+    // Activity 已存在时（onNewIntent 路径）NavHost 不会重建，这里显式跳过去
+    LaunchedEffect(pendingGoto) {
+        val route = pendingGoto
+            ?.let { PageShowOnNav.getPage(it)?.toString() }
+            ?: return@LaunchedEffect
+        if (navController.currentDestination?.route != route) {
+            navController.navigate(route)
+        }
+        GotoRequest.consume()
+    }
+
     val navEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navEntry?.destination?.route ?: startRoute
 

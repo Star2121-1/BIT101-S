@@ -1,5 +1,6 @@
 package cn.bit101.android.features.widget
 
+import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import org.junit.Assert.assertEquals
@@ -9,12 +10,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 
 /**
  * [WidgetLogic] 的纯逻辑单测。
  *
- * Glance 的 UI 无法在 JVM 单测里跑，所以这里是组件**唯一**能自动化验证的部分 ——
- * 也因此所有「可能出错的判断」都应尽量下沉到这一层，别留在 composable 里。
+ * RemoteViews 的渲染无法在 JVM 单测里跑，所以这里是组件**唯一**能自动化验证的部分 ——
+ * 也因此所有「可能出错的判断」都应尽量下沉到这一层，别留在 XML 绑定代码里。
  */
 class WidgetLogicTest {
 
@@ -333,34 +335,170 @@ class WidgetLogicTest {
 
     // ------------------------------------------------------------ 辅助
 
+    // ------------------------------------------------ 作息时间与「当前/下一节」高亮
+
     @Test
-    fun `副标题周次已知时带周次，未知时只显示星期`() {
-        assertEquals("周三 · 第 3 周", WidgetLogic.dateSubtitle(today, 3))
-        assertEquals("周三", WidgetLogic.dateSubtitle(today, -1))
+    fun `节次换算成时间段`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        // 真机实测那天的课就是 3-5 / 6-7 / 8-10 节
+        assertEquals("09:55-12:20", WidgetLogic.courseTimeText(t, 3, 5))
+        assertEquals("13:20-14:55", WidgetLogic.courseTimeText(t, 6, 7))
+        assertEquals("15:15-17:40", WidgetLogic.courseTimeText(t, 8, 10))
+        assertEquals("08:00-08:45", WidgetLogic.courseTimeText(t, 1, 1))
     }
 
     @Test
-    fun `星期几映射正确`() {
-        // 2026-09-21 是周一
-        val monday = LocalDate.of(2026, 9, 21)
-        assertEquals("周一 · 第 1 周", WidgetLogic.dateSubtitle(monday, 1))
-
-        val sunday = LocalDate.of(2026, 9, 27)
-        assertEquals("周日 · 第 1 周", WidgetLogic.dateSubtitle(sunday, 1))
+    fun `节次越界时宁可不给时间，也不要编一个`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        assertEquals("", WidgetLogic.courseTimeText(t, 0, 1))
+        assertEquals("", WidgetLogic.courseTimeText(t, 1, 99))
+        assertEquals("", WidgetLogic.courseTimeText(emptyList(), 1, 2))
     }
 
     @Test
-    fun `跨零点检测`() {
-        assertTrue(WidgetLogic.dayChanged(null, today))
-        assertTrue(WidgetLogic.dayChanged(today.minusDays(1), today))
-        assertFalse(WidgetLogic.dayChanged(today, today))
+    fun `正在上课时高亮那一节`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        val courses = listOf(
+            course(name = "操作系统", start = 3, end = 5),
+            course(name = "计算机系统导论", start = 6, end = 7),
+            course(name = "开源软件开发", start = 8, end = 10),
+        )
+        // 14:12 落在 6-7 节（13:20-14:55）内 —— 与真机实测的时刻一致
+        assertEquals(1 to ClassState.ONGOING, WidgetLogic.focusOf(courses, LocalTime.of(14, 12), t))
     }
 
     @Test
-    fun `上课时间段判定：深夜不刷新`() {
-        assertFalse(WidgetLogic.isClassHours(java.time.LocalTime.of(3, 0)))
-        assertFalse(WidgetLogic.isClassHours(java.time.LocalTime.of(23, 30)))
-        assertTrue(WidgetLogic.isClassHours(java.time.LocalTime.of(8, 0)))
-        assertTrue(WidgetLogic.isClassHours(java.time.LocalTime.of(21, 59)))
+    fun `课间时高亮下一节`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        val courses = listOf(
+            course(name = "操作系统", start = 3, end = 5),
+            course(name = "计算机系统导论", start = 6, end = 7),
+        )
+        // 12:30 是午休，下一节是 13:20 的第 6 节
+        assertEquals(1 to ClassState.UPCOMING, WidgetLogic.focusOf(courses, LocalTime.of(12, 30), t))
+        // 15:00 是 7 节之后，今天已经没有下一节了
+        assertNull(WidgetLogic.focusOf(courses, LocalTime.of(15, 0), t))
+    }
+
+    @Test
+    fun `今天的课都上完后不再高亮`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        assertNull(WidgetLogic.focusOf(listOf(course(start = 3, end = 5)), LocalTime.of(21, 0), t))
+    }
+
+    @Test
+    fun `显示窗口跟着当前时刻走，不会停在上午`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        val courses = listOf(
+            course(name = "早课", start = 1, end = 2),
+            course(name = "操作系统", start = 3, end = 5),
+            course(name = "计算机系统导论", start = 6, end = 7),
+            course(name = "开源软件开发", start = 8, end = 10),
+        )
+        val page = WidgetLogic.coursePage(
+            courses = courses,
+            week = 3,
+            weekday = 3,
+            now = LocalTime.of(14, 12),
+            limit = 3,
+            timeTable = t,
+        )
+        // 14:12 时第 6-7 节正在上，窗口应该以它开头（而不是停在上午的早课）
+        assertEquals("计算机系统导论", page.primary?.main)
+        assertEquals(ClassState.ONGOING, page.primary?.highlight)
+        assertEquals(1, page.secondary.size)
+        assertEquals("开源软件开发", page.secondary[0].main)
+    }
+
+    /**
+     * 「起点」有两个容易混淆的分支，必须分开验证：
+     * 时间未知 → 从头显示；今天已上完 → 显示末尾。
+     * 早期实现把两者合并成「一律取末尾」，导致没有 now 时（降级路径）显示的是当天最后几节课。
+     */
+    @Test
+    fun `今天上完后窗口停在末尾，时间未知时从头显示`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        val courses = listOf(
+            course(name = "早课", start = 1, end = 2),
+            course(name = "操作系统", start = 3, end = 5),
+            course(name = "计算机系统导论", start = 6, end = 7),
+            course(name = "开源软件开发", start = 8, end = 10),
+        )
+
+        // 21:00 今天的课早结束了：显示末尾几节，而不是停在早课
+        val evening = WidgetLogic.coursePage(
+            courses = courses, week = 3, weekday = 3,
+            now = LocalTime.of(21, 0), limit = 2, timeTable = t,
+        )
+        assertEquals("计算机系统导论", evening.primary?.main)
+        assertEquals("开源软件开发", evening.secondary.single().main)
+        assertNull(evening.primary?.highlight)
+
+        // now 为 null（时间未知）：无从判断上没上完，从头显示
+        val unknown = WidgetLogic.coursePage(
+            courses = courses, week = 3, weekday = 3, limit = 2, timeTable = t,
+        )
+        assertEquals("早课", unknown.primary?.main)
+    }
+
+    @Test
+    fun `高度决定行数，且不会超出布局能放下的行数`() {
+        // 4×3（180dp）→ 3 行；拖矮到 4×2（110dp）→ 2 行；再矮 → 1 行
+        assertEquals(3, WidgetLogic.rowsForHeight(180))
+        assertEquals(3, WidgetLogic.rowsForHeight(140))
+        assertEquals(2, WidgetLogic.rowsForHeight(139))
+        assertEquals(2, WidgetLogic.rowsForHeight(110))
+        assertEquals(2, WidgetLogic.rowsForHeight(100))
+        assertEquals(1, WidgetLogic.rowsForHeight(99))
+        // 系统没给尺寸（部分 ROM 不写 options）：按完整行数渲染，宁可多显示
+        assertEquals(3, WidgetLogic.rowsForHeight(0))
+        assertEquals(3, WidgetLogic.rowsForHeight(-1))
+        // full 参数是上限，不能因为布局变高就超出去
+        assertEquals(1, WidgetLogic.rowsForHeight(300, full = 1))
+        assertEquals(2, WidgetLogic.rowsForHeight(300, full = 2))
+    }
+
+    @Test
+    fun `课程行带上了上课时间`() {
+        val page = WidgetLogic.coursePage(
+            courses = listOf(course(start = 6, end = 7)),
+            week = 3,
+            weekday = 3,
+            now = LocalTime.of(14, 12),
+            timeTable = WidgetLogic.FALLBACK_TIME_TABLE,
+        )
+        assertEquals("13:20-14:55", page.primary?.time)
+    }
+
+    @Test
+    fun `用户在设置里改的作息时间表会生效`() {
+        // 真实场景：学校改作息 / 用户自己编辑课表设置，组件必须跟着变
+        val custom = listOf(TimeTableItem(LocalTime.of(10, 0), LocalTime.of(10, 45)))
+        assertEquals("10:00-10:45", WidgetLogic.courseTimeText(custom, 1, 1))
+        assertEquals(
+            0 to ClassState.ONGOING,
+            WidgetLogic.focusOf(listOf(course(start = 1, end = 1)), LocalTime.of(10, 10), custom),
+        )
+    }
+
+    @Test
+    fun `行数上限受限时仍优先显示高亮的那一节`() {
+        val t = WidgetLogic.FALLBACK_TIME_TABLE
+        val courses = listOf(
+            course(name = "早课", start = 1, end = 2),
+            course(name = "操作系统", start = 3, end = 5),
+            course(name = "计算机系统导论", start = 6, end = 7),
+        )
+        // 组件被拖矮，只显示 1 行 —— 这一行必须是「正在上的那节」
+        val page = WidgetLogic.coursePage(
+            courses = courses,
+            week = 3,
+            weekday = 3,
+            now = LocalTime.of(14, 12),
+            limit = 1,
+            timeTable = t,
+        )
+        assertEquals("计算机系统导论", page.primary?.main)
+        assertTrue(page.secondary.isEmpty())
     }
 }

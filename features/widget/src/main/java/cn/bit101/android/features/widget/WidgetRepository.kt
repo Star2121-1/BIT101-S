@@ -6,7 +6,6 @@ import cn.bit101.android.data.repo.base.CoursesRepo
 import cn.bit101.android.data.repo.base.DDLScheduleRepo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
-import java.time.LocalDate
 import java.time.LocalDateTime
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,7 +14,7 @@ import javax.inject.Singleton
  * 小组件的数据入口。
  *
  * 只做两件事：从各仓库取数据 → 交给 [WidgetLogic] 聚合。
- * 不含任何展示逻辑（那是 Glance 层的事），也不含业务判断（那是 [WidgetLogic] 的事），
+ * 不含任何展示逻辑（那是 `WidgetViews` 的事），也不含业务判断（那是 [WidgetLogic] 的事），
  * 所以本身很薄、不需要单测 —— 真正需要测的纯逻辑都在 [WidgetLogic] 里。
  */
 @Singleton
@@ -31,12 +30,27 @@ class WidgetRepository @Inject constructor(
      *
      * 各数据源**并行且容错**：任何一个失败都不应让整个组件空白 ——
      * 课表拉不到就显示空课程页，但 DDL 页仍应正常。故每项单独 try/catch。
+     *
+     * @param limit 每页最多显示几行。组件纵向可缩放，行数随之变化
+     *   （见 [WidgetLogic.rowsForHeight]）；数据与布局必须用**同一个** limit，
+     *   否则会出现「取了 3 行只画 2 行」或反之的浪费。
      */
-    suspend fun load(now: LocalDateTime = LocalDateTime.now()): WidgetData {
+    suspend fun load(
+        now: LocalDateTime = LocalDateTime.now(),
+        limit: Int = 3,
+    ): WidgetData {
         val today = now.toLocalDate()
 
         val firstDay = runCatching { courseScheduleSettings.firstDay.get() }.getOrNull()
         val week = WidgetLogic.weekOf(firstDay, today)
+
+        // ⚠️ 节次→时间用**课表设置里的时间表**，不是硬编码常量：
+        //    用户可以自己编辑它（设置 → 课程表 → 时间表），学校改了作息也只需改设置。
+        //    读不到才退回内置的学校官方默认表。
+        val timeTable = runCatching { courseScheduleSettings.timeTable.get() }
+            .getOrNull()
+            ?.takeIf { it.isNotEmpty() }
+            ?: WidgetLogic.FALLBACK_TIME_TABLE
 
         val courses = runCatching {
             coursesRepo.getCoursesFromLocal().first()
@@ -56,6 +70,8 @@ class WidgetRepository @Inject constructor(
             now = now,
             week = week,
             weekday = today.dayOfWeek.value,
+            limit = limit,
+            timeTable = timeTable,
         )
     }
 
@@ -79,6 +95,3 @@ class WidgetRepository @Inject constructor(
         const val LOOKBACK_DAYS = 7L
     }
 }
-
-/** 便捷扩展：把 `LocalDate` 转成午夜时刻，用于需要 `LocalDateTime` 的场景。 */
-internal fun LocalDate.atStartOfDay(): LocalDateTime = atTime(0, 0)
