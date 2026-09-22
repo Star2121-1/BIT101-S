@@ -2,6 +2,12 @@
 
 > 调研时间：2026-09-22　｜　调研方式：**只读抓取前端静态资源 + 接口探测**（未登录任何账号、未使用任何凭据）
 > 归档：`.workbuddy/archive/ddl-research/`（config.js / main.js / casapi 页面等原始材料）
+>
+> ✅ **2026-09-22 下午更新：第一阶段已完成** —— 已用作者授权的账号**真实登录两个平台**并实测接口，
+> 结论与字段记录见 **`docs/ddl-source-contract.md`**。关键结论：
+> - **eclass 是纯 cookie 会话**（无需 token 头）→ 与 seatlib 的「WebView 登录 + 共享 CookieManager」**完全同构，最省事**
+> - aita 是 `cookie _token` + `Authorization: Bearer`
+> - 会话凭据与浏览器 profile **已全部销毁**，仓库与记忆中**无任何凭据残留**（已 grep 验证）
 
 ---
 
@@ -89,8 +95,8 @@
 
 | 阶段 | 目标 | 交付物 | 验收标准 | 风险 |
 |---|---|---|---|---|
-| **P0 调研收尾** | 补齐 eclass 的接口与鉴权；确认 aita `course/todo` 的返回字段 | `docs/ddl-source-contract.md`（接口契约文档，仿 `seatlib-contract.md`） | 两个平台各有**真实响应样本**（脱敏）落档；字段能覆盖「标题 / 所属课程 / 截止时间 / 类型 / 跳转链接」 | eclass 可能无 REST（纯 SSR/加密），需退化为 WebView 内展示 |
-| **P1 认证打通** | 让 App 能拿到两个平台的有效会话 | `AitaSession`（CAS → cookie `_token`）、`EclassSession`（Keycloak）；WebView 登录页 + 会话持久化 | 冷启动后能静默复用会话；失效能提示并重新登录；**不触发风控** | Keycloak 与 CAS 差异；短信二次验证；eclass 可能要求 WebAuthn |
+| **P0 调研收尾** ✅ **基本完成** | 补齐 eclass 的接口与鉴权；确认 aita `course/todo` 的返回字段 | `docs/ddl-source-contract.md`（**已产出**，接口/鉴权/字段实测记录） | 两个平台各有**真实响应样本**落档 | ⏳ 仅剩「作业类活动的 `type` 取值」待有作业时再抓 |
+| **P1 认证打通** | 让 App 能拿到两个平台的有效会话 | `AitaSession`（CAS/SSO → cookie `_token`）、`EclassSession`（Keycloak cookie 会话）；WebView 登录页 + 会话持久化 | 冷启动后能静默复用会话；失效能提示并重新登录；**不触发风控** | aita 有验证码形态兜底；eclass cookie 有效期未知 |
 | **P2 数据接入** | 新增 DDL 源，多源并存 | `SchoolAitaService` / `SchoolEclassService` + `DdlSourceAdapter` + Room `version 2 → 3`（或复用 group 字段，视 P0 结论） | 真实拉到我账号的 DDL 列表；旧乐学数据仍在；去重生效 | 接口可能改版；分页/时间范围参数未知 |
 | **P3 UI 接入** | App DDL 页 + 桌面组件 DDL 页显示新源 | DDL 来源标签（延河课堂 / 课程动态 / 自定义）、点条目跳对应平台课程页 | 来源可区分；点击能跳到正确位置；组件不再显示空 DDL | 组件跨进程打开外部 URL 需用浏览器 Intent（已有先例） |
 | **P4 通知联动** | 与「通知与提醒中心」合并 | DDL 截止前提醒（1 天 / 1 小时） | 提醒去重（同一 DDL 不重复打扰）；开关可控 | 依赖 P4 的通知基建，建议与通知中心同批做 |
