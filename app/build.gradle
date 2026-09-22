@@ -76,6 +76,7 @@ dependencies {
     // 面太大；显式声明把耦合限制在 app 一处。
     implementation project(':features:widget')
     implementation project(':features:seat')
+    implementation project(':features:notify')
 }
 
 // 开源声明生成配置

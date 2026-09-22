@@ -112,6 +112,29 @@ internal class SettingDataStore @Inject constructor(
     private val DDL_SCHEDULE_AFTER_DAY = longPreferencesKey("ddl_schedule_after_day")
     val ddlScheduleAfterDay = PreferencesDataStoreItem(DDL_SCHEDULE_AFTER_DAY, 3, preferences.SETTING_DATASTORE)
 
+    // ── 提醒（通知）设置 ─────────────────────────────────────────────
+    // 总开关
+    private val NOTIFY_ENABLED = booleanPreferencesKey("notify_enabled")
+    val notifyEnabled = PreferencesDataStoreItem(NOTIFY_ENABLED, true, preferences.SETTING_DATASTORE)
+
+    // 上课提醒
+    private val NOTIFY_CLASS_ENABLED = booleanPreferencesKey("notify_class_enabled")
+    val notifyClassEnabled = PreferencesDataStoreItem(NOTIFY_CLASS_ENABLED, true, preferences.SETTING_DATASTORE)
+
+    // 上课提前量（分钟）：默认提前 10 分钟
+    private val NOTIFY_CLASS_LEAD_MINUTES = longPreferencesKey("notify_class_lead_minutes")
+    val notifyClassLeadMinutes = PreferencesDataStoreItem(NOTIFY_CLASS_LEAD_MINUTES, 10, preferences.SETTING_DATASTORE)
+
+    // DDL 提醒总开关 + 两个窗口
+    private val NOTIFY_DDL_ENABLED = booleanPreferencesKey("notify_ddl_enabled")
+    val notifyDdlEnabled = PreferencesDataStoreItem(NOTIFY_DDL_ENABLED, true, preferences.SETTING_DATASTORE)
+
+    private val NOTIFY_DDL_DAY_ENABLED = booleanPreferencesKey("notify_ddl_day_enabled")
+    val notifyDdlDayEnabled = PreferencesDataStoreItem(NOTIFY_DDL_DAY_ENABLED, true, preferences.SETTING_DATASTORE)
+
+    private val NOTIFY_DDL_HOUR_ENABLED = booleanPreferencesKey("notify_ddl_hour_enabled")
+    val notifyDdlHourEnabled = PreferencesDataStoreItem(NOTIFY_DDL_HOUR_ENABLED, true, preferences.SETTING_DATASTORE)
+
     // 空教室检索设置
     // 当前校区名
     private val FREE_CLASSROOM_CURRENT_CAMPUS_NAME = stringPreferencesKey("free_classroom_campus_name")

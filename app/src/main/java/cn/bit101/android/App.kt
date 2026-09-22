@@ -1,6 +1,7 @@
 package cn.bit101.android
 
 import android.app.Application
+import cn.bit101.android.features.notify.NotifyAppStartup
 import cn.bit101.android.features.seat.SeatAppStartup
 import cn.bit101.android.features.widget.WidgetAppStartup
 import com.umeng.commonsdk.UMConfigure
@@ -38,5 +39,9 @@ class App : Application() {
         // 座位模块 → 小组件的数据推送。放在 App 启动而非「座」页面：
         // 用户不开座位页时任务仍在后台跑，组件也应能看到进度。
         SeatAppStartup.init(this)
+
+        // 提醒排期：读本地课表/DDL 排未来 7 天的通知，并挂上每日兜底重排。
+        // 与其它 Startup 一样：起不来只影响提醒，不影响 App 主流程。
+        NotifyAppStartup.init(this)
     }
 }

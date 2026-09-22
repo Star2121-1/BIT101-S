@@ -58,4 +58,10 @@ internal abstract class SettingModule {
     abstract fun bindFreeClassroomSettings(
         freeClassroomSettings: DefaultFreeClassroomSettings
     ): FreeClassroomSettings
+
+    @Binds
+    @Singleton
+    abstract fun bindNotifySettings(
+        notifySettings: DefaultNotifySettings
+    ): NotifySettings
 }

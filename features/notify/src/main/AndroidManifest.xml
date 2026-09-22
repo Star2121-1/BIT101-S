@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      通知运行时权限（Android 13+）。
+      ⚠️ features/seat 的清单里也声明了同一条 —— 合并时会去重，这里保留是为了
+      让本模块**自包含**：将来若座位模块被移除，提醒仍然能申请权限。
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+</manifest>

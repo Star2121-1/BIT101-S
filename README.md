@@ -123,6 +123,22 @@ features/seat/
 └── SeatScreen.kt              # 入口，内部 NavHost 管理三页导航
 ```
 
+features/notify/               # 通知与提醒中心（上课 / 作业截止）
+├── NotifyLogic.kt             # 全部纯逻辑：提醒时刻/窗口/周次/去重键（23 条单测）
+├── NotifyRepository.kt        # 设置 + 本地数据 → NotifyLogic（走 data 的公开仓库接口）
+├── NotifyCenter.kt            # 通知渠道与发送（class_reminder / ddl_reminder）
+├── NotifyScheduler.kt         # WorkManager 排期：每条提醒一个一次性任务 + 每日重排
+├── NotifyFireWorker.kt        # 到点发通知（**执行前二次校验**，避免发过期提醒）
+├── NotifyRefreshWorker.kt     # 周期性重排（用户长期不开 App 也不断）
+├── NotifySentStore.kt         # 已发记录，防重复打扰（保留 14 天）
+├── NotifyRepositoryHolder.kt  # Worker 侧的 EntryPoint 兜底
+└── NotifyAppStartup.kt        # 启动接线（建渠道 + 重排 + 周期任务）
+```
+
+⚠️ **`features/notify` 不依赖 `features:seat` / `features:widget`** —— 它只读 config 与
+data 层；座位侧要发提醒时**反过来调用 notify**（`seat → notify`），这样不会成环。
+设计与验证记录见 `docs/notify.md`。
+
 任务执行链路：`SeatViewModel`（加/取消任务）→ `SeatTaskRepository`（状态 + 落盘）
 → `SeatMonitorService`（由任务流驱动，实际轮询）→ 结果通知。
 
