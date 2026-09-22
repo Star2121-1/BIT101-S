@@ -319,12 +319,10 @@ object WidgetLogic {
     /**
      * 决定组件此刻显示哪一天。
      *
-     * 规则（2026-09-22 依用户反馈收窄）：
-     * **只有「现在已经过了今天的最后一个时段」才切到明天**；
-     * 今天没课也不再切 —— 停在今天显示整段空闲（日期栏会写清是哪天）。
-     *
-     * ⚠️ 只有明天**有课**时才切过去 —— 否则会出现「今晚看明天，明天也是一片空白」，
-     * 不如停在今天。
+     * 规则（2026-09-22 第二次收窄，依用户反馈）：
+     * **只要「现在」过了今天最后一个时段就切明天** —— 哪怕明天没课
+     * （明天没课时显示明天的整段空闲，日期栏会写清是哪天）。
+     * 今天没课不切，停在今天。
      */
     fun pickDay(
         courses: List<CourseScheduleEntity>,
@@ -337,10 +335,7 @@ object WidgetLogic {
         val tomorrow = today.plusDays(1)
 
         if (now != null && isAfterAll(todayBlocks, now, table)) {
-            val blocks = blocksOf(courses, tomorrow, firstDay, table)
-            if (blocks.any { it.kind == BlockKind.COURSE }) {
-                return DayChoice(tomorrow, isTomorrow = true, blocks)
-            }
+            return DayChoice(tomorrow, isTomorrow = true, blocksOf(courses, tomorrow, firstDay, table))
         }
         return DayChoice(today, isTomorrow = false, todayBlocks)
     }

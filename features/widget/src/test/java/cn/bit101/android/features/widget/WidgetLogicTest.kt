@@ -216,12 +216,13 @@ class WidgetLogicTest {
         assertEquals(BlockKind.FREE, choice.blocks[0].kind)
     }
 
-    /** 明天没课就别切了 —— 停在今天，至少能看到「今天全天没课」。 */
+    /** 2026-09-22 第二次收窄：明天没课也切 —— 显示明天的整段空闲。 */
     @Test
-    fun `今天明天都没课时停在今天`() {
+    fun `过了末段即使明天没课也切明天`() {
         val choice = WidgetLogic.pickDay(emptyList(), today, LocalTime.of(21, 0), firstDay)
 
-        assertFalse(choice.isTomorrow)
+        assertTrue(choice.isTomorrow)
+        assertEquals(today.plusDays(1), choice.date)
         assertEquals(1, choice.blocks.size)
         assertEquals(BlockKind.FREE, choice.blocks[0].kind)
     }
