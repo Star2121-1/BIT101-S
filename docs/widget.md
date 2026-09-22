@@ -196,7 +196,7 @@ WidgetListService : RemoteViewsService
 
 ⚠️ 用的是**课表设置里的时间表**（`CourseScheduleSettings.timeTable`，用户可在
 App 里自行编辑），**不是硬编码常量** —— 学校改作息、用户自定义都能生效。
-只有读取设置失败时才退回内置的学校官方默认表（`WidgetLogic.FALLBACK_TIME_TABLE`，
+只有读取设置失败时才退回内置的学校官方默认表（`FALLBACK_TIME_TABLE（已移到 `config/.../TimeTableLogic.kt`，组件侧转发）`，
 与 `SettingDataStore` 的默认值一致：2021-08-23 起实行的作息）。
 
 节次越界（学校新增节次而时间表没更新）时**不显示时间**，而不是编一个错的。

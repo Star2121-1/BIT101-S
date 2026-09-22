@@ -60,7 +60,7 @@ import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.TaskStatus
-import cn.bit101.android.features.seat.ui.component.rememberNotificationPermissionState
+import cn.bit101.android.features.common.helper.rememberNotificationPermissionState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.ZoneId

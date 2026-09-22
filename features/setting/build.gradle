@@ -57,4 +57,6 @@ dependencies {
 
     // 版本管理
     implementation project(':features:versions')
+    // 提醒设置页要触发一次重排（改了提前量必须重排才生效）
+    implementation project(':features:notify')
 }

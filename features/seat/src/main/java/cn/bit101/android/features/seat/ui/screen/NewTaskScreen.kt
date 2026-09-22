@@ -46,7 +46,7 @@ import cn.bit101.android.features.seat.ui.component.LocationPicker
 import cn.bit101.android.features.seat.ui.component.ModeSelector
 import cn.bit101.android.features.seat.ui.component.PickedSeatRow
 import cn.bit101.android.features.seat.ui.component.SeatColors
-import cn.bit101.android.features.seat.ui.component.rememberNotificationPermissionState
+import cn.bit101.android.features.common.helper.rememberNotificationPermissionState
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter

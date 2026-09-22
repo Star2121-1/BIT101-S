@@ -334,6 +334,31 @@ class SeatViewModel @Inject constructor(
         _casLoginFlow.value = true
     }
 
+    /** 进座位页时是否已经自动试过续期（每次进程只试一次，别反复去撞风控）。 */
+    private var autoRenewTried = false
+
+    /**
+     * 进入座位页时**自动**尝试一次静默续期。
+     *
+     * ⚠️ 2026-09-22 真机发现的缺口：此前只有点「授权座位系统」按钮才会走
+     * [ensureSeatlibSession]，冷启动进页面时不会自动恢复 —— 用户看到
+     * 「登录已失效」就以为必须重新授权一次。
+     *
+     * 与 [ensureSeatlibSession] 的区别：**这里绝不会弹 WebView**。
+     * 续期失败就保持现状（页面照旧显示提示 + 按钮），由用户决定是否手动登录。
+     */
+    fun autoRenewSilently() {
+        if (autoRenewTried) return
+        autoRenewTried = true
+        viewModelScope.launch {
+            // token 还在就什么都不用做（续期只在「会话被清空」时才有意义）
+            if (seatApi.token.isNotEmpty()) return@launch
+            val renewed = runCatching { autoLogin.renew() }.getOrNull() ?: return@launch
+            seatApi.token = renewed
+            onAuthSuccess()
+        }
+    }
+
     /** 检查 seatlib 会话；必要时打开 WebView 登录。返回 true 表示会话可用。 */
     suspend fun ensureSeatlibSession(): Boolean {
         // ⚠️ token 为空 ≠ 一定要人工登录：先试静默续期（cookie → 持久化凭据）。

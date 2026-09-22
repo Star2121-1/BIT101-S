@@ -5,6 +5,8 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import cn.bit101.android.config.datastore.basic.Preferences
+import cn.bit101.android.config.setting.base.FALLBACK_TIME_TABLE
+import cn.bit101.android.config.setting.base.toTimeTableString
 import cn.bit101.android.config.datastore.basic.PreferencesDataStoreItem
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -80,19 +82,9 @@ internal class SettingDataStore @Inject constructor(
     private val COURSE_SCHEDULE_TIME_TABLE = stringPreferencesKey("course_schedule_time_table")
     val courseScheduleTimeTable = PreferencesDataStoreItem(
         COURSE_SCHEDULE_TIME_TABLE,
-        "08:00,08:45\n" +
-                "08:50,09:35\n" +
-                "09:55,10:40\n" +
-                "10:45,11:30\n" +
-                "11:35,12:20\n" +
-                "13:20,14:05\n" +
-                "14:10,14:55\n" +
-                "15:15,16:00\n" +
-                "16:05,16:50\n" +
-                "16:55,17:40\n" +
-                "18:30,19:15\n" +
-                "19:20,20:05\n" +
-                "20:10,20:55",
+        // ⚠️ 默认值由 FALLBACK_TIME_TABLE 生成，**不再手写第二份** ——
+        // 以前这里和 TimeTableLogic 各写一遍，改一处忘一处就会不一致
+        FALLBACK_TIME_TABLE.toTimeTableString(),
         preferences.SETTING_DATASTORE
     )
 

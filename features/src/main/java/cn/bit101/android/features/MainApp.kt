@@ -91,10 +91,10 @@ internal fun MainApp() {
     val appVersion = getAppVersion(ctx)
 
     // 显示当前版本信息
-    if(lastVersion < appVersion.versionNumber) {
+    if(lastVersion < appVersion.versionCode) {
         VersionDialog(
             onConfirm = vm::logout,
-            onDismiss = { vm.setLastVersion(appVersion.versionNumber) }
+            onDismiss = { vm.setLastVersion(appVersion.versionCode) }
         )
     }
 

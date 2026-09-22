@@ -1,4 +1,4 @@
-package cn.bit101.android.features.seat.ui.component
+package cn.bit101.android.features.common.helper
 
 import android.Manifest
 import android.content.Context
@@ -20,10 +20,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 
 /**
- * 前台服务常驻通知的权限状态。
+ * 通知权限（`POST_NOTIFICATIONS`）的状态与申请入口。
  *
- * 监控/优先预约靠前台服务在后台轮询，若通知被系统隐藏，用户就看不到「正在抢座」，
- * 也无法从通知快速回到任务列表 —— 功能不受影响，但状态不透明。
+ * 放在 `features:common` 而不是某个业务模块里 —— 现在至少有三处要用：
+ * 座位预约（前台服务常驻通知 + 抢座结果）、提醒中心（上课 / 作业截止）、设置页（权限状态）。
+ *
+ * 通知被系统隐藏时**功能不受影响**（前台服务照跑、提醒照算），但用户看不到任何反馈，
+ * 所以要有地方把「未授权」明确告诉用户并给一键申请的入口。
  */
 @Stable
 class NotificationPermissionState(

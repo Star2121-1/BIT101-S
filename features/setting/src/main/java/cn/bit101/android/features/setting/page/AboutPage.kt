@@ -409,7 +409,7 @@ internal fun AboutPage(
         if (checkUpdateState is SimpleDataState.Fail) {
             onSnackBar("检查更新失败")
         } else if (checkUpdateState is SimpleDataState.Success) {
-            val need = appVersion.versionNumber < (checkUpdateState as SimpleDataState.Success).data.versionCode
+            val need = appVersion.versionCode < (checkUpdateState as SimpleDataState.Success).data.versionCode
             if (need) {
                 showUpgradeDialog = true
             } else {

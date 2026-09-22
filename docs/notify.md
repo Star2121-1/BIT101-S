@@ -1,6 +1,6 @@
 # 通知与提醒中心（features/notify）
 
-> 设计日期：2026-09-22　｜　分支：`feature/notify`　｜　状态：**Phase 1 已完成并在真机验证通过（v1.6.8）**
+> 设计日期：2026-09-22　｜　分支：`feature/notify`　｜　状态：**Phase 1 完成（v1.6.8 真机验证通过）；设置页已补齐（v1.6.9）**
 
 ---
 
@@ -130,9 +130,8 @@ ddl:{uid}:{窗口}                            例 ddl:lexue-123:1d / ddl:lexue-1
 
 ## 六、后续（不在本轮）
 
-- **设置页 UI**：加「提醒」分组（总开关 / 上课提醒 + 提前量 / DDL 两个窗口）+
-  权限状态与一键申请。*数据层已就绪*（config 的 `NotifySettings` + 6 个 DataStore 键），
-  只差页面渲染
+- ~~设置页 UI~~ ✅ **已在 v1.6.9 完成**：`我 → 设置 → 提醒设置`，
+  含权限状态与一键申请；每次改动都会立即重排（`NotifyAppStartup.reschedule`）
 - 座位签到时限 / 暂离将到期提醒的**座位侧接入**（`seat → notify` 调用）
 - DDL 换源完成后（见 `docs/ddl-migration-plan.md`），提醒自动跟着新源走
 

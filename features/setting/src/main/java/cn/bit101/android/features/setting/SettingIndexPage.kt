@@ -16,6 +16,7 @@ import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.EditCalendar
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -64,6 +65,12 @@ internal fun SettingIndexPage(
             subTitle = "话廊数据及显示方式",
             icon = Icons.AutoMirrored.Outlined.Chat,
             onClick = { navController.navigate("gallery") },
+        ),
+        SettingItemData.IndexCard(
+            title = "提醒设置",
+            subTitle = "上课与作业截止提醒",
+            icon = Icons.Outlined.NotificationsNone,
+            onClick = { navController.navigate("notify") },
         ),
         SettingItemData.IndexCard(
             title = "空教室查询设置",

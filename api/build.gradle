@@ -3,14 +3,17 @@ plugins {
     id 'org.jetbrains.kotlin.jvm'
 }
 
+// ⚠️ 这里曾经被写死成 JDK 25（当年为了绕开本机只装了 JDK 25 的环境），
+// 但那会让别的机器 / CI 直接编译失败。改为与全仓其它模块同源（versions.*，当前 17）：
+// 编译仍用运行 Gradle 的 JDK，只是**目标字节码**是 17。
 java {
-    sourceCompatibility = JavaVersion.VERSION_25
-    targetCompatibility = JavaVersion.VERSION_25
+    sourceCompatibility = versions.sourceCompatibility
+    targetCompatibility = versions.targetCompatibility
 }
 
-kotlin {
-    jvmToolchain {
-        languageVersion.set(JavaLanguageVersion.of(25))
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    kotlinOptions {
+        jvmTarget = versions.jvmTarget
     }
 }
 

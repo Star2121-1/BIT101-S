@@ -183,11 +183,14 @@ private fun UserScreenContent(
                                     contentDescription = "消息",
                                 )
                             }
-                            Badge(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                            ) {
-                                Text(text = unreadMessageCount.toString())
+                            // ⚠️ 未读为 0 时不要画角标 —— 否则消息图标上永远挂着一个「0」
+                            if (unreadMessageCount > 0) {
+                                Badge(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                ) {
+                                    Text(text = unreadMessageCount.toString())
+                                }
                             }
                         }
 

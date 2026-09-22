@@ -42,7 +42,7 @@ fun UpdateDialog(
     val appVersion = getAppVersion(context)
     AlertDialog(
         onDismissRequest = {
-            if(appVersion.versionNumber >= version.minVersionCode) {
+            if(appVersion.versionCode >= version.minVersionCode) {
                 onDismiss()
             }
         },
@@ -50,7 +50,7 @@ fun UpdateDialog(
             Column {
                 Text("海日生残夜")
                 Text(
-                    text = "当前版本：${appVersion.versionNumber}",
+                    text = "当前版本：${appVersion.versionCode}",
                     style = MaterialTheme.typography.labelMedium
                 )
                 Text(
@@ -83,7 +83,7 @@ fun UpdateDialog(
         dismissButton = {
             TextButton(
                 onClick = {
-                    if (appVersion.versionNumber < version.minVersionCode) {
+                    if (appVersion.versionCode < version.minVersionCode) {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(version.url))
                         context.startActivity(intent)
                     } else {
@@ -93,7 +93,7 @@ fun UpdateDialog(
 
                 }
             ) {
-                if (appVersion.versionNumber < version.minVersionCode) {
+                if (appVersion.versionCode < version.minVersionCode) {
                     Text("强制更新")
                 } else {
                     Text("忽略该版本")
@@ -124,7 +124,7 @@ fun UpdateDialog() {
 
     var show by rememberSaveable { mutableStateOf(false) }
 
-    if((show && version.versionCode > ignoreVersion!!) || appVersion.versionNumber < version.minVersionCode) {
+    if((show && version.versionCode > ignoreVersion!!) || appVersion.versionCode < version.minVersionCode) {
         UpdateDialog(
             version = version,
             onDismiss = { show = false },

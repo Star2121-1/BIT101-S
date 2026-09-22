@@ -50,6 +50,12 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
         }
     }
 
+    // 进座位页自动试一次静默续期（不弹 WebView）：
+    // 会话被清空时用户不该被迫「重新授权」——能静默恢复就恢复。
+    LaunchedEffect(Unit) {
+        viewModel.autoRenewSilently()
+    }
+
     if (showCasLogin) {
         CasLoginScreen(
             mainController = mainController,

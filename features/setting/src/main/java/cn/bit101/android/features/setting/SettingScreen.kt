@@ -19,6 +19,7 @@ import cn.bit101.android.features.setting.page.AboutPage
 import cn.bit101.android.features.setting.page.AccountPage
 import cn.bit101.android.features.setting.page.CalendarSettingPage
 import cn.bit101.android.features.setting.page.DDLSettingPage
+import cn.bit101.android.features.setting.page.NotifySettingPage
 import cn.bit101.android.features.setting.page.PagesSettingPage
 import cn.bit101.android.features.setting.page.ThemeSettingPage
 
@@ -124,6 +125,16 @@ fun SettingScreen(
                 navController = navController,
             ) {
                 DDLSettingPage(onSnackBar = onSnackBar)
+            }
+        }
+
+        composable("notify") {
+            SettingPage(
+                mainController = mainController,
+                title = "提醒设置",
+                navController = navController,
+            ) {
+                NotifySettingPage()
             }
         }
 

@@ -28,7 +28,8 @@ internal class MessageViewModel @Inject constructor(
         MutableStateFlow<SimpleDataState<GetSeparateMessagesNumberDataModel.Response>?>(null)
     val separateUnreadCountStateFlow = _separateUnreadCountStateFlow.asStateFlow()
 
-    private val _selectedTypeFlow = MutableStateFlow(MessageType.SYSTEM)
+    // 默认停在「点赞」——用户更关心自己的帖子被谁赞了（「系统」通常只有公告）
+    private val _selectedTypeFlow = MutableStateFlow(MessageType.LIKE)
     val selectedTypeFlow = _selectedTypeFlow.asStateFlow()
 
     // 每个类型的消息缓存，切换 tab 时直接展示缓存，不重新请求
@@ -41,11 +42,15 @@ internal class MessageViewModel @Inject constructor(
     val loadMoreStateByTypeFlow = _loadMoreStateByTypeFlow.asStateFlow()
 
     fun loadUnreadCounts() {
-        withSimpleDataStateFlow(_unreadCountStateFlow) {
-            messageRepo.getUnreadMessageCount()
-        }
+        // ⚠️ 只发一次请求：分开计数（点赞/评论/关注/系统）求和就是总数，
+        // 再单独请求一次总数属于白跑一趟
         withSimpleDataStateFlow(_separateUnreadCountStateFlow) {
             messageRepo.getSeparateUnreadMessageCount()
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val total = (_separateUnreadCountStateFlow.value as? SimpleDataState.Success)?.data
+                ?.let { it.like + it.comment + it.follow + it.system }
+            if (total != null) _unreadCountStateFlow.value = SimpleDataState.Success(total)
         }
     }
 
@@ -92,11 +97,14 @@ internal class MessageViewModel @Inject constructor(
         }
     }
 
+    /** 拉一次「分开计数」，总数由四类求和得出（省掉一次请求）。 */
     private fun reloadUnreadCounts() = viewModelScope.launch(Dispatchers.IO) {
         runCatching {
-            _unreadCountStateFlow.value = SimpleDataState.Success(messageRepo.getUnreadMessageCount())
-            _separateUnreadCountStateFlow.value =
-                SimpleDataState.Success(messageRepo.getSeparateUnreadMessageCount())
+            val separate = messageRepo.getSeparateUnreadMessageCount()
+            _separateUnreadCountStateFlow.value = SimpleDataState.Success(separate)
+            _unreadCountStateFlow.value = SimpleDataState.Success(
+                separate.like + separate.comment + separate.follow + separate.system
+            )
         }
     }
 }

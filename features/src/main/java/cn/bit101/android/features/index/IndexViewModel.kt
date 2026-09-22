@@ -1,6 +1,7 @@
 package cn.bit101.android.features.index
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.EventSeat
 import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Event
@@ -50,7 +51,8 @@ internal class IndexViewModel @Inject constructor(
                     PageShowOnNav.BIT101Web -> Icons.Rounded.Explore
                     PageShowOnNav.Gallery -> Icons.AutoMirrored.Rounded.Chat
                     PageShowOnNav.Mine -> Icons.Rounded.AccountCircle
-                    PageShowOnNav.Seat -> Icons.Rounded.Person
+                    // 座位页：用人像图标语义不对，换成座位图标
+                    PageShowOnNav.Seat -> Icons.Rounded.EventSeat
                 }
                 IndexPage(it, label, icon)
             }
