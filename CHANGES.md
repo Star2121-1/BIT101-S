@@ -1,5 +1,63 @@
 # CHANGES
 
+## 2026-09-23 v1.7.0 DDL 换源：乐学 → 课程中心（eclass）
+
+学校 2026 年起用「课程中心」（延河课堂，`zy-eclass.bit.edu.cn`）替代乐学下发作业与
+学习资料。乐学链路失效后 DDL 页实际是空的 —— 本版新增课程中心作为**主数据源**，
+乐学源保留（历史数据仍有价值），两者并存。
+
+### 1. 新增 eclass 数据链路
+
+- `EclassApiService`（Retrofit）：`/api/user/recently-visited-courses`（课程列表）
+  + `/api/courses/{id}/activities`（课程动态）
+  ⚠️ 会话是**纯 cookie**（用户在 WebView 走统一身份认证后拿到），挂在带 cookieJar 的
+  `schoolClient` 上即可，不需要额外 token 头
+- `EclassDdlLogic`（**纯逻辑，20 条单测**）：作业判定 / 时间解析 / 映射
+- `EclassRepo` + `DefaultEclassRepo`：课程列表 → 逐课程并发拉动态 → 映射
+- `WebViewCookieSync`：把 WebView 登录后的 cookie 同步到 OkHttp 的 cookie store
+
+### 2. ⚠️ 判定作业的方式：用「字段存在性」，不枚举 type
+
+资料与作业在同一张表里，靠 `type` 与若干字段区分。**刻意不猜 `type` 的枚举值** ——
+实测时开学第 4 周课程里只有资料、没有任何作业，**拿不到作业的 type 真实值**；
+猜错就是「一个作业都收不到」且极难排查。改判作业特有字段是否存在：
+
+```
+带 submit_times / is_review_homework / late_submission_count  →  作业
+只有标题和附件、没有截止时间                                   →  资料
+```
+
+唯一已知的 `type` 取值是资料的 `"material"`，直接排除。判定**保守**：
+宁可漏一条，也不要把资料混进 DDL 列表。
+
+### 3. 接入与 UI
+
+- `DDLScheduleViewModel.updateEclassDdl()`：沿用乐学源的「不存在插入、存在更新」策略，
+  **保留 `done`**（用户勾掉的完成状态不被一次同步冲掉）
+- `DdlSource`（data 层，App 与组件共用）：`group` → 中文名（课程中心 / 乐学 / 自定义）
+  + 可否编辑 —— 同步来的条目改了也会被下次同步覆盖，故只允许编辑自定义项
+- DDL 页右下角新增「课程中心」FAB → App 内 WebView 打开登录页
+  ⚠️ 必须用 App 内 WebView：只有它与我们共用的 CookieManager 互通，
+  用系统浏览器登录的话 App 拿不到会话
+- **修组件 bug**：DDL 行首以前直接显示 `group` 原文，组件上会出现「lexue 第三次作业」
+
+### 4. 验证
+
+- 编译：api / data / schedule / widget / app **全通**
+- 单测：`EclassDdlLogicTest` **20/20**
+  （其中 `没有 endTime 时回落到 visibleEndAt` 逮到实现的真 bug：
+  `isHomework` 只看 `endTime`，而 `deadlineOf` 会回落到 `visibleEndAt`，两处口径不一致）
+- ⚠️ **真机端到端未验证** —— 需要在 App 里登录课程中心（WebView），
+  且当前账号尚无作业，所以只能验证「能拉到课程列表」这一步
+
+### 5. 未做 / 已知限制
+
+- `/api/todos`（个人待办）**当前恒为空**（未布置作业时无数据），故未纳入；
+  等有作业时再补
+- 课程列表用的是「最近访问的课程」（`/api/courses` 返回 403，`/api/user/courses`
+  与 `/api/course-list` 都不存在）。若将来发现漏课，再找更全的入口
+- 作业的 `type` 真实值仍未知 —— 等有第一份作业时用 `adb run-as` 读真实响应校正
+
 ## 2026-09-22 v1.6.9 提醒设置页 + 清掉 8 个小毛病 + 座位页自动静默重登
 
 ### 1. 提醒设置页（v1.6.8 欠的 UI）

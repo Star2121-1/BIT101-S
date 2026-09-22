@@ -135,3 +135,31 @@
 **eclass 需要你帮我抓一次接口**（它被 Keycloak 挡着，静态挖不到）。
 
 这两件事都不阻塞**通知与提醒中心**，那个可以立刻开工。
+
+---
+
+## 2026-09-23 进度更新：P1–P3 已实现（v1.7.0）
+
+| 阶段 | 状态 |
+|---|---|
+| P0 调研收尾 | ✅ 完成（接口契约见 `docs/ddl-source-contract.md`） |
+| P1 认证打通 | ✅ eclass 用**纯 cookie**（WebView 登录 + `WebViewCookieSync`），无需 token 交换 |
+| P2 数据接入 | ✅ `EclassRepo`：课程列表 → 逐课程 activities → `EclassDdlLogic` 映射；**多源并存**（乐学源保留） |
+| P3 UI 接入 | ✅ `DdlSource` 显示中文来源；DDL 页加「课程中心」FAB；同步来的条目不可编辑 |
+| P4 通知联动 | ⏸ 通知中心本来就读 `ddl_schedule`，换源后自动跟着走，但**带作业的场景未在真机确认** |
+| P5 收尾 | ⏸ 乐学源的降级文案未动 |
+
+### ⚠️ 唯一没做实的部分
+
+**作业的 `type` 真实取值仍未拿到** —— 开学第 4 周课程里只有资料。
+
+已按「字段存在性」绕开（见 CHANGES v1.7.0 第 2 节），但**这属于权宜之计**。
+等账号里有第一份作业后应做一次校正：
+
+```bash
+# 前提：真机装 debug 包并已登录课程中心
+adb shell run-as cn.bit101.android.debug cat files/eclass_activities.json
+```
+
+把真实响应补进 `docs/ddl-source-contract.md`，再回头确认 `EclassDdlLogic.isHomework`
+是否命中作业、是否会误收资料。

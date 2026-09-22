@@ -11,6 +11,7 @@ import cn.bit101.android.config.setting.base.sectionStart
 import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
+import cn.bit101.android.data.ddl.DdlSource
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -611,7 +612,9 @@ object WidgetLogic {
     }
 
     private fun DDLScheduleEntity.toLine(now: LocalDateTime): WidgetLine = WidgetLine(
-        lead = group.ifBlank { "DDL" },
+        // ⚠️ 必须走 DdlSource 转成中文：这里以前直接写 group，
+        // 于是组件上会出现「lexue 第三次作业」这种把技术标识当文案的情况
+        lead = DdlSource.displayName(group),
         main = title,
         trail = remainText(time, now),
         // 已过期或 24 小时内到期 —— 都算紧急

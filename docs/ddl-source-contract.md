@@ -118,3 +118,65 @@ aita 的 `course/todo` 作为补充源一起并入 ——
 2. aita `/courseapi/v2/course-live/get-my-course-day` 的 403 是缺哪个头（试 `tenant` / `Tenant-Id`）
 3. eclass 是否有**跨课程的作业汇总**接口（避免逐课程 N 次请求）；`/api/todos` 很可能就是它
 4. 会话**有效期**与失效表现（cookie 多久过期、失效时返回 401 还是跳登录页）
+
+---
+
+## 2026-09-23 实测补充（Playwright 有头会话内抓取）
+
+### 接口确认结果
+
+| 接口 | 结果 | 说明 |
+|---|---|---|
+| `GET /api/todos` | **200** `{"todo_list":[]}` | 当前无待办 → **项字段仍未知** |
+| `GET /api/user/recently-visited-courses` | **200** | ⭐ **课程列表主源** |
+| `GET /api/courses` | **403** 您没有权限完成此操作 | 不可用 |
+| `GET /api/user/courses` | 404 | 不存在 |
+| `GET /api/course-list` | 404 | 不存在 |
+| `GET /api/classes` | 200 `{"classes":[]}` | 空 |
+
+### 课程对象字段（`visited_courses[]`，实测）
+
+```
+id: int                   // 课程 id —— 用于 /api/courses/{id}/activities
+name: str                 // 课程名，如「操作系统」
+course_code: str          // 教务课号
+course_type: int
+credit_state: { credit_remaining:int, status:str }
+current_user_is_member: bool
+department: { name: str } // 开课学院
+imported_from: str
+org_id: int
+teaching_unit_type: str
+url: str
+course_attributes: { teaching_class_name: str|null }
+cover / grade / klass
+```
+
+### 首页实际调用的 /api 接口（17 个）
+
+`/api/activities/is-locked`、`/api/air-credit/user/courses/ai-ability`、`/api/alert/messages`、
+`/api/announcement`、`/api/bulletins/latest`、`/api/classes`、`/api/config`、`/api/course-list`、
+`/api/courses`、`/api/org-bulletin/bulletins/latest`、`/api/orgs/{id}/lang-settings`、
+`/api/orgs/{id}/welcome-notification`、`/api/todos`、`/api/uploads/{id}/modified-image`、
+`/api/user/courses`、`/api/user/recently-visited-courses`、`/statistics/api/user-visits`
+
+### ⚠️ 仍未确认的（及其原因）
+
+- **作业类活动的 `type` 取值** —— 第 4 周课程里只有资料，没有作业
+- **`/api/todos` 项字段** —— 返回空列表
+- 前端 JS 里搜 `todo_list` / `homework` / `deadline` / `end_time` 等关键词
+  **只命中无关代码**（日期选择器文案、sentry 上报）—— 作业页面的 chunk 是
+  **懒加载**的，首页不下载，所以静态搜不到
+
+### 结论：改以 activities 为主源
+
+`GET /api/courses/{id}/activities`（字段见本文档前文实测）作为 DDL 主数据源，
+判定作业用**字段存在性**而非枚举 `type`：
+
+```
+有 submit_times / is_review_homework / score_* 之类字段  ⇒  作业
+仅标题 + 附件、无截止时间                              ⇒  资料
+```
+
+字段细节在**真机验证阶段**用 `adb shell run-as cn.bit101.android.debug` 读取
+真实响应校正（debug 包可 run-as，不需要 root）。
