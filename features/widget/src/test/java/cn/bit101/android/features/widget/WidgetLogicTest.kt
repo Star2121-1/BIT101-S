@@ -435,6 +435,37 @@ class WidgetLogicTest {
         )
     }
 
+    /**
+     * ⚠️ **回归测试（用户实际报过的 bug，2026-09-23 修）**
+     *
+     * DDL 的数据来自本地库（延河课堂同步 + 用户手动添加），跟 BIT101 的学校会话无关。
+     * 原来这页挂了 `bit101LoggedIn`，未登录就整页换成「未登录 BIT101」——
+     * 于是用户看到「App 里明明有两条 DDL，桌面上什么都没有」。
+     */
+    @Test
+    fun `未登录 BIT101 时 DDL 页照常显示本地条目`() {
+        val data = WidgetLogic.build(
+            courses = emptyList(),
+            ddls = listOf(ddl(title = "要交的报告", time = now.plusDays(1))),
+            today = today,
+            now = now,
+            firstDay = firstDay,
+            bit101LoggedIn = false,
+        )
+
+        val ddlPage = data.pages[PageKind.DDL.ordinal]
+        assertNull("DDL 页不该有登录引导", ddlPage.loginPrompt)
+        assertEquals(
+            listOf("未完成 · 1", "要交的报告"),
+            ddlPage.items.map { it.main },
+        )
+        // 对照：课程页仍按登录态挡住（它的数据确实来自 BIT101 会话）
+        assertEquals(
+            "未登录 BIT101",
+            data.pages[PageKind.COURSE.ordinal].loginPrompt,
+        )
+    }
+
     /** 栏目行只是分区标识：不可点、没有第二行。 */
     @Test
     fun `栏目行不可点也不带第二行`() {

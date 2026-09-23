@@ -14,7 +14,8 @@ import kotlinx.coroutines.launch
 /**
  * BIT101 桌面小组件的宿主。
  *
- * 组件显示三页（课程 / DDL / 座位），点击顶部页签直接切换，右侧「刷新」键重读本地数据。
+ * 组件显示四页（**课程 / DDL / 座位 / 动态**），点击顶部页签直接切换，
+ * 右侧「刷新」键重读本地数据。
  *
  * ## 渲染方式
  *
@@ -29,6 +30,20 @@ import kotlinx.coroutines.launch
  *
  * RemoteViews 是跨进程的只读快照，宿主（桌面）只执行我们下发的操作。
  * 所以点击只能通过 `setOnClickPendingIntent` → 广播回本进程 → 重新构建整张 RemoteViews。
+ *
+ * ## ⚠️ 安全边界：接收器是 `exported="false"`
+ *
+ * 自定义 action（切页签 / 刷新 / 一键预约 / 勾选 DDL）都是**写操作**，
+ * 所以特意确认过暴露面 —— `AndroidManifest.xml` 里这个 receiver 没有任何
+ * `intent-filter` 之外的开放理由，声明为 `exported="false"`：
+ *
+ * - 第三方 App / `adb shell am broadcast` **发不进来**（2026-09-23 实测：
+ *   广播只到 `ActivityManager: Enqueued broadcast`，接收器完全没被调用）
+ * - 系统与桌面仍可投递（系统 uid 不受 exported 限制）
+ * - 我们自己的点击由 `PendingIntent` 代发，发送方身份就是我们这个 uid
+ *
+ * 也就是说**不能**把它改成 `exported="true"` —— 那样任何人都能用一条
+ * `am broadcast -a …QUICK_RESERVE` 触发一次真实预约。
  */
 class BIT101WidgetProvider : AppWidgetProvider() {
 
@@ -95,13 +110,16 @@ class BIT101WidgetProvider : AppWidgetProvider() {
                     ACTION_ITEM_TAP -> toggleDdl(context, intent)
 
                     ACTION_REFRESH -> {
-                        // 刷新时顺带拉一次「我的预约」—— 组件上显示的座位状态
-                        //（已预约/使用中/暂离）只有拉了数据才会变。
+                        // 「刷新」键的语义是「真的去拿一遍最新数据」，所以两件事都要做：
+                        // 1) 拉一次「我的预约」—— 座位状态（已预约/使用中/暂离）
+                        //    只有拉了数据才会变（此前这里只装了 bridge、没真的拉，
+                        //    注释说的和代码做的不一致）
                         SeatWidgetBridgeHolder.ensureBridge(context)
-                        WidgetRepositoryHolder.load(context)
+                        SeatWidgetBridgeHolder.refreshReservations()
                     }
                 }
-                render(context.applicationContext, appWidgetId)
+                // 只有显式刷新才强制重拉延河课堂动态（页签切换 / 勾选 DDL 只是重画）
+                render(context.applicationContext, appWidgetId, forceEclass = action == ACTION_REFRESH)
             } finally {
                 pendingResult.finish()
             }
@@ -186,14 +204,20 @@ class BIT101WidgetProvider : AppWidgetProvider() {
          *
          * 供 [WidgetRefreshWorker] 在自己的协程里调用 ——
          * Worker 用异步版的话，`doWork` 一返回协程就可能被收走，渲染半途而废。
+         *
+         * @param forceEclass 周期刷新是「兜底拿最新」的场景，默认强制重拉动态。
          */
-        suspend fun renderAllNow(context: Context) {
+        suspend fun renderAllNow(context: Context, forceEclass: Boolean = true) {
             val appContext = context.applicationContext
-            appWidgetIds(appContext).forEach { render(appContext, it) }
+            appWidgetIds(appContext).forEach { render(appContext, it, forceEclass) }
         }
 
-        private suspend fun render(context: Context, appWidgetId: Int) {
-            val data = WidgetRepositoryHolder.load(context)
+        private suspend fun render(
+            context: Context,
+            appWidgetId: Int,
+            forceEclass: Boolean = false,
+        ) {
+            val data = WidgetRepositoryHolder.load(context, forceEclass = forceEclass)
             val manager = AppWidgetManager.getInstance(context)
             manager.updateAppWidget(appWidgetId, WidgetViews.build(context, appWidgetId, data))
             // ⚠️ 必须显式通知列表数据变了：只 updateAppWidget 的话，ListView 会沿用

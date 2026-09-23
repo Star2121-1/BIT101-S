@@ -44,9 +44,12 @@ internal object WidgetRepositoryHolder {
      * 两条路径各自读一遍数据，属于可接受的小额重复：把结果塞进 adapter 的 Intent
      * 传过去虽然省一次查询，但要让 [WidgetLine] 可序列化，且组件被系统持久化恢复时
      * 类名变更会导致反序列化失败。宁可多查一次。
+     * （网络那一项已在 [WidgetRepository] 内部按 TTL 缓存，所以这里的重复不会重复请求。）
+     *
+     * @param forceEclass 无视缓存重新拉延河课堂动态；只有显式刷新路径才传 true。
      */
-    suspend fun load(context: Context): WidgetData =
-        runCatching { ensureRepository(context)?.load() }.getOrNull()
+    suspend fun load(context: Context, forceEclass: Boolean = false): WidgetData =
+        runCatching { ensureRepository(context)?.load(forceEclass = forceEclass) }.getOrNull()
             ?: loadingWidgetData()
 
     private fun loadingWidgetData() = WidgetData(

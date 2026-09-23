@@ -406,10 +406,27 @@ suspend fun updateGlance() { sendEvent(UpdateGlanceState) }
   `requestCode` + `Intent.filterEquals`，而 **filterEquals 不比较 extras** ——
   只靠 extras 区分的话，几个页签会被判定为同一个 PendingIntent 互相覆盖，
   表现就是「只有最后一个页签能用」
+- ⚠️⚠️ **列表条目的点击模板必须 `FLAG_MUTABLE`**（2026-09-23 实测踩到）：
+  collection 的 fill-in 机制是**宿主（桌面进程）**拿到模板 PendingIntent 后调
+  `send(context, code, fillInIntent)` 把 extras 合进去；Android 12 起对**不可变**的
+  PendingIntent 这样做会抛 `IllegalArgumentException`（…with a fillInIntent on an
+  immutable PendingIntent），异常被宿主吞掉 ——
+  **表现是「点条目毫无反应」，没有任何日志**（当时点 DDL 行后数据库纹丝不动）。
+  页签 / 刷新 / 动作键那些**不带 fill-in** 的仍然保持 `FLAG_IMMUTABLE`。
+  ⚠️ 换 mutability 时**连 `data` 一起换**（如 `…/list` → `…/list2`）：同一个 key
+  不允许既有可变又有不可变的记录共存，会抛
+  "Cannot create both immutable and mutable PendingIntents with the same key"
+- ⚠️ **组件列表页的数据门槛要与 App 内同一页一致**：曾经 DDL 页挂 `bit101LoggedIn`，
+  未登录整页换成「未登录 BIT101」，而 App 的 DDL 页从不问登录态（数据在本地库）→
+  用户看到「App 里明明有两条 DDL，桌面上什么都没有」。登录引导只该挂在
+  **数据确实依赖该会话**的页上（课程页→BIT101、动态页→延河课堂、座位页→seatlib）
 - 颜色写固定值，不要用 `?attr/colorSurface`：RemoteViews 是在**桌面的进程**里
   inflate 的，取不到我们 App 的主题属性
 - 单向数据流：RemoteViews 是跨进程的只读快照，点击只能通过广播回本进程，
   重新构建整张 RemoteViews 再下发
+- ⚠️ **重绘不要顺带打网络**：每一次重绘（切页签、勾选、改尺寸、onUpdate）都会走
+  `WidgetRepository.load()`；网络项（延河课堂动态）必须自己带 TTL 缓存
+  （`EclassActivityCache`），只有显式刷新（刷新键 / 周期任务）才真拉
 
 
 ## 五、已抽取的可测逻辑

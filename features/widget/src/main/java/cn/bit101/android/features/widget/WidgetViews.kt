@@ -155,18 +155,31 @@ internal object WidgetViews {
     /**
      * 列表条目的点击模板：打开 App 并按条目自己的 [WidgetLine.openRoute] 跳页。
      * extras 由条目的 fillInIntent 提供，没有 fillInIntent 的条目点了没反应。
+     *
+     * ⚠️⚠️ **必须 `FLAG_MUTABLE`** —— collection 的 fill-in 机制是**宿主（桌面）**
+     * 拿到模板 PendingIntent 后调 `send(context, code, fillInIntent)` 把 extras 合进去；
+     * Android 12 起对**不可变**的 PendingIntent 这样做会直接抛
+     * `IllegalArgumentException`（Attempt to invoke PendingIntent.send() with a
+     * fillInIntent on an immutable PendingIntent），异常被宿主吞掉 ——
+     * 表现就是**点条目毫无反应**（2026-09-23 模拟器实测：点 DDL 行后数据库没变）。
+     * 页签 / 刷新 / 动作键那些**不带 fill-in** 的仍然保持不可变。
+     *
+     * ⚠️ `data` 里的 `list2` 是**刻意换过的**：旧版本用 `…/list/…` 创建过**不可变**的
+     * 同 key PendingIntent，而系统不允许「同一 key 既有可变又有不可变」的记录共存
+     * （会抛 "Cannot create both immutable and mutable PendingIntents with the same key"）。
+     * 换 URI 让 key 不同，升级路径上不必依赖系统是否清理过旧记录。
      */
     private fun listTapTemplate(context: Context, appWidgetId: Int): PendingIntent {
         val intent = Intent().apply {
             setClassName(context.packageName, MAIN_ACTIVITY_CLASS)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            data = Uri.parse("bit101://goto/list/$appWidgetId")
+            data = Uri.parse("bit101://goto/list2/$appWidgetId")
         }
         return PendingIntent.getActivity(
             context,
             appWidgetId,
             intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
         )
     }
 
@@ -176,13 +189,16 @@ internal object WidgetViews {
      * 走**广播**回到 [BIT101WidgetProvider]（而不是打开 App）：勾一个 DDL
      * 不该把用户从桌面拽进 App；Provider 写完库直接重绘，原地就能看到变化。
      * 具体的 DDL uid 由条目的 fillInIntent 带上。
+     *
+     * ⚠️ 同样必须 `FLAG_MUTABLE`（要接 fill-in 的 uid），理由见 [listTapTemplate]。
      */
     private fun ddlToggleTemplate(context: Context, appWidgetId: Int): PendingIntent =
         broadcast(
             context,
             appWidgetId,
             BIT101WidgetProvider.ACTION_ITEM_TAP,
-            Uri.parse("bit101://ddl-toggle/$appWidgetId"),
+            Uri.parse("bit101://ddl-toggle2/$appWidgetId"),
+            mutable = true,
         )
 
     private fun showEmpty(rv: RemoteViews, text: String) {
@@ -440,11 +456,18 @@ internal object WidgetViews {
         )
     }
 
+    /**
+     * 组件内部广播的通用构造。
+     *
+     * @param mutable 只有**要接 fill-in extras 的列表模板**才需要 true（见 [listTapTemplate]）；
+     *   页签 / 刷新这类固定动作保持 `FLAG_IMMUTABLE` —— 不接外部填充，越不可变越安全。
+     */
     private inline fun broadcast(
         context: Context,
         appWidgetId: Int,
         action: String,
         data: Uri,
+        mutable: Boolean = false,
         extra: Intent.() -> Unit = {},
     ): PendingIntent {
         val intent = Intent(context, BIT101WidgetProvider::class.java).apply {
@@ -457,7 +480,8 @@ internal object WidgetViews {
             context,
             0,
             intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE,
         )
     }
 

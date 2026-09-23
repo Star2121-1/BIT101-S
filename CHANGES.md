@@ -1,5 +1,62 @@
 # CHANGES
 
+## 2026-09-23 v1.7.5 自检修 bug：桌面组件的点击一个都不生效 + DDL 被登录态挡住
+
+一轮系统自检（跑全量单测 + 逐文件读代码 + **模拟器实测**）逮到 3 个真 bug，全部修好并验证。
+
+### 1. 🐛🐛 **桌面组件上点任何条目都没反应**（最严重）
+
+列表条目的点击模板用了 `PendingIntent.FLAG_IMMUTABLE`，而 RemoteViews collection 的
+fill-in 机制要求模板**可变**：宿主（桌面进程）拿到模板后调
+`send(context, code, fillInIntent)` 合并 extras，Android 12 起对不可变 PendingIntent
+这样做会抛 `IllegalArgumentException`，**异常被宿主吞掉、没有任何日志**。
+
+后果：点 DDL 条目不会勾选、点课程/座位条目不会打开 App —— v1.7.3 做的
+「点 DDL 勾选」和更早的「点课程行打开课表」**一直是死的**。
+
+- 两个模板（打开 App / 切换完成状态）改 `FLAG_MUTABLE`；页签 / 刷新 / 动作键
+  这些不带 fill-in 的仍保持不可变
+- ⚠️ 换 mutability 时连 `data` 一起换（`…/list` → `…/list2`）：同一 key 不允许
+  既有可变又有不可变的记录共存，否则抛
+  "Cannot create both immutable and mutable PendingIntents with the same key"
+
+**模拟器实测**：点 DDL 行 → 数据库 `done` 0→1 且组件就地重绘成「已完成」；
+`bit101_goto=seat` 的跳转把 App 停在了「座」页。
+
+### 2. 🐛 **「App 里有 DDL、桌面组件不显示」的真因**
+
+之前以为是「只看未来 14 天 + 隐藏已完成」（v1.7.3 已修），但模拟器一测就暴露了另一条：
+组件把 DDL 页**整体挂在 BIT101 登录态上**，未登录就整页换成「未登录 BIT101」。
+而 DDL 的数据自 v1.7.0 起来自**延河课堂 + 用户手动添加**，全在本地库，
+App 里的 DDL 页从不问登录态 —— 两边行为不一致，正好是用户的原话。
+
+- DDL 页不再看登录态（登录引导只留给**数据确实依赖该会话**的页：
+  课程页→BIT101、动态页→延河课堂、座位页→seatlib）
+- 单测加了回归用例（未登录 BIT101 时 DDL 页照常显示本地条目）
+
+### 3. 🐛 **组件每次重绘都在打网络**
+
+动态页的数据是网络请求（1 次课程列表 + 每门课 1 次），而它挂在 `WidgetRepository.load()` 里 ——
+于是**点一次页签、勾一次 DDL** 都要等一轮完整请求，网络差时像卡死，还白耗流量。
+
+- 新增 `EclassActivityCache`（纯逻辑 + 5 条单测）：10 分钟 TTL 内复用，
+  只有显式刷新（刷新键 / 周期任务）才 `forceEclass` 真拉
+- 顺带修：刷新键**注释说拉「我的预约」但代码里只装了桥、没真拉**，现在真的拉了
+
+### 4. 其他
+
+- `WebViewCookieSync` 逐条容错：单条坏 cookie 不再让整次同步（也就是整个延河课堂会话）失败
+- `BIT101WidgetProvider` 类注释仍是「三页」→ 改四页；补上安全边界说明
+  （receiver 是 `exported="false"`，**实测** `adb shell am broadcast` 打不进来）
+- `docs/widget.md` 增补上面 3 条坑；`docs/ddl-source-contract.md` 记录 `Course.url` 值未实测
+
+### 验证
+
+- `WidgetLogicTest` 60 → **61**、`EclassActivityCacheTest` **5**、座位 145、通知 36 全过
+- 模拟器（debug 包，`run-as` 灌真实数据）：DDL 分栏渲染 ✓、点条目勾选 ✓、
+  页签切换 ✓、4 页签齐全 ✓、跳转路由 ✓
+- release 包装到真机并核对 `versionName=1.7.5`
+
 ## 2026-09-23 v1.7.4 「动态」点条目 → 直接落到**那门课**的页面
 
 承接 v1.7.3：当时动态点开只能到延河课堂**首页**。用户要的是"点了能跳过去看"，

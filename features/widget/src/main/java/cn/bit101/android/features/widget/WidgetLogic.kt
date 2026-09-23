@@ -420,7 +420,8 @@ object WidgetLogic {
                 timeTable = timeTable,
                 loggedIn = bit101LoggedIn,
             ),
-            ddlPage(ddls, now, loggedIn = bit101LoggedIn),
+            // ⚠️ DDL 页**不看登录态**（见 ddlPage 的说明）：它的数据来自本地库
+            ddlPage(ddls, now),
             seatPage(seat, loggedIn = seatLoggedIn),
             // ⚠️ 顺序必须与 PageKind.entries 一致（页号按索引存）
             activityPage(activities, now, loggedIn = eclassLoggedIn),
@@ -434,11 +435,16 @@ object WidgetLogic {
      *
      * 措辞区分两套登录体系 —— 用户报告「组件没数据」时，这句话能直接告诉他
      * 该去登哪一个，而不是笼统的「未登录」。
+     *
+     * ⚠️ **DDL 页刻意不用它**：那页的数据在本地库，与登录态无关（见 [ddlPage]）。
+     * 所以这里只覆盖三页 —— 课程页（BIT101 会话）、座位页（seatlib）、
+     * 动态页（延河课堂会话）。
      */
     fun loginPromptOf(kind: PageKind, loggedIn: Boolean): String? = when {
         loggedIn -> null
         kind == PageKind.SEAT -> "未登录座位系统"
         kind == PageKind.ACTIVITY -> "在 App 里登录延河课堂后显示动态"
+        // 只剩课程页走这里：它的数据确实来自 BIT101 的学校会话
         else -> "未登录 BIT101"
     }
 
@@ -621,23 +627,30 @@ object WidgetLogic {
      * **已过期的未完成项仍然显示**（它们才是真正要紧的），只是会被标为 urgent。
      * 已完成的一律不显示 —— 组件空间有限，只放还需要行动的事。
      */
+    /**
+     * DDL 页：**未完成 / 已完成两栏**，条目可点（点一下 = 勾选/取消）。
+     *
+     * ## ⚠️ 为什么这页**没有**「未登录」门禁（2026-09-23 修）
+     *
+     * 原来这里挂了 `bit101LoggedIn`，未登录就整页换成「未登录 BIT101」。
+     * 但 v1.7.0 换源之后，DDL 的数据来源是**延河课堂（eclass）+ 用户手动添加**，
+     * 全部存在**本地库**里，跟 BIT101 的学校会话没关系 —— 于是出现：
+     *
+     * > 用户在 App 里明明看得到这两条 DDL，桌面上却只有一句「未登录 BIT101」。
+     *
+     * 这正是用户反馈的原话。App 内的 DDL 页读本地库、从不问登录态，
+     * 组件却把它挡住，两边行为不一致。现在对齐 App：**有数据就显示**。
+     *
+     * （登录引导各归其位：课程页看 BIT101 会话、动态页看延河课堂会话、
+     * 座位页看 seatlib 会话。）
+     *
+     * ⚠️ **不再限制时间范围**（2026-09-23 用户要求「显示里面所有的 DDL」）：
+     * 以前只看未来 14 天，于是 16 天/41 天后的作业在组件上完全看不见。
+     */
     fun ddlPage(
         ddls: List<DDLScheduleEntity>,
         now: LocalDateTime,
-        loggedIn: Boolean = true,
     ): WidgetPage {
-        if (!loggedIn) {
-            return WidgetPage(
-                kind = PageKind.DDL,
-                title = PageKind.DDL.label,
-                emptyText = "暂无待办",
-                loginPrompt = loginPromptOf(PageKind.DDL, loggedIn = false),
-            )
-        }
-
-        // ⚠️ **不再限制时间范围**（2026-09-23 用户要求「显示里面所有的 DDL」）：
-        // 以前只看未来 14 天，于是 16 天/41 天后的作业在组件上完全看不见 —— 用户
-        // 在 App 里看得到、组件里看不到，只会以为是 bug。
         val pending = ddls.filter { !it.done }.sortedBy { it.time }
         // 已完成的按**时间倒序**：最近完成的排前面，翻旧账的往下沉
         val done = ddls.filter { it.done }.sortedByDescending { it.time }

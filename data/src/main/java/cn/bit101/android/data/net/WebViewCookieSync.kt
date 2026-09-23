@@ -30,6 +30,11 @@ object WebViewCookieSync {
     /**
      * 把 [urls] 这些地址在 WebView 中的 cookie 写入 [target]。
      *
+     * ⚠️ **逐条容错**：某一条 cookie 坏掉（名字非法、值里带 `HttpCookie` 不接受的字符）
+     * 不能让整次同步失败 —— 那会让整个延河课堂会话都拿不到数据，
+     * 而且失败得很安静（调用方只会看到「没数据」）。跳过坏的那条，继续同步其余的；
+     * 某个地址整体出问题也只影响它自己。
+     *
      * @return 每个地址同步成功的 cookie 数量（仅用于日志排障）
      */
     fun sync(target: CookieManager, urls: List<String>): Map<String, Int> {
@@ -37,26 +42,31 @@ object WebViewCookieSync {
         val result = mutableMapOf<String, Int>()
 
         urls.forEach { url ->
-            val raw = web.getCookie(url)?.takeIf { it.isNotEmpty() }
-            if (raw == null) {
-                result[url] = 0
-                return@forEach
-            }
-
-            val uri = URI.create(url)
-            var count = 0
-            raw.split(';').forEach { part ->
-                val eq = part.indexOf('=')
-                if (eq <= 0) return@forEach
-                val name = part.substring(0, eq).trim()
-                val value = part.substring(eq + 1).trim()
-                if (name.isEmpty()) return@forEach
-                put(target, uri, name, value)
-                count++
-            }
-            result[url] = count
+            result[url] = runCatching { syncOne(target, web, url) }.getOrDefault(0)
         }
         return result
+    }
+
+    /** 同步单个地址，返回成功的条数。 */
+    private fun syncOne(
+        target: CookieManager,
+        web: WebCookieManager,
+        url: String,
+    ): Int {
+        val raw = web.getCookie(url)?.takeIf { it.isNotEmpty() } ?: return 0
+
+        val uri = URI.create(url)
+        var count = 0
+        raw.split(';').forEach { part ->
+            val eq = part.indexOf('=')
+            if (eq <= 0) return@forEach
+            val name = part.substring(0, eq).trim()
+            val value = part.substring(eq + 1).trim()
+            if (name.isEmpty()) return@forEach
+
+            if (runCatching { put(target, uri, name, value) }.isSuccess) count++
+        }
+        return count
     }
 
     /** 以「同名覆盖」写入，避免同名 cookie 在 store 里越堆越多、旧值先生效。 */
