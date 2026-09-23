@@ -157,18 +157,6 @@ class WidgetRepository @Inject constructor(
     }
 
     /**
-     * 切换一条 DDL 的完成状态（组件里点条目即可，不必打开 App）。
-     *
-     * ⚠️ 只改 `done`，其余字段原样写回 —— 表里还有同步来的 title / time / group，
-     * 漏掉任何一个都会把数据改坏。取不到这条（已被删除）时静默什么都不做。
-     */
-    suspend fun toggleDdlDone(uid: String) {
-        val item = runCatching { ddlRepo.getDDLByUIDs(listOf(uid)).firstOrNull() }
-            .getOrNull() ?: return
-        runCatching { ddlRepo.updateDDL(item.copy(done = !item.done)) }
-    }
-
-    /**
      * 供 App 内部（课表同步、DDL 同步后）调用的刷新触发器。
      *
      * 组件不在前台，只能主动通知系统重绘；数据由 Provider 重新读一遍。

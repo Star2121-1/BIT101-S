@@ -141,16 +141,16 @@ internal object WidgetViews {
         // 列表条目的点击模板（collection 的标准做法）：模板在这里挂一次，
         // 条目里用 setOnClickFillInIntent 补 extras —— 只有带 fillInIntent 的条目可点。
         //
-        // ⚠️ 一个 collection **只能挂一个模板**，所以「整行跳转」与「整行勾选」
-        // 没法按视图分流。当前统一是**打开 App**（用户 2026-09-23 要求：
-        // 点 DDL / 动态条目要跳进 App 对应页）。`ddlToggleTemplate` 保留给将来的
-        // 「勾选模式」（点动作键把整页切成勾选语义），暂时没有调用方。
+        // ⚠️ 一个 collection **只能挂一个模板**：所以「整行跳转」与「整行勾选」不可能
+        // 在同一列表里按视图分流（更别说 RemoteViews 连长按 API 都没有）。
+        // 现在的语义统一是**打开 App**（用户 2026-09-23 要求：点 DDL / 动态条目
+        // 要跳进 App 对应页并定位到那一条）。
         rv.setPendingIntentTemplate(R.id.widget_list, listTapTemplate(context, appWidgetId))
     }
 
     /**
-     * 列表条目的点击模板：打开 App 并按条目自己的 [WidgetLine.openRoute] 跳页。
-     * extras 由条目的 fillInIntent 提供，没有 fillInIntent 的条目点了没反应。
+     * 列表条目的点击模板：打开 App 并按条目自己的 [WidgetLine.openRoute] 跳页
+     * （再带上 `openTab` / `focusKey`）。没有 fillInIntent 的条目点了没反应。
      *
      * ⚠️⚠️ **必须 `FLAG_MUTABLE`** —— collection 的 fill-in 机制是**宿主（桌面）**
      * 拿到模板 PendingIntent 后调 `send(context, code, fillInIntent)` 把 extras 合进去；
@@ -178,25 +178,6 @@ internal object WidgetViews {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
         )
     }
-
-    /**
-     * DDL 行的点击模板：**在组件里直接勾选/取消**（广播回 [BIT101WidgetProvider] 写库）。
-     *
-     * ⚠️ **当前没有调用方**（2026-09-23 起条目点击改为「跳进 App 的 DDL 页」）。
-     * 保留它是为了将来的**「勾选模式」**：点动作键把整页切换成勾选语义、再点回到跳转。
-     * 之所以不能两者共存：一个 collection 只能挂一个点击模板（见 `renderBody` 的说明）。
-     *
-     * 数据（`WidgetLine.toggleDdlUid`）也一直带着，接上模板即可用。
-     */
-    @Suppress("unused")
-    private fun ddlToggleTemplate(context: Context, appWidgetId: Int): PendingIntent =
-        broadcast(
-            context,
-            appWidgetId,
-            BIT101WidgetProvider.ACTION_ITEM_TAP,
-            Uri.parse("bit101://ddl-toggle2/$appWidgetId"),
-            mutable = true,
-        )
 
     private fun showEmpty(rv: RemoteViews, text: String) {
         rv.setViewVisibility(R.id.widget_empty, View.VISIBLE)
@@ -269,22 +250,20 @@ internal object WidgetViews {
         rv.setTextColor(R.id.item_time, timeColor(context, line))
         rv.setTextViewText(R.id.item_trail, line.trail)
 
-        // 条目的点击语义（extras 经列表的 PendingIntentTemplate 合并后投递）：
-        // - 打开 App 并跳到某页：openRoute（+ openTab 停在第几个 tab、focusKey 定位到哪一条）
-        // - 在组件里勾选 DDL：toggleDdlUid（当前未接线，留给将来的「勾选模式」）
+        // 条目的点击语义：**打开 App 并跳到某页**（openRoute，可选 openTab / focusKey）。
+        // 组件里不再有「勾选」—— 一个 collection 只能挂一个点击模板，
+        // 且 RemoteViews 没有长按 API（见 `renderBody` 的说明）。
         //
-        // ⚠️⚠️ **必须合成一个 fillInIntent**：`setOnClickFillInIntent` 对同一 view 是
-        // **覆盖**语义，连着调两次只会留下最后一次 —— 早先分开写两段时，
-        // DDL 行（两个字段都有）会把 openRoute 丢掉，点了变成「勾选」而不是跳转。
-        val clickable = line.openRoute != null || line.toggleDdlUid != null
-        if (clickable) {
+        // ⚠️⚠️ **extras 必须合成一个 fillInIntent**：`setOnClickFillInIntent` 对同一 view
+        // 是**覆盖**语义，连着调两次只会留下最后一次 —— 分成几段写的话，
+        // 先设置的 extra 会被后一次调用悄悄丢掉。
+        line.openRoute?.let { route ->
             rv.setOnClickFillInIntent(
                 R.id.item_root,
                 Intent().apply {
-                    line.openRoute?.let { putExtra(GOTO_EXTRA, it) }
+                    putExtra(GOTO_EXTRA, route)
                     line.openTab?.let { putExtra(TAB_EXTRA, it) }
                     line.focusKey?.let { putExtra(FOCUS_EXTRA, it) }
-                    line.toggleDdlUid?.let { putExtra(DDL_UID_EXTRA, it) }
                 },
             )
         }
@@ -500,9 +479,6 @@ internal object WidgetViews {
 
     /** 与 `MainActivity.EXTRA_FOCUS` 保持一致：定位到哪一条（DDL uid / 动态 id）。 */
     private const val FOCUS_EXTRA = "bit101_focus"
-
-    /** DDL 行 fillInIntent 里的 uid —— Provider 据此知道要切换哪一条。 */
-    const val DDL_UID_EXTRA = "bit101_ddl_uid"
 
     /** `cn.bit101.android.features.MainActivity` —— 见 [gotoPendingIntent] 的说明。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"

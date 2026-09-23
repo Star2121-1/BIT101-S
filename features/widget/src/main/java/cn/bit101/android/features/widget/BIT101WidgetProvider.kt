@@ -79,7 +79,7 @@ class BIT101WidgetProvider : AppWidgetProvider() {
 
         val action = intent.action ?: return
         if (action != ACTION_SET_PAGE && action != ACTION_REFRESH &&
-            action != ACTION_QUICK_RESERVE && action != ACTION_ITEM_TAP
+            action != ACTION_QUICK_RESERVE
         ) {
             return
         }
@@ -112,10 +112,6 @@ class BIT101WidgetProvider : AppWidgetProvider() {
 
                     ACTION_QUICK_RESERVE -> quickReserve(context, appWidgetId, intent)
 
-                    // DDL 条目被点：切换完成状态。**不打开 App** ——
-                    // 在桌面勾一下「作业做完了」不该把用户拽进 App。
-                    ACTION_ITEM_TAP -> toggleDdl(context, intent)
-
                     ACTION_REFRESH -> {
                         // 「刷新」键的语义是「真的去拿一遍最新数据」，所以两件事都要做：
                         // 1) 拉一次「我的预约」—— 座位状态（已预约/使用中/暂离）
@@ -125,26 +121,12 @@ class BIT101WidgetProvider : AppWidgetProvider() {
                         SeatWidgetBridgeHolder.refreshReservations()
                     }
                 }
-                // 只有显式刷新才强制重拉延河课堂动态（页签切换 / 勾选 DDL 只是重画）
+                // 只有显式刷新才强制重拉延河课堂动态（页签切换只是重画）
                 render(context.applicationContext, appWidgetId, forceEclass = action == ACTION_REFRESH)
             } finally {
                 pendingResult.finish()
             }
         }
-    }
-
-    /**
-     * DDL 条目点击 → 切换完成状态。
-     *
-     * ⚠️ 这里**只处理「切换」**：打开 App 的跳转仍走 `PendingIntent.getActivity`
-     * 的条目模板（`WidgetViews.listTapTemplate`）。原因是 Android 10 起
-     * 后台广播里 `startActivity` 会被系统拦掉（后台启动 Activity 限制），
-     * 而 `getActivity` 的 PendingIntent 由系统代发，不受此限。
-     */
-    private suspend fun toggleDdl(context: Context, intent: Intent) {
-        val uid = intent.getStringExtra(WidgetViews.DDL_UID_EXTRA)?.takeIf { it.isNotBlank() }
-            ?: return
-        WidgetRepositoryHolder.ensureRepository(context)?.toggleDdlDone(uid)
     }
 
     /**
@@ -177,9 +159,6 @@ class BIT101WidgetProvider : AppWidgetProvider() {
         const val ACTION_SET_PAGE = "cn.bit101.android.features.widget.SET_PAGE"
         const val ACTION_REFRESH = "cn.bit101.android.features.widget.REFRESH"
         const val ACTION_QUICK_RESERVE = "cn.bit101.android.features.widget.QUICK_RESERVE"
-
-        /** 列表条目被点（目前用于 DDL 的「勾选/取消」，见 [toggleDdl]）。 */
-        const val ACTION_ITEM_TAP = "cn.bit101.android.features.widget.ITEM_TAP"
         const val EXTRA_PAGE = "bit101_page"
         const val EXTRA_TASK_ID = "bit101_task_id"
 

@@ -148,14 +148,6 @@ data class WidgetLine(
      * 标题行只作为分区标识：次要色、没有第二行、**不可点**。
      */
     val header: Boolean = false,
-
-    /**
-     * 点这条要**切换完成状态**的 DDL uid；null = 这条不切换。
-     *
-     * 组件里给 DDL 行的点击语义就是「勾上 / 取消勾选」—— 与 App 里的复选框一致，
-     * 不用为此打开 App（见 Provider 的 `ACTION_ITEM_TAP`）。
-     */
-    val toggleDdlUid: String? = null,
 )
 
 /**
@@ -701,15 +693,13 @@ object WidgetLogic {
         // 已过期或 24 小时内到期 —— 都算紧急（已完成的不再标红）
         urgent = !done && time.isBefore(now.plusHours(URGENT_HOURS)),
         muted = done,
-        // 点一下 = **打开 App 的 DDL 页并定位到这一条**（2026-09-23 用户要求；
-        // 以前是就地勾选，但组件上没法同时保留「跳转」与「勾选」两种点击语义 ——
-        // 一个 collection 只能挂一个点击模板，见 WidgetViews.build 的说明）。
+        // 点一下 = **打开 App 的 DDL 页并定位到这一条**（2026-09-23 用户要求）。
+        // 组件里不再提供「勾选」：一个 collection 只能挂一个点击模板，
+        // 没法「整行跳转 + 别处勾选」；而 RemoteViews 也没有长按 API。
         openRoute = PageShowOnNav.Schedule.toPageData().value,
         openTab = ScheduleTabs.DDL,
         // 定位键带归属前缀：DDL 与动态列表在同一个 Pager 里都活着，键必须自描述
         focusKey = FocusKeys.ddl(uid),
-        // 勾选语义**保留在数据里**：将来做「勾选模式」时换个模板就能直接用
-        toggleDdlUid = uid,
     )
 
     // ------------------------------------------------------------ 延河课堂动态

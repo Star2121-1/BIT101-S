@@ -476,17 +476,19 @@ class WidgetLogicTest {
         val header = page.items.first()
         assertTrue(header.header)
         assertTrue(header.muted)
-        assertNull("栏目行不该挂切换 uid", header.toggleDdlUid)
+        assertNull("栏目行不可点", header.openRoute)
         assertTrue("栏目行不该有右侧信息", header.trail.isEmpty())
     }
 
-    /** 点条目 = 切换完成状态，所以每条都得带上自己的 uid。 */
+    /** 点条目 = 打开 App 并定位到这一条，所以每条都得带上跳转信息。 */
     @Test
-    fun `DDL 条目带切换用的 uid`() {
+    fun `DDL 条目带跳转与定位信息`() {
         val page = WidgetLogic.ddlPage(listOf(ddl(title = "作业A", time = now.plusDays(1))), now)
 
         val item = page.items.first { !it.header }
-        assertEquals("u-作业A", item.toggleDdlUid)
+        assertEquals("schedule", item.openRoute)
+        assertEquals(ScheduleTabs.DDL, item.openTab)
+        assertEquals(FocusKeys.ddl("u-作业A"), item.focusKey)
     }
 
     /** 已完成的弱化显示，且**不写剩余时间** —— 都做完了还写「还剩 3 天」是误导。 */
@@ -840,7 +842,8 @@ class WidgetLogicTest {
     /**
      * DDL 行 = **点一下跳进 App 的 DDL 页并定位到这一条**（不再就地勾选）。
      *
-     * 勾选信息（[WidgetLine.toggleDdlUid]）仍然带着，留给将来的「勾选模式」用。
+     * ⚠️ 组件里的「勾选」已按用户决定**彻底去掉**（一个列表只能挂一个点击模板，
+     * RemoteViews 又没有长按 API）—— 相关字段/模板/广播都已删除，别再往回调。
      */
     @Test
     fun `DDL 行点击跳进 App 的 DDL 页并带上定位键`() {
@@ -854,8 +857,6 @@ class WidgetLogicTest {
         assertEquals(ScheduleTabs.DDL, row.openTab)
         // 定位键 = 带归属前缀的 DDL uid（App 侧据此滚到那一条）
         assertEquals(FocusKeys.ddl("u-第三章作业"), row.focusKey)
-        // 勾选信息仍是**裸 uid**（将来做「勾选模式」时按 uid 写库），别和定位键混
-        assertEquals("u-第三章作业", row.toggleDdlUid)
     }
 
     /**
