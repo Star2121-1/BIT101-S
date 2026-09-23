@@ -24,6 +24,13 @@ class NotifyRepository @Inject constructor(
     private val ddlRepo: DDLScheduleRepo,
     private val notifySettings: NotifySettings,
     private val courseScheduleSettings: CourseScheduleSettings,
+    /**
+     * 座位侧的签到数据源。
+     *
+     * ⚠️ 这是**接口**，实现由 `features:seat` 提供并绑定（见 [SeatReminderSource] 的说明）。
+     * notify 模块的代码并不依赖座位模块 —— 依赖方向依然是 `seat → notify`。
+     */
+    private val seatReminderSource: SeatReminderSource,
 ) {
 
     /**
@@ -43,6 +50,12 @@ class NotifyRepository @Inject constructor(
         val firstDay = runCatching { courseScheduleSettings.firstDay.get() }.getOrNull()
         val table = runCatching { courseScheduleSettings.timeTable.get() }.getOrNull()
             ?: FALLBACK_TIME_TABLE
+        // 座位侧取不到（未登录 / 会话失效）时按空处理 —— 这条源是「有就更好」
+        val seatSignIns = if (policy.seatEnabled) {
+            runCatching { seatReminderSource.pendingSignIns(now) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
 
         return NotifyLogic.plan(
             courses = courses,
@@ -52,13 +65,15 @@ class NotifyRepository @Inject constructor(
             table = table,
             policy = policy,
             sentKeys = NotifySentStore.read(),
+            seatSignIns = seatSignIns,
         )
     }
 
     /**
      * **worker 执行时的二次校验**：这条提醒现在还成立吗？
      *
-     * 排期与执行之间用户可能：删了课、把 DDL 标记为完成、DDL 改期到更晚。
+     * 排期与执行之间用户可能：删了课、把 DDL 标记为完成、DDL 改期、
+     * 座位预约被取消或已刷卡签到。
      * 只有仍然成立才发通知 —— 迟到的错误提醒比不发更烦人。
      */
     suspend fun stillValid(reminder: Reminder, now: LocalDateTime = LocalDateTime.now()): Boolean {
@@ -68,7 +83,22 @@ class NotifyRepository @Inject constructor(
         return when (reminder.kind) {
             ReminderKind.CLASS -> classStillValid(reminder, now)
             ReminderKind.DDL -> ddlStillValid(reminder, now)
+            ReminderKind.SEAT_SIGN_IN -> seatStillValid(reminder, now)
         }
+    }
+
+    /**
+     * 座位签到是否仍然待办：**当前**仍有一条未签到、且截止时刻未过的预约，
+     * 座位号与提醒里的一致。
+     *
+     * ⚠️ 只比座位号、不比截止时刻 —— 服务端可能把时段微调（如整体延后几分钟），
+     * 那种情况下用户仍然需要被提醒。
+     */
+    private suspend fun seatStillValid(reminder: Reminder, now: LocalDateTime): Boolean {
+        val seatNo = NotifyLogic.seatNoOfKey(reminder.key) ?: return false
+        val signIns = runCatching { seatReminderSource.pendingSignIns(now) }
+            .getOrDefault(emptyList())
+        return signIns.any { it.seatNo.trim() == seatNo }
     }
 
     /**
@@ -112,6 +142,8 @@ class NotifyRepository @Inject constructor(
             ddlEnabled = notifySettings.ddlEnabled.get(),
             ddlDayEnabled = notifySettings.ddlDayEnabled.get(),
             ddlHourEnabled = notifySettings.ddlHourEnabled.get(),
+            seatEnabled = notifySettings.seatEnabled.get(),
+            seatSignInLeadMinutes = notifySettings.seatSignInLeadMinutes.get(),
         )
     }.getOrNull()
 

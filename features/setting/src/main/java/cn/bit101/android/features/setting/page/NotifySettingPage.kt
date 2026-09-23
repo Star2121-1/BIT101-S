@@ -34,8 +34,9 @@ import cn.bit101.android.features.setting.viewmodel.NotifySettingViewModel
 /**
  * 提醒设置页。
  *
- * 三组：总开关 / 上课提醒 / 作业截止提醒，外加一条**系统通知权限状态** ——
- * 设置里全开着但系统权限被拒的话，什么都不会弹，必须在这里说清楚。
+ * 四组：总开关 / 上课提醒 / 作业截止提醒 / 座位签到提醒，
+ * 外加一条**系统通知权限状态** —— 设置里全开着但系统权限被拒的话，
+ * 什么都不会弹，必须在这里说清楚。
  */
 @Composable
 private fun NotifySettingPageContent(
@@ -45,6 +46,8 @@ private fun NotifySettingPageContent(
     ddlEnabled: Boolean,
     ddlDayEnabled: Boolean,
     ddlHourEnabled: Boolean,
+    seatEnabled: Boolean,
+    seatLead: Long,
     permissionGranted: Boolean,
 
     onToggleEnabled: (Boolean) -> Unit,
@@ -52,7 +55,9 @@ private fun NotifySettingPageContent(
     onToggleDdl: (Boolean) -> Unit,
     onToggleDdlDay: (Boolean) -> Unit,
     onToggleDdlHour: (Boolean) -> Unit,
+    onToggleSeat: (Boolean) -> Unit,
     onOpenLeadDialog: () -> Unit,
+    onOpenSeatLeadDialog: () -> Unit,
     onRequestPermission: () -> Unit,
 ) {
     SettingsColumn {
@@ -94,7 +99,7 @@ private fun NotifySettingPageContent(
             items = listOf(
                 SettingItemData.Switch(
                     title = "启用作业提醒",
-                    subTitle = "DDL（乐学/自定义）截止前提醒",
+                    subTitle = "DDL（课程中心 / 乐学 / 自定义）截止前提醒",
                     checked = ddlEnabled,
                     onClick = onToggleDdl,
                 ),
@@ -109,6 +114,26 @@ private fun NotifySettingPageContent(
                     subTitle = "截止前一小时提醒一次",
                     checked = ddlHourEnabled,
                     onClick = onToggleDdlHour,
+                ),
+            ),
+        )
+
+        SettingsGroup(
+            title = "座位签到提醒",
+            subTitle = "预约的座位要在时限内刷卡签到，错过会记违约（累计 5 次暂停 7 天）",
+            visible = enabled,
+            items = listOf(
+                SettingItemData.Switch(
+                    title = "签到时限提醒",
+                    subTitle = "有未签到的预约时提醒你去刷卡",
+                    checked = seatEnabled,
+                    onClick = onToggleSeat,
+                ),
+                SettingItemData.Button(
+                    title = "提前时间",
+                    subTitle = "签到截止前多久提醒",
+                    text = "提前 $seatLead 分钟",
+                    onClick = onOpenSeatLeadDialog,
                 ),
             ),
         )
@@ -132,6 +157,7 @@ private fun NotifySettingPageContent(
 
 @Composable
 private fun LeadMinutesDialog(
+    title: String,
     current: Long,
     options: List<Long>,
     onPick: (Long) -> Unit,
@@ -143,7 +169,7 @@ private fun LeadMinutesDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         },
-        title = { Text(text = "上课前多久提醒") },
+        title = { Text(text = title) },
         text = {
             Column(
                 modifier = Modifier
@@ -186,8 +212,11 @@ internal fun NotifySettingPage() {
     val ddlEnabled by vm.ddlEnabled.flow.collectAsState(initial = true)
     val ddlDayEnabled by vm.ddlDayEnabled.flow.collectAsState(initial = true)
     val ddlHourEnabled by vm.ddlHourEnabled.flow.collectAsState(initial = true)
+    val seatEnabled by vm.seatEnabled.flow.collectAsState(initial = true)
+    val seatLead by vm.seatSignInLeadMinutes.flow.collectAsState(initial = 15L)
 
     var showLeadDialog by rememberSaveable { mutableStateOf(false) }
+    var showSeatLeadDialog by rememberSaveable { mutableStateOf(false) }
 
     NotifySettingPageContent(
         enabled = enabled,
@@ -196,6 +225,8 @@ internal fun NotifySettingPage() {
         ddlEnabled = ddlEnabled,
         ddlDayEnabled = ddlDayEnabled,
         ddlHourEnabled = ddlHourEnabled,
+        seatEnabled = seatEnabled,
+        seatLead = seatLead,
         permissionGranted = permission.granted,
 
         onToggleEnabled = vm::setEnabled,
@@ -203,12 +234,15 @@ internal fun NotifySettingPage() {
         onToggleDdl = vm::setDdlEnabled,
         onToggleDdlDay = vm::setDdlDayEnabled,
         onToggleDdlHour = vm::setDdlHourEnabled,
+        onToggleSeat = vm::setSeatEnabled,
         onOpenLeadDialog = { showLeadDialog = true },
+        onOpenSeatLeadDialog = { showSeatLeadDialog = true },
         onRequestPermission = permission::request,
     )
 
     if (showLeadDialog) {
         LeadMinutesDialog(
+            title = "上课前多久提醒",
             current = classLead,
             options = vm.leadOptions,
             onPick = {
@@ -216,6 +250,19 @@ internal fun NotifySettingPage() {
                 showLeadDialog = false
             },
             onDismiss = { showLeadDialog = false },
+        )
+    }
+
+    if (showSeatLeadDialog) {
+        LeadMinutesDialog(
+            title = "签到截止前多久提醒",
+            current = seatLead,
+            options = vm.seatLeadOptions,
+            onPick = {
+                vm.setSeatLeadMinutes(it)
+                showSeatLeadDialog = false
+            },
+            onDismiss = { showSeatLeadDialog = false },
         )
     }
 }

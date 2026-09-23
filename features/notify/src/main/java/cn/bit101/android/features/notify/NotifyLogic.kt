@@ -24,7 +24,34 @@ enum class ReminderKind {
 
     /** 作业/DDL 截止提醒。 */
     DDL,
+
+    /**
+     * 座位签到提醒：签到截止前 N 分钟。
+     *
+     * ⚠️ 这条**必须单独成类**，不能并进 DDL —— 它有时效性极强的后果：
+     * 错过签到会**记一次违约**，累计 5 次暂停 7 天（见 `docs/seatlib-contract.md` 第 10 节）。
+     */
+    SEAT_SIGN_IN,
 }
+
+/**
+ * 座位提醒的输入。
+ *
+ * ⚠️ 定义在 notify 侧，而不是直接用座位模块的 `ReservationRecord` ——
+ * **notify 不依赖 `features:seat`**（依赖方向见 `docs/notify.md`），
+ * 由座位侧转换成这个模型后传进来。
+ */
+data class SeatReminderInput(
+    /** 座位号，如 `018`。 */
+    val seatNo: String,
+    /**
+     * 签到截止时刻。
+     *
+     * 规则：当日预约需在开始后 **60 分钟**内刷卡，次日预约需在次日 **9:00** 前刷卡。
+     * 座位侧已经算好了这个时刻（`Reservation.signInDeadline`），这里直接用。
+     */
+    val signInDeadline: LocalDateTime,
+)
 
 /**
  * 一条**已排定**的提醒。
@@ -54,6 +81,15 @@ data class NotifyPolicy(
     val ddlEnabled: Boolean = true,
     val ddlDayEnabled: Boolean = true,
     val ddlHourEnabled: Boolean = true,
+    /** 座位签到提醒。 */
+    val seatEnabled: Boolean = true,
+    /**
+     * 签到提醒的提前量（分钟）。
+     *
+     * 契约规则是「开始后 60 分钟内刷卡」，提前 15 分钟足够从容走过去；
+     * 再早反而会被当成"还早着呢"而忽略。
+     */
+    val seatSignInLeadMinutes: Long = 15,
     /** 只排未来这么多天内的提醒；更远的等下次重排。 */
     val horizonDays: Long = 7,
 ) {
@@ -84,6 +120,7 @@ object NotifyLogic {
         table: TimeTable,
         policy: NotifyPolicy = NotifyPolicy(),
         sentKeys: Set<String> = emptySet(),
+        seatSignIns: List<SeatReminderInput> = emptyList(),
     ): List<Reminder> {
         val until = now.plusDays(policy.horizonDays)
         val out = mutableListOf<Reminder>()
@@ -94,9 +131,72 @@ object NotifyLogic {
         if (policy.ddlEnabled) {
             out += ddlReminders(ddls, now, until, policy, sentKeys)
         }
+        if (policy.seatEnabled) {
+            out += seatReminders(seatSignIns, now, until, policy, sentKeys)
+        }
 
         // 按时刻排序：便于人工核对，也让「最近的一条」一目了然
         return out.sortedBy { it.at }
+    }
+
+    // ------------------------------------------------------------ 座位签到提醒
+
+    /**
+     * 预约签到时限提醒。
+     *
+     * ⚠️ 与上课提醒**故意不同**：上课提醒过了时刻就**不补发**（「10 分钟后上课」
+     * 迟发会变成假话）；而这里即使我们**发现得晚**也要发 —— 只要签到截止时刻
+     * 还没到，用户就还能补救（走过去刷卡）。所以 `at` 落在过去时**改为立刻发**。
+     *
+     * 通知正文写**绝对截止时刻**，因此早发晚发都不会说错话。
+     */
+    private fun seatReminders(
+        signIns: List<SeatReminderInput>,
+        now: LocalDateTime,
+        until: LocalDateTime,
+        policy: NotifyPolicy,
+        sentKeys: Set<String>,
+    ): List<Reminder> {
+        val lead = policy.seatSignInLeadMinutes.coerceAtLeast(0)
+        val out = mutableListOf<Reminder>()
+
+        signIns.forEach { input ->
+            // 截止时刻已过：不补发（违约已成事实，提醒只会让人懊恼）
+            if (!input.signInDeadline.isAfter(now)) return@forEach
+            if (input.signInDeadline.isAfter(until)) return@forEach
+
+            // 「该提醒的时刻」已过去 → 立刻发（见上面的说明）
+            val at = input.signInDeadline.minusMinutes(lead).coerceAtLeast(now)
+
+            val key = seatKey(input, lead)
+            if (key in sentKeys) return@forEach
+
+            out += Reminder(
+                key = key,
+                kind = ReminderKind.SEAT_SIGN_IN,
+                at = at,
+                title = seatTitle(lead),
+                text = seatText(input),
+                route = PageShowOnNav.Seat.toPageData().value,
+            )
+        }
+        return out
+    }
+
+    /** 「15 分钟后截止签到」；提前量为 0 时不写「0 分钟后」。 */
+    fun seatTitle(leadMinutes: Long): String =
+        if (leadMinutes <= 0) "签到即将截止" else "$leadMinutes 分钟后截止签到"
+
+    /**
+     * 通知正文，如 `座位 018 · 请在 11:03 前刷卡`。
+     *
+     * ⚠️ 用**绝对时刻**而不是「还剩 15 分钟」：通知可能因系统调度晚到，
+     * 绝对时刻永远是对的。
+     */
+    fun seatText(input: SeatReminderInput): String {
+        val seat = input.seatNo.trim()
+        val prefix = if (seat.isBlank()) "座位预约" else "座位 $seat"
+        return "$prefix · 请在 ${hm(input.signInDeadline.toLocalTime())} 前刷卡"
     }
 
     // ------------------------------------------------------------ 上课提醒
@@ -244,6 +344,25 @@ object NotifyLogic {
 
     /** DDL 提醒的去重键：`ddl:{uid}:{窗口}`。 */
     fun ddlKey(ddl: DDLScheduleEntity, window: String): String = "ddl:${ddl.uid}:$window"
+
+    /**
+     * 座位签到提醒的去重键：`seat:{座位号}:{签到截止时刻}:{提前量}`。
+     *
+     * ⚠️ **带座位号与截止时刻**（不只是座位号）：同一座位今天预约、明天又预约，
+     * 这是两条独立提醒；否则第二天会被判成「已发过」而静默丢失。
+     * 提前量同样进键 —— 用户改了提前量应按新策略再提醒一次（与上课提醒一致）。
+     */
+    fun seatKey(input: SeatReminderInput, leadMinutes: Long): String =
+        "seat:${input.seatNo.trim()}:${input.signInDeadline}:$leadMinutes"
+
+    /**
+     * 从去重键里取座位号。
+     *
+     * 键形如 `seat:018:2026-09-23T11:03:15`（第 4 段是提前量）——
+     * 截止时刻自身含 `:`，所以**只用前两段**，不做完整拆分。
+     */
+    fun seatNoOfKey(key: String): String? =
+        key.split(":").getOrNull(1)?.takeIf { it.isNotBlank() }
 
     // ------------------------------------------------------------ 周次
 

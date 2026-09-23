@@ -1,8 +1,10 @@
 package cn.bit101.android.features.notify
 
 import cn.bit101.android.config.setting.base.FALLBACK_TIME_TABLE
+import cn.bit101.android.config.setting.base.PageShowOnNav
 import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.config.setting.base.TimeTableItem
+import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import org.junit.Assert.assertEquals
@@ -445,5 +447,175 @@ class NotifyLogicTest {
         )
 
         assertEquals(LocalDateTime.of(monday, LocalTime.of(9, 50)), list[0].at)
+    }
+
+    // ============================================================ 座位签到提醒
+
+    /** 签到截止 = 预约开始 + 60 分钟（座位侧算好传进来），这里只负责定时。 */
+    private fun signIn(seatNo: String = "018", deadline: LocalDateTime) =
+        SeatReminderInput(seatNo = seatNo, signInDeadline = deadline)
+
+    private fun seatPlan(
+        signIns: List<SeatReminderInput>,
+        now: LocalDateTime,
+        policy: NotifyPolicy = NotifyPolicy(),
+        sentKeys: Set<String> = emptySet(),
+    ) = NotifyLogic.plan(
+        courses = emptyList(),
+        ddls = emptyList(),
+        now = now,
+        firstDay = firstDay,
+        table = table,
+        policy = policy,
+        sentKeys = sentKeys,
+        seatSignIns = signIns,
+    )
+
+    @Test
+    fun `签到提醒排在截止前 N 分钟`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(10, 0))
+        val deadline = LocalDateTime.of(monday, LocalTime.of(11, 0))
+
+        val list = seatPlan(listOf(signIn(deadline = deadline)), now)
+
+        assertEquals(1, list.size)
+        assertEquals(LocalDateTime.of(monday, LocalTime.of(10, 45)), list[0].at)
+        assertEquals(ReminderKind.SEAT_SIGN_IN, list[0].kind)
+        assertEquals("15 分钟后截止签到", list[0].title)
+        assertEquals("座位 018 · 请在 11:00 前刷卡", list[0].text)
+        assertEquals(PageShowOnNav.Seat.toPageData().value, list[0].route)
+    }
+
+    /** 已经错过截止的不补发 —— 违约已成事实，通知只会添堵。 */
+    @Test
+    fun `错过签到截止的不再提醒`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(11, 30))
+        val list = seatPlan(listOf(signIn(deadline = LocalDateTime.of(monday, LocalTime.of(11, 0)))), now)
+
+        assertTrue(list.isEmpty())
+    }
+
+    /**
+     * ⚠️ 这条与上课提醒**行为相反**，是刻意设计的：
+     * 上课提醒过了时刻不补发（「10 分钟后上课」会变成假话），
+     * 而签到只要截止还没到就该提醒 —— 用户还能走过去刷卡。
+     */
+    @Test
+    fun `发现得晚也要立刻提醒`() {
+        // 10:55 时才排期，按 15 分钟提前量本该 10:45 提醒（已过去）
+        val now = LocalDateTime.of(monday, LocalTime.of(10, 55))
+        val deadline = LocalDateTime.of(monday, LocalTime.of(11, 0))
+
+        val list = seatPlan(listOf(signIn(deadline = deadline)), now)
+
+        assertEquals(1, list.size)
+        // 提醒时刻被抬到「现在」→ 立刻发，而不是被丢掉
+        assertEquals(now, list[0].at)
+        // 正文仍是绝对时刻，晚发也不会说错话
+        assertEquals("座位 018 · 请在 11:00 前刷卡", list[0].text)
+    }
+
+    @Test
+    fun `关掉座位提醒后不排`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(10, 0))
+        val list = seatPlan(
+            signIns = listOf(signIn(deadline = LocalDateTime.of(monday, LocalTime.of(11, 0)))),
+            now = now,
+            policy = NotifyPolicy(seatEnabled = false),
+        )
+
+        assertTrue(list.isEmpty())
+    }
+
+    /** 截止太远（超出排期窗口）先不排，等它进入 7 天窗口后再排。 */
+    @Test
+    fun `超出窗口的签到不排`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(10, 0))
+        val list = seatPlan(
+            signIns = listOf(signIn(deadline = LocalDateTime.of(monday.plusDays(9), LocalTime.of(11, 0)))),
+            now = now,
+        )
+
+        assertTrue(list.isEmpty())
+    }
+
+    /** 同一座位今天约一次、明天再约一次 → 两条独立提醒（键带截止时刻）。 */
+    @Test
+    fun `同一座位不同时段是两条提醒`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(10, 0))
+        val list = seatPlan(
+            signIns = listOf(
+                signIn(deadline = LocalDateTime.of(monday, LocalTime.of(10, 30))),
+                signIn(deadline = LocalDateTime.of(monday.plusDays(1), LocalTime.of(10, 30))),
+            ),
+            now = now,
+        )
+
+        assertEquals(2, list.size)
+        assertEquals(2, list.map { it.key }.toSet().size)
+    }
+
+    /** 已发过的键不再排（同一座位、同一截止时刻）。 */
+    @Test
+    fun `已发过的签到提醒不重复`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(10, 0))
+        val input = signIn(deadline = LocalDateTime.of(monday, LocalTime.of(11, 0)))
+        val key = NotifyLogic.seatKey(input, 15)
+
+        val list = seatPlan(listOf(input), now, sentKeys = setOf(key))
+
+        assertTrue(list.isEmpty())
+    }
+
+    /** 提前量进键：用户改成 30 分钟后应按新策略再提醒一次。 */
+    @Test
+    fun `改提前量视为新提醒`() {
+        val deadline = LocalDateTime.of(monday, LocalTime.of(11, 0))
+        val input = signIn(deadline = deadline)
+
+        assertFalse(NotifyLogic.seatKey(input, 15) == NotifyLogic.seatKey(input, 30))
+
+        val now = LocalDateTime.of(monday, LocalTime.of(10, 0))
+        val list = seatPlan(listOf(input), now, policy = NotifyPolicy(seatSignInLeadMinutes = 30))
+
+        assertEquals(LocalDateTime.of(monday, LocalTime.of(10, 30)), list[0].at)
+    }
+
+    /** 键里的截止时刻含 `:`，取座位号只能靠固定段位。 */
+    @Test
+    fun `能从去重键取回座位号`() {
+        val input = signIn(seatNo = "018", deadline = LocalDateTime.of(monday, LocalTime.of(11, 3, 15)))
+        val key = NotifyLogic.seatKey(input, 15)
+
+        assertEquals("018", NotifyLogic.seatNoOfKey(key))
+    }
+
+    /** 座位号缺失时文案退化成「座位预约」，不出现「座位  · 」这种残缺拼接。 */
+    @Test
+    fun `座位号为空时文案降级`() {
+        val text = NotifyLogic.seatText(
+            signIn(seatNo = "  ", deadline = LocalDateTime.of(monday, LocalTime.of(11, 0)))
+        )
+
+        assertEquals("座位预约 · 请在 11:00 前刷卡", text)
+    }
+
+    /** 三条源混在一起时统一按时刻排序（排期器依赖这个顺序，便于人工核对）。 */
+    @Test
+    fun `三类提醒混排后按时刻排序`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(0, 1))
+        val list = NotifyLogic.plan(
+            courses = listOf(course()),
+            ddls = listOf(ddl(time = LocalDateTime.of(monday.plusDays(3), LocalTime.of(23, 59)))),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+            seatSignIns = listOf(signIn(deadline = LocalDateTime.of(monday, LocalTime.of(9, 0)))),
+        )
+
+        assertEquals(list.sortedBy { it.at }, list)
+        assertTrue(list.any { it.kind == ReminderKind.SEAT_SIGN_IN })
+        assertTrue(list.any { it.kind == ReminderKind.CLASS })
+        assertTrue(list.any { it.kind == ReminderKind.DDL })
     }
 }

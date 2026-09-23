@@ -1,6 +1,7 @@
 package cn.bit101.android.features.seat
 
 import android.content.Context
+import cn.bit101.android.features.notify.NotifyAppStartup
 import cn.bit101.android.features.seat.api.SeatTaskRepository
 import cn.bit101.android.features.seat.api.SeatReservationRepository
 import cn.bit101.android.features.seat.model.ReservationRecord
@@ -65,8 +66,13 @@ class SeatWidgetPublisher @Inject constructor(
      */
     private suspend fun periodicRefresh() {
         while (kotlin.coroutines.coroutineContext.isActive) {
-            runCatching { reservationRepository.refreshIfStale(REFRESH_INTERVAL_MS) }
+            val refreshed = runCatching { reservationRepository.refreshIfStale(REFRESH_INTERVAL_MS) }
                 .onFailure { SeatLog.w(TAG, "periodic refresh failed: ${it.message}") }
+                .getOrDefault(false)
+            // 「我的预约」真的变了（新预约 / 已签到 / 被取消）→ 重排提醒。
+            // ⚠️ 必须重排：签到提醒是在**排期那一刻**按当时的预约算出来的，
+            //    刚约上的座位在上次排期时还不存在，不重排就永远等不到提醒。
+            if (refreshed) runCatching { NotifyAppStartup.reschedule(context) }
             delay(REFRESH_INTERVAL_MS)
         }
     }

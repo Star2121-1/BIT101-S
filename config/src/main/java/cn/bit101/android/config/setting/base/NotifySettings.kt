@@ -26,4 +26,14 @@ interface NotifySettings {
 
     /** DDL 提前一小时提醒。 */
     val ddlHourEnabled: SettingItem<Boolean>
+
+    /**
+     * 座位签到提醒开关。
+     *
+     * 默认开 —— 错过签到会记违约，这是最「真金白银」的一条提醒。
+     */
+    val seatEnabled: SettingItem<Boolean>
+
+    /** 座位签到提前量（分钟）。默认 15：规则是「开始后 60 分钟内刷卡」，提前一刻钟够从容。 */
+    val seatSignInLeadMinutes: SettingItem<Long>
 }

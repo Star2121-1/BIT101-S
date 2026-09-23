@@ -127,6 +127,14 @@ internal class SettingDataStore @Inject constructor(
     private val NOTIFY_DDL_HOUR_ENABLED = booleanPreferencesKey("notify_ddl_hour_enabled")
     val notifyDdlHourEnabled = PreferencesDataStoreItem(NOTIFY_DDL_HOUR_ENABLED, true, preferences.SETTING_DATASTORE)
 
+    // 座位签到提醒（错过会记违约，默认开）
+    private val NOTIFY_SEAT_ENABLED = booleanPreferencesKey("notify_seat_enabled")
+    val notifySeatEnabled = PreferencesDataStoreItem(NOTIFY_SEAT_ENABLED, true, preferences.SETTING_DATASTORE)
+
+    // 座位签到提前量（分钟）：默认 15
+    private val NOTIFY_SEAT_LEAD_MINUTES = longPreferencesKey("notify_seat_lead_minutes")
+    val notifySeatLeadMinutes = PreferencesDataStoreItem(NOTIFY_SEAT_LEAD_MINUTES, 15, preferences.SETTING_DATASTORE)
+
     // 空教室检索设置
     // 当前校区名
     private val FREE_CLASSROOM_CURRENT_CAMPUS_NAME = stringPreferencesKey("free_classroom_campus_name")

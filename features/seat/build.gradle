@@ -47,6 +47,9 @@ dependencies {
     implementation project(':features:common')
     implementation project(':features:theme')
     implementation project(':features:widget')
+    // 座位签到提醒：seat 实现 notify 声明的 SeatReminderSource 接口
+    // （方向是 seat → notify，notify 不认识座位模块，不成环）
+    implementation project(':features:notify')
     implementation project(':config')
 
     implementation "com.google.dagger:hilt-android:${versions.hilt}"

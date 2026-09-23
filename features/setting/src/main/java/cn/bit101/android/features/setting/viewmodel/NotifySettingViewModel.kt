@@ -27,9 +27,19 @@ internal class NotifySettingViewModel @Inject constructor(
     val ddlEnabled = notifySettings.ddlEnabled
     val ddlDayEnabled = notifySettings.ddlDayEnabled
     val ddlHourEnabled = notifySettings.ddlHourEnabled
+    val seatEnabled = notifySettings.seatEnabled
+    val seatSignInLeadMinutes = notifySettings.seatSignInLeadMinutes
 
     /** 上课提前量的可选项（分钟）——不给自由输入，免得填出「提前 3 天」这种怪值。 */
     val leadOptions = listOf(5L, 10L, 15L, 20L, 30L)
+
+    /**
+     * 签到提醒提前量的可选项（分钟）。
+     *
+     * ⚠️ 上限比上课提醒大：契约规则是「开始后 **60 分钟**内刷卡」，
+     * 提前一刻钟走过去是常态，60 分钟（一进馆就提醒）也该允许。
+     */
+    val seatLeadOptions = listOf(5L, 15L, 30L, 60L)
 
     fun setEnabled(value: Boolean) = write { notifySettings.enabled.set(value) }
 
@@ -42,6 +52,10 @@ internal class NotifySettingViewModel @Inject constructor(
     fun setDdlDayEnabled(value: Boolean) = write { notifySettings.ddlDayEnabled.set(value) }
 
     fun setDdlHourEnabled(value: Boolean) = write { notifySettings.ddlHourEnabled.set(value) }
+
+    fun setSeatEnabled(value: Boolean) = write { notifySettings.seatEnabled.set(value) }
+
+    fun setSeatLeadMinutes(minutes: Long) = write { notifySettings.seatSignInLeadMinutes.set(minutes) }
 
     /**
      * 写设置 + 立即重排。

@@ -290,6 +290,11 @@ class SeatViewModel @Inject constructor(
     fun refreshMyReservations() {
         viewModelScope.launch {
             reservationRepository.refresh()
+                .onSuccess {
+                    // 预约可能刚产生（App 内下单成功）或刚变化 —— 重排提醒，
+                    // 让「签到时限」这条能立刻排上（见 NotifyAppStartup.reschedule）
+                    runCatching { cn.bit101.android.features.notify.NotifyAppStartup.reschedule(appContext) }
+                }
                 .onFailure { SeatLog.d(TAG) { "load reservations failed: ${it.message}" } }
         }
     }

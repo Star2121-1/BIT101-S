@@ -13,8 +13,8 @@ App 里的数据早就齐了（课表、DDL、座位预约），但**没有任�
 |---|---|---|---|
 | **上课提醒** | `course_schedule` + 课表设置里的时间表 | 提前 **10 分钟** | ✅ |
 | **DDL 提醒** | `ddl_schedule` | 提前 **1 天** 与 **1 小时** | ✅ |
-| 座位签到时限 | `Reservation.signInDeadline`（当日 +60 分钟 / 次日 9:00） | 提前 15 分钟 | ⏳ 预留 API，座位侧接入 |
-| 暂离将到期 | 座位规则（60 分钟；用餐时段 120 分钟） | 提前 10 分钟 | ⏳ |
+| **座位签到时限** | `Reservation.signInDeadline`（当日 +60 分钟 / 次日 9:00） | 提前 **15 分钟** | ✅ v1.7.1 |
+| 暂离将到期 | 座位规则（60 分钟；用餐时段 120 分钟） | 提前 10 分钟 | ⏳ 未做 |
 | 抢座结果 | 已在 `SeatMonitorService` 里发（`预约结果` 渠道） | 即时 | ✅ 已有，不重复做 |
 
 ---
@@ -23,8 +23,9 @@ App 里的数据早就齐了（课表、DDL、座位预约），但**没有任�
 
 ```
 features/notify
-├── NotifyLogic.kt          纯逻辑：给定「课程/DDL/现在」，算出该排哪些提醒（全部可单测）
-├── NotifyRepository.kt     取数：Room（课程/DDL）+ 课表设置里的时间表
+├── NotifyLogic.kt          纯逻辑：给定「课程/DDL/座位签到/现在」，算出该排哪些提醒（全部可单测）
+├── NotifyRepository.kt     取数：Room（课程/DDL）+ 课表设置里的时间表 + 座位签到（经接口）
+├── SeatReminderSource.kt   **座位侧实现的接口**（数据方向；seat 提供实现，notify 只认识模型）
 ├── NotifyCenter.kt         渠道创建 + 发通知 + 点击跳转
 ├── NotifyScheduler.kt      WorkManager 排期（每类提醒一个 unique work）
 ├── NotifyWorker.kt         到点执行：**重新取数校验** → 发通知 → 记录已发
@@ -33,8 +34,9 @@ features/notify
 └── NotifyAppStartup.kt     App 启动时排一次期
 ```
 
-依赖方向：`notify → (config, data)`；**`seat → notify`**（座位侧调用提醒 API）；
-`notify` **不依赖** `seat`/`widget`，不会成环。
+依赖方向：`notify → (config, data)`；**`seat → notify`**（座位侧实现 notify 声明的
+`SeatReminderSource` 并在 Hilt 里绑定）；`notify` **不依赖** `seat`/`widget`，不会成环。
+`NotifyRepository` 注入的是 `SeatReminderSource` 这个**接口** —— 编译期不引用座位模块任何代码。
 
 ### 为什么用 WorkManager 而不是 AlarmManager
 
@@ -132,7 +134,8 @@ ddl:{uid}:{窗口}                            例 ddl:lexue-123:1d / ddl:lexue-1
 
 - ~~设置页 UI~~ ✅ **已在 v1.6.9 完成**：`我 → 设置 → 提醒设置`，
   含权限状态与一键申请；每次改动都会立即重排（`NotifyAppStartup.reschedule`）
-- 座位签到时限 / 暂离将到期提醒的**座位侧接入**（`seat → notify` 调用）
+- ~~座位签到时限提醒~~ ✅ **已在 v1.7.1 完成**（`SeatReminderSource` + `seat_reminder` 渠道）
+- 暂离将到期提醒（`seat → notify`）：暂离保留 60/120 分钟，超时自动释放 —— 未做
 - DDL 换源完成后（见 `docs/ddl-migration-plan.md`），提醒自动跟着新源走
 
 ## 七、踩坑记录

@@ -24,6 +24,15 @@ internal object NotifyCenter {
     /** 作业截止 —— 更紧急，给 HIGH 让用户能在锁屏看到。 */
     private const val CHANNEL_DDL = "ddl_reminder"
 
+    /**
+     * 座位签到提醒。
+     *
+     * ⚠️ 也给 HIGH：错过签到会**记一次违约**，累计 5 次暂停 7 天
+     * （见 `docs/seatlib-contract.md` 第 10 节）—— 这是有实际后果的提醒，
+     * 值得让用户在锁屏就能看见。
+     */
+    private const val CHANNEL_SEAT = "seat_reminder"
+
     /** 点击通知打开 App 的入口（与组件共用同一套 `bit101_goto` 约定）。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"
     private const val EXTRA_GOTO = "bit101_goto"
@@ -51,6 +60,15 @@ internal object NotifyCenter {
                 ).apply { description = "作业/DDL 截止前提醒" }
             )
         }
+        if (manager.getNotificationChannel(CHANNEL_SEAT) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_SEAT,
+                    "座位签到",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply { description = "预约座位的签到时限提醒（错过会记违约）" }
+            )
+        }
     }
 
     /**
@@ -64,7 +82,12 @@ internal object NotifyCenter {
         val channel = when (reminder.kind) {
             ReminderKind.CLASS -> CHANNEL_CLASS
             ReminderKind.DDL -> CHANNEL_DDL
+            ReminderKind.SEAT_SIGN_IN -> CHANNEL_SEAT
         }
+
+        // DDL 与座位签到都值得「弹出来」：前者交不上去要扣分，
+        // 后者错过会记违约（累计 5 次暂停 7 天）
+        val urgent = reminder.kind != ReminderKind.CLASS
 
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -73,7 +96,7 @@ internal object NotifyCenter {
             .setStyle(NotificationCompat.BigTextStyle().bigText(reminder.text))
             .setAutoCancel(true)
             .setPriority(
-                if (reminder.kind == ReminderKind.DDL) NotificationCompat.PRIORITY_HIGH
+                if (urgent) NotificationCompat.PRIORITY_HIGH
                 else NotificationCompat.PRIORITY_DEFAULT
             )
             .setContentIntent(gotoIntent(context, reminder))
