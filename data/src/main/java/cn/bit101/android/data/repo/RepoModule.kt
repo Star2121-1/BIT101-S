@@ -25,6 +25,12 @@ internal abstract class RepoModule {
 
     @Binds
     @Singleton
+    abstract fun bindCampusCardRepo(
+        campusCardRepo: DefaultCampusCardRepo
+    ): CampusCardRepo
+
+    @Binds
+    @Singleton
     abstract fun bindVersionRepo(
         versionRepo: DefaultVersionRepo
     ): VersionRepo

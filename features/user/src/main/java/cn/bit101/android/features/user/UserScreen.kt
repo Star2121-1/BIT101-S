@@ -1,7 +1,9 @@
 package cn.bit101.android.features.user
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +18,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Badge
+import androidx.compose.material3.Surface
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,6 +31,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
@@ -38,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -62,8 +68,7 @@ import androidx.core.graphics.toColorInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun UserScreenContent(
-    mainController: MainController,
+private fun UserScreenContent(    mainController: MainController,
     data: GetUserInfoDataModel.Response,
     posters: List<GetPostersDataModel.ResponseItem>,
     state: LoadableLazyColumnWithoutPullRequestState,
@@ -210,6 +215,20 @@ private fun UserScreenContent(
             state = state,
             loading = loadState == SimpleState.Loading,
         ) {
+            // 校园服务卡（仅本人页显示）：一卡通余额摘要 + 校园网入口。
+            // 放在信息流最顶上 —— 查余额是高频操作，不该滚去找。
+            if (data.own) {
+                item(key = "campus-services") {
+                    CampusServiceSection(mainController = mainController)
+                    Divider(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(0.dp),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                    )
+                }
+            }
             posters.forEachIndexed { index, poster ->
                 item(index + 100) {
                     PosterCard(
@@ -310,5 +329,100 @@ fun UserScreen(
         )
     } else {
         ErrorMessageForPage()
+    }
+}
+
+/**
+ * 「校园服务」卡片区（仅本人页显示）。
+ *
+ * 一卡通：余额摘要 + 点击进 App 内 WebView（CAS 登录在 WebView 里完成，
+ * cookie 落在全局 CookieManager，[CampusCardViewModel] 的快照请求与之共享会话）。
+ *
+ * 校园网（`netpay.bit.edu.cn:8091`）：接口形态未确认（`entry=dingtalk` 疑似
+ * 只认钉钉免登），首版只给 WebView 入口 —— 用户在 WebView 里登录一次后
+ * 会话同样留在 CookieManager，等抓包确认接口后再升级原生。
+ */
+@Composable
+private fun CampusServiceSection(mainController: MainController) {
+    val vm: CampusCardViewModel = hiltViewModel()
+
+    val snapshot by vm.snapshot.collectAsState()
+    val loading by vm.loading.collectAsState()
+    val fetched by vm.fetched.collectAsState()
+
+    // 余额摘要：取解析出的第一个候选值（标签去重过）；没有就按状态给文案
+    val balanceText = when {
+        loading && !fetched -> "获取中…"
+        snapshot == null -> "获取失败，点重试"
+        snapshot?.loggedIn == false -> "点开登录后显示"
+        else -> snapshot?.entries?.firstOrNull()?.let { "${it.first} ¥${it.second}" }
+            ?: "未识别到余额，点开查看"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // 一卡通
+        Surface(
+            modifier = Modifier
+                .weight(1f)
+                .clip(MaterialTheme.shapes.medium)
+                .clickable { mainController.openWebPage(CampusCardViewModel.CAMPUS_CARD_URL) },
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "一卡通",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = balanceText,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (loading && fetched) "刷新中…" else "点开流水",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
+                )
+            }
+        }
+
+        // 校园网（先只给入口）
+        Surface(
+            modifier = Modifier
+                .weight(1f)
+                .clip(MaterialTheme.shapes.medium)
+                .clickable { mainController.openWebPage(CampusCardViewModel.CAMPUS_NET_URL) },
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "校园网",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "网费与套餐",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                    text = "在 App 内打开",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
+                )
+            }
+        }
     }
 }
