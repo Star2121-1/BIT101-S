@@ -45,6 +45,14 @@ interface DDLScheduleRepo {
     /**
      * 根据 uid 从数据库中获取 DDL
      */
+    /**
+     * **全部** DDL（不过滤时间）。
+     *
+     * ⚠️ 与 [getFutureDDL] 的区别就是「不筛时间」：桌面组件要显示所有条目 ——
+     * 包括很久以后才截止的、以及已经过期的（过期的标「已过期」而不是消失）。
+     */
+    fun getAllDDL(): Flow<List<DDLScheduleEntity>>
+
     suspend fun getDDLByUIDs(
         uids: List<String>
     ): List<DDLScheduleEntity>

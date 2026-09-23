@@ -5,7 +5,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * 课程中心（eclass）→ DDL 的**纯逻辑**。
+ * 延河课堂（eclass）→ DDL 的**纯逻辑**。
  *
  * 全部是纯函数，便于单测（沿用项目里「纯逻辑一律抽 `*Logic`」的约定）。
  * 取数（HTTP、数据库）在 `EclassRepo` 里，本类不碰。

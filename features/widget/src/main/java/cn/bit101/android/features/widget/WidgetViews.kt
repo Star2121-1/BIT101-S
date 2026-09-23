@@ -38,8 +38,8 @@ import cn.bit101.android.config.setting.base.toPageData
  */
 internal object WidgetViews {
 
-    /** 页签 id，顺序与 [PageKind.entries] 一致 */
-    private val TAB_IDS = intArrayOf(R.id.tab_0, R.id.tab_1, R.id.tab_2)
+    /** 页签 id，顺序与 [PageKind.entries] 一致（课程 / DDL / 座位 / 动态） */
+    private val TAB_IDS = intArrayOf(R.id.tab_0, R.id.tab_1, R.id.tab_2, R.id.tab_3)
 
     fun build(
         context: Context,
@@ -137,7 +137,19 @@ internal object WidgetViews {
 
         // 列表条目的点击模板（collection 的标准做法）：模板在这里挂一次，
         // 条目里用 setOnClickFillInIntent 补 extras —— 只有带 fillInIntent 的条目可点。
-        rv.setPendingIntentTemplate(R.id.widget_list, listTapTemplate(context, appWidgetId))
+        //
+        // ⚠️ 模板按**当前页**切换：
+        // - DDL 页：点条目 = 勾选/取消（广播回 Provider 写库，**不打开 App**）
+        // - 其余页：点条目 = 打开 App 并跳到该行的 openRoute
+        // 一个列表只能挂一个模板，所以只能按页区分 —— 好在同一页里行的语义是一致的。
+        rv.setPendingIntentTemplate(
+            R.id.widget_list,
+            if (page?.kind == PageKind.DDL) {
+                ddlToggleTemplate(context, appWidgetId)
+            } else {
+                listTapTemplate(context, appWidgetId)
+            },
+        )
     }
 
     /**
@@ -157,6 +169,21 @@ internal object WidgetViews {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
+
+    /**
+     * DDL 行的点击模板：切换完成状态。
+     *
+     * 走**广播**回到 [BIT101WidgetProvider]（而不是打开 App）：勾一个 DDL
+     * 不该把用户从桌面拽进 App；Provider 写完库直接重绘，原地就能看到变化。
+     * 具体的 DDL uid 由条目的 fillInIntent 带上。
+     */
+    private fun ddlToggleTemplate(context: Context, appWidgetId: Int): PendingIntent =
+        broadcast(
+            context,
+            appWidgetId,
+            BIT101WidgetProvider.ACTION_ITEM_TAP,
+            Uri.parse("bit101://ddl-toggle/$appWidgetId"),
+        )
 
     private fun showEmpty(rv: RemoteViews, text: String) {
         rv.setViewVisibility(R.id.widget_empty, View.VISIBLE)
@@ -198,6 +225,17 @@ internal object WidgetViews {
         val rv = RemoteViews(context.packageName, R.layout.widget_item)
         val emphasize = line.highlight != null
 
+        // 栏目标题行（「未完成 · 3」）：只有一行小字，次要色、无第二行、不可点。
+        // 分区让「我还有什么要交」一眼可见，而不是和已完成的混在一起。
+        if (line.header) {
+            rv.setTextViewText(R.id.item_main, line.main)
+            rv.setTextColor(R.id.item_main, color(context, R.color.widget_text_secondary))
+            rv.setTextViewTextSize(R.id.item_main, TypedValue.COMPLEX_UNIT_SP, 12f)
+            rv.setViewVisibility(R.id.item_meta, View.GONE)
+            rv.setInt(R.id.item_root, "setBackgroundResource", 0)
+            return rv
+        }
+
         rv.setTextViewText(R.id.item_main, lineText(context, line, emphasize))
         rv.setTextViewTextSize(
             R.id.item_main,
@@ -224,6 +262,13 @@ internal object WidgetViews {
             rv.setOnClickFillInIntent(
                 R.id.item_root,
                 Intent().putExtra(GOTO_EXTRA, route),
+            )
+        }
+        // DDL 条目点一下 → 切换完成状态（uid 经模板合并后由 Provider 收到）
+        line.toggleDdlUid?.let { uid ->
+            rv.setOnClickFillInIntent(
+                R.id.item_root,
+                Intent().putExtra(DDL_UID_EXTRA, uid),
             )
         }
         return rv
@@ -421,6 +466,9 @@ internal object WidgetViews {
 
     /** 与 `MainActivity.EXTRA_GOTO` 保持一致（跨模块，注释互相指向）。 */
     private const val GOTO_EXTRA = "bit101_goto"
+
+    /** DDL 行 fillInIntent 里的 uid —— Provider 据此知道要切换哪一条。 */
+    const val DDL_UID_EXTRA = "bit101_ddl_uid"
 
     /** `cn.bit101.android.features.MainActivity` —— 见 [gotoPendingIntent] 的说明。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"

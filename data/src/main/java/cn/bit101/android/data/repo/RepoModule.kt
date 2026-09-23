@@ -16,7 +16,7 @@ internal abstract class RepoModule {
         calendarRepo: DefaultDDLScheduleRepo
     ): DDLScheduleRepo
 
-    /** 课程中心（eclass）—— 学校 2026 年起替代乐学的作业来源。 */
+    /** 延河课堂（eclass）—— 学校 2026 年起替代乐学的作业来源。 */
     @Binds
     @Singleton
     abstract fun bindEclassRepo(

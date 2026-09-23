@@ -1,7 +1,7 @@
 package cn.bit101.api.model.http.eclass
 
 /**
- * 课程中心（eclass / 延河课堂，`zy-eclass.bit.edu.cn`）的响应模型。
+ * 延河课堂（eclass，`zy-eclass.bit.edu.cn`）的响应模型。
  *
  * ⚠️ 这里字段用 **camelCase** —— `Bit101ApiFactory` 的 Gson 配了
  * `FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES`，会自动与接口的 snake_case

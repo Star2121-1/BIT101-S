@@ -129,17 +129,41 @@ internal fun DDLSchedule(
                         )
                     }
                 } else {
-                    itemsIndexed(events.value) { _, item ->
-                        DDLScheduleItem(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(10.dp, 5.dp)
-                                .clip(MaterialTheme.shapes.medium)
-                                .clickable {
-                                    detailData = item
-                                    showDetailDialog.value = true
-                                }, item, vm
-                        )
+                    // 分区显示（2026-09-23 用户要求）：未完成在上、已完成在下。
+                    // 以前两者混在一条时间轴上，做完了的作业会把待办往下挤。
+                    val pending = events.value.filter { !it.done }
+                    // 已完成的按时间倒序：最近做完的排前面
+                    val done = events.value.filter { it.done }.sortedByDescending { it.time }
+
+                    if (pending.isNotEmpty()) {
+                        item { DdlSectionTitle("未完成 · ${pending.size}") }
+                        itemsIndexed(pending) { _, item ->
+                            DDLScheduleItem(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp, 5.dp)
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .clickable {
+                                        detailData = item
+                                        showDetailDialog.value = true
+                                    }, item, vm
+                            )
+                        }
+                    }
+                    if (done.isNotEmpty()) {
+                        item { DdlSectionTitle("已完成 · ${done.size}") }
+                        itemsIndexed(done) { _, item ->
+                            DDLScheduleItem(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp, 5.dp)
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .clickable {
+                                        detailData = item
+                                        showDetailDialog.value = true
+                                    }, item, vm
+                            )
+                        }
                     }
                 }
 
@@ -173,7 +197,7 @@ internal fun DDLSchedule(
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
-                // 课程中心（eclass）—— 学校 2026 年起用它替代乐学下发作业。
+                // 延河课堂（eclass）—— 学校 2026 年起用它替代乐学下发作业。
                 // ⚠️ 必须用 **App 内 WebView** 打开：只有它和我们共用的 CookieManager 互通，
                 //    换成系统浏览器登录的话，App 这边拿不到会话（见 WebViewCookieSync）
                 FloatingActionButton(
@@ -186,7 +210,7 @@ internal fun DDLSchedule(
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.School,
-                        contentDescription = "课程中心",
+                        contentDescription = "延河课堂",
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
@@ -208,4 +232,21 @@ internal fun DDLSchedule(
         }
 
     }
+}
+
+/**
+ * DDL 列表的分区标题（「未完成 · 3」「已完成 · 2」）。
+ *
+ * 与桌面上组件 DDL 页的分区保持一致 —— 两处看到的结构一样，用户不用重新理解。
+ */
+@Composable
+private fun DdlSectionTitle(text: String) {
+    Text(
+        text = text,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, top = 10.dp, bottom = 2.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }

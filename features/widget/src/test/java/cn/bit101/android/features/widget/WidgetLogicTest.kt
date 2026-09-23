@@ -4,8 +4,10 @@ import cn.bit101.android.config.setting.base.AppRoutes
 import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
+import cn.bit101.android.data.eclass.EclassActivityLogic
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -412,8 +414,14 @@ class WidgetLogicTest {
 
     // ------------------------------------------------------------ DDL 页
 
+    /**
+     * 未完成在上、已完成在下，各自带栏目标题（2026-09-23 用户要求分区）。
+     *
+     * 以前已完成的**完全不显示** —— 用户在 App 里看得到、组件里看不到，
+     * 会以为是同步出了问题。
+     */
     @Test
-    fun `DDL 只取未完成项，已完成的不显示`() {
+    fun `DDL 分未完成与已完成两栏`() {
         val ddls = listOf(
             ddl(title = "已交作业", time = now.plusDays(1), done = true),
             ddl(title = "未交作业", time = now.plusDays(1), done = false),
@@ -421,7 +429,45 @@ class WidgetLogicTest {
 
         val page = WidgetLogic.ddlPage(ddls, now)
 
-        assertEquals(listOf("未交作业"), page.items.map { it.main })
+        assertEquals(
+            listOf("未完成 · 1", "未交作业", "已完成 · 1", "已交作业"),
+            page.items.map { it.main },
+        )
+    }
+
+    /** 栏目行只是分区标识：不可点、没有第二行。 */
+    @Test
+    fun `栏目行不可点也不带第二行`() {
+        val page = WidgetLogic.ddlPage(listOf(ddl(title = "作业", time = now.plusDays(1))), now)
+
+        val header = page.items.first()
+        assertTrue(header.header)
+        assertTrue(header.muted)
+        assertNull("栏目行不该挂切换 uid", header.toggleDdlUid)
+        assertTrue("栏目行不该有右侧信息", header.trail.isEmpty())
+    }
+
+    /** 点条目 = 切换完成状态，所以每条都得带上自己的 uid。 */
+    @Test
+    fun `DDL 条目带切换用的 uid`() {
+        val page = WidgetLogic.ddlPage(listOf(ddl(title = "作业A", time = now.plusDays(1))), now)
+
+        val item = page.items.first { !it.header }
+        assertEquals("u-作业A", item.toggleDdlUid)
+    }
+
+    /** 已完成的弱化显示，且**不写剩余时间** —— 都做完了还写「还剩 3 天」是误导。 */
+    @Test
+    fun `已完成的条目弱化且不显示剩余时间`() {
+        val page = WidgetLogic.ddlPage(
+            listOf(ddl(title = "交完了", time = now.plusDays(3), done = true)),
+            now,
+        )
+
+        val item = page.items.first { !it.header }
+        assertTrue(item.muted)
+        assertTrue(item.trail.isEmpty())
+        assertFalse("已完成的不该标紧急", item.urgent)
     }
 
     @Test
@@ -434,7 +480,7 @@ class WidgetLogicTest {
 
         val page = WidgetLogic.ddlPage(ddls, now)
 
-        assertEquals(listOf("今天", "明天", "后天"), page.items.map { it.main })
+        assertEquals(listOf("今天", "明天", "后天"), page.items.filter { !it.header }.map { it.main })
     }
 
     /** 已过期的未完成项才真正要紧，必须显示（且标红），不能因为过期就滤掉。 */
@@ -444,21 +490,28 @@ class WidgetLogicTest {
 
         val page = WidgetLogic.ddlPage(ddls, now)
 
-        assertEquals("错过了", page.items.first().main)
-        assertTrue("过期项必须标紧急以便高亮", page.items.first().urgent)
-        assertEquals("已过期", page.items.first().trail)
+        val item = page.items.first { !it.header }
+        assertEquals("错过了", item.main)
+        assertTrue("过期项必须标紧急以便高亮", item.urgent)
+        assertEquals("已过期", item.trail)
     }
 
+    /**
+     * ⚠️ 远期 DDL **也要显示**（2026-09-23 用户明确要求「不要时间限制」）。
+     *
+     * 旧行为是只看未来 14 天，于是用户那两条 16 天 / 41 天后的作业在组件上
+     * 完全看不见（App 里却有）—— 被当成 bug 报过来的就是这件事。
+     */
     @Test
-    fun `超出视野的远期 DDL 不显示`() {
+    fun `远期 DDL 也显示，不再限时`() {
         val ddls = listOf(
             ddl(title = "很近", time = now.plusDays(1)),
-            ddl(title = "太远", time = now.plusDays(WidgetLogic.DDL_HORIZON_DAYS + 1)),
+            ddl(title = "很远", time = now.plusDays(41)),
         )
 
         val page = WidgetLogic.ddlPage(ddls, now)
 
-        assertEquals(listOf("很近"), page.items.map { it.main })
+        assertEquals(listOf("很近", "很远"), page.items.filter { !it.header }.map { it.main })
     }
 
     /** 24 小时内到期标红；25 小时后不标 —— 否则组件上永远一片红，红色就失去意义。 */
@@ -467,8 +520,8 @@ class WidgetLogicTest {
         val soon = WidgetLogic.ddlPage(listOf(ddl(time = now.plusHours(23))), now)
         val later = WidgetLogic.ddlPage(listOf(ddl(time = now.plusHours(25))), now)
 
-        assertTrue(soon.items.first().urgent)
-        assertFalse(later.items.first().urgent)
+        assertTrue(soon.items.first { !it.header }.urgent)
+        assertFalse(later.items.first { !it.header }.urgent)
     }
 
     // ------------------------------------------------------------ 剩余时间
@@ -521,7 +574,7 @@ class WidgetLogicTest {
     // ------------------------------------------------------------ 整体装配
 
     @Test
-    fun `build 固定返回三页且顺序为 课程-DDL-座位`() {
+    fun `build 固定返回四页且顺序为 课程-DDL-座位-动态`() {
         val data = WidgetLogic.build(
             courses = emptyList(),
             ddls = emptyList(),
@@ -530,9 +583,10 @@ class WidgetLogicTest {
             firstDay = firstDay,
         )
 
-        assertEquals(3, data.pages.size)
+        assertEquals(4, data.pages.size)
         assertEquals(
-            listOf(PageKind.COURSE, PageKind.DDL, PageKind.SEAT),
+            // ⚠️ 动态页必须**排在最后**：页号按索引持久化，插队会让既有用户的组件跳页
+            listOf(PageKind.COURSE, PageKind.DDL, PageKind.SEAT, PageKind.ACTIVITY),
             data.pages.map { it.kind },
         )
     }
@@ -548,8 +602,12 @@ class WidgetLogicTest {
         )
 
         assertEquals("没课时课程页应只剩空闲段", 0, data.pages[0].courses().size)
-        assertEquals("要交的报告", data.pages[1].items.first().main)
+        assertEquals(
+            "要交的报告",
+            data.pages[1].items.first { !it.header }.main,
+        )
         assertTrue("座位页应为空", data.pages[2].isEmpty)
+        assertTrue("没动态时动态页应为空", data.pages[3].isEmpty)
     }
 
     // ------------------------------------------------ 作息时间与「当前/下一节」高亮
@@ -706,8 +764,57 @@ class WidgetLogicTest {
     }
 
     @Test
-    fun `课程页与 DDL 页没有动作键`() {
+    fun `课程页没有动作键，DDL 页的动作键是打开 DDL`() {
         assertNull(WidgetLogic.actionOf(WidgetLogic.coursePage(emptyList(), today, now, firstDay)))
-        assertNull(WidgetLogic.actionOf(WidgetLogic.ddlPage(emptyList(), now)))
+
+        // DDL 行的点击语义被用来「勾选/取消」，所以要另给一个进 App 的入口
+        val action = WidgetLogic.actionOf(WidgetLogic.ddlPage(emptyList(), now))
+        assertEquals("打开 DDL", action?.label)
+        assertEquals("schedule", action?.route)
+    }
+
+    // ------------------------------------------------------------ 动态页
+
+    private fun activity(
+        title: String = "第二章课件",
+        kind: EclassActivityLogic.ActivityKind = EclassActivityLogic.ActivityKind.MATERIAL,
+        time: LocalDateTime? = now.minusHours(3),
+    ) = EclassActivityLogic.EclassActivity(
+        id = "a-$title",
+        courseId = 20268,
+        courseName = "操作系统",
+        title = title,
+        kind = kind,
+        time = time,
+    )
+
+    @Test
+    fun `动态页列出动态并带类型标签`() {
+        val page = WidgetLogic.activityPage(
+            listOf(
+                activity(title = "第二章课件", kind = EclassActivityLogic.ActivityKind.MATERIAL),
+                activity(title = "第三章作业", kind = EclassActivityLogic.ActivityKind.HOMEWORK),
+            ),
+            now,
+        )
+
+        assertEquals(PageKind.ACTIVITY, page.kind)
+        assertEquals(listOf("资料", "作业"), page.items.map { it.lead })
+        assertEquals(listOf("第二章课件", "第三章作业"), page.items.map { it.main })
+    }
+
+    @Test
+    fun `动态页未登录时显示登录引导`() {
+        val page = WidgetLogic.activityPage(emptyList(), now, loggedIn = false)
+
+        assertNotNull(page.loginPrompt)
+        assertTrue(page.loginPrompt!!.contains("延河课堂"))
+        // 引导按钮带用户去「卷」页（延河课堂的登录入口在 App 的 DDL 页）
+        assertEquals("schedule", WidgetLogic.loginRoute(PageKind.ACTIVITY))
+    }
+
+    @Test
+    fun `动态页没有内容时空态是暂无动态`() {
+        assertEquals("暂无动态", WidgetLogic.activityPage(emptyList(), now).emptyText)
     }
 }

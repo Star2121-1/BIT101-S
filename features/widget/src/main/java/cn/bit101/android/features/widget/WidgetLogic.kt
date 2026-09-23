@@ -11,6 +11,7 @@ import cn.bit101.android.config.setting.base.sectionStart
 import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
+import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.ddl.DdlSource
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -95,6 +96,14 @@ enum class PageKind(val label: String) {
 
     /** 座位预约 */
     SEAT("座位"),
+
+    /**
+     * 延河课堂的课程动态（作业 / 资料 / 公告）。
+     *
+     * ⚠️ **追加在最后**而不是插在中间：页号存在 `WidgetPageStore` 里，
+     * 插队会让所有既有用户的组件跳到别的页。
+     */
+    ACTIVITY("动态"),
 }
 
 /**
@@ -117,6 +126,21 @@ data class WidgetLine(
     val muted: Boolean = false,
     /** 点这条打开 App 的哪个路由（如课表页 `"schedule"`）；null = 不可点 */
     val openRoute: String? = null,
+
+    /**
+     * 是不是**栏目标题行**（如「未完成 · 3」「已完成 · 2」）。
+     *
+     * 标题行只作为分区标识：次要色、没有第二行、**不可点**。
+     */
+    val header: Boolean = false,
+
+    /**
+     * 点这条要**切换完成状态**的 DDL uid；null = 这条不切换。
+     *
+     * 组件里给 DDL 行的点击语义就是「勾上 / 取消勾选」—— 与 App 里的复选框一致，
+     * 不用为此打开 App（见 Provider 的 `ACTION_ITEM_TAP`）。
+     */
+    val toggleDdlUid: String? = null,
 )
 
 /**
@@ -174,6 +198,8 @@ data class DayChoice(
 object WidgetLogic {
 
     /** DDL 页最多往前看多少天内的到期项 */
+    /** @deprecated DDL 不再限制时间范围（用户要求显示全部）；保留常量只为兼容旧引用。 */
+    @Deprecated("DDL 不再限时")
     const val DDL_HORIZON_DAYS = 14L
 
     /** 剩余时间少于该阈值标记为 urgent（UI 层高亮） */
@@ -382,6 +408,8 @@ object WidgetLogic {
         timeTable: TimeTable = FALLBACK_TIME_TABLE,
         bit101LoggedIn: Boolean = true,
         seatLoggedIn: Boolean = true,
+        activities: List<EclassActivityLogic.EclassActivity> = emptyList(),
+        eclassLoggedIn: Boolean = true,
     ): WidgetData = WidgetData(
         pages = listOf(
             coursePage(
@@ -394,6 +422,8 @@ object WidgetLogic {
             ),
             ddlPage(ddls, now, loggedIn = bit101LoggedIn),
             seatPage(seat, loggedIn = seatLoggedIn),
+            // ⚠️ 顺序必须与 PageKind.entries 一致（页号按索引存）
+            activityPage(activities, now, loggedIn = eclassLoggedIn),
         )
     )
 
@@ -408,6 +438,7 @@ object WidgetLogic {
     fun loginPromptOf(kind: PageKind, loggedIn: Boolean): String? = when {
         loggedIn -> null
         kind == PageKind.SEAT -> "未登录座位系统"
+        kind == PageKind.ACTIVITY -> "在 App 里登录延河课堂后显示动态"
         else -> "未登录 BIT101"
     }
 
@@ -421,6 +452,8 @@ object WidgetLogic {
      */
     fun loginRoute(kind: PageKind): String = when (kind) {
         PageKind.SEAT -> PageShowOnNav.Seat.toPageData().value
+        // 延河课堂的登录入口在 App 的 DDL 页（那个学校图标按钮），不去登录页
+        PageKind.ACTIVITY -> PageShowOnNav.Schedule.toPageData().value
         else -> AppRoutes.LOGIN
     }
 
@@ -446,6 +479,12 @@ object WidgetLogic {
             WidgetAction(
                 label = "立即预约",
                 route = PageShowOnNav.Seat.toPageData().value,
+            )
+        // DDL 行的点击语义是「勾选/取消」，所以要另给一个进 App 的入口
+        page.kind == PageKind.DDL ->
+            WidgetAction(
+                label = "打开 DDL",
+                route = PageShowOnNav.Schedule.toPageData().value,
             )
         else -> null
     }
@@ -585,7 +624,6 @@ object WidgetLogic {
     fun ddlPage(
         ddls: List<DDLScheduleEntity>,
         now: LocalDateTime,
-        horizonDays: Long = DDL_HORIZON_DAYS,
         loggedIn: Boolean = true,
     ): WidgetPage {
         if (!loggedIn) {
@@ -597,28 +635,87 @@ object WidgetLogic {
             )
         }
 
-        val horizon = now.plusDays(horizonDays)
-        val pending = ddls
-            .filter { !it.done }
-            .filter { !it.time.isAfter(horizon) }
-            .sortedBy { it.time }
+        // ⚠️ **不再限制时间范围**（2026-09-23 用户要求「显示里面所有的 DDL」）：
+        // 以前只看未来 14 天，于是 16 天/41 天后的作业在组件上完全看不见 —— 用户
+        // 在 App 里看得到、组件里看不到，只会以为是 bug。
+        val pending = ddls.filter { !it.done }.sortedBy { it.time }
+        // 已完成的按**时间倒序**：最近完成的排前面，翻旧账的往下沉
+        val done = ddls.filter { it.done }.sortedByDescending { it.time }
+
+        val items = buildList {
+            if (pending.isNotEmpty()) {
+                add(headerLine("未完成 · ${pending.size}"))
+                addAll(pending.map { it.toLine(now) })
+            }
+            if (done.isNotEmpty()) {
+                add(headerLine("已完成 · ${done.size}"))
+                addAll(done.map { it.toLine(now) })
+            }
+        }
 
         return WidgetPage(
             kind = PageKind.DDL,
             title = PageKind.DDL.label,
-            items = pending.take(MAX_ITEMS).map { it.toLine(now) },
+            items = items.take(MAX_ITEMS),
             emptyText = "暂无待办",
         )
     }
+
+    /** 栏目标题行（「未完成 · 3」）：不可点、无第二行。 */
+    private fun headerLine(text: String): WidgetLine =
+        WidgetLine(lead = "", main = text, header = true, muted = true)
+
 
     private fun DDLScheduleEntity.toLine(now: LocalDateTime): WidgetLine = WidgetLine(
         // ⚠️ 必须走 DdlSource 转成中文：这里以前直接写 group，
         // 于是组件上会出现「lexue 第三次作业」这种把技术标识当文案的情况
         lead = DdlSource.displayName(group),
         main = title,
-        trail = remainText(time, now),
-        // 已过期或 24 小时内到期 —— 都算紧急
-        urgent = time.isBefore(now.plusHours(URGENT_HOURS)),
+        // 已完成的没有「剩余时间」可言 —— 写剩余时间反而误导
+        trail = if (done) "" else remainText(time, now),
+        // 已过期或 24 小时内到期 —— 都算紧急（已完成的不再标红）
+        urgent = !done && time.isBefore(now.plusHours(URGENT_HOURS)),
+        muted = done,
+        // 点一下切换完成状态（在组件里直接勾，不必打开 App）
+        toggleDdlUid = uid,
+    )
+
+    // ------------------------------------------------------------ 延河课堂动态
+
+    /**
+     * 动态页（延河课堂的作业 / 资料 / 公告）。
+     *
+     * 与 DDL 页的区别：**不筛选**、按时间倒序（最近发生的在上）——
+     * 「最近课程里发生了什么」和「我还有什么要交」是两种视角。
+     */
+    fun activityPage(
+        activities: List<EclassActivityLogic.EclassActivity>,
+        now: LocalDateTime,
+        loggedIn: Boolean = true,
+    ): WidgetPage {
+        if (!loggedIn) {
+            return WidgetPage(
+                kind = PageKind.ACTIVITY,
+                title = PageKind.ACTIVITY.label,
+                emptyText = "暂无动态",
+                loginPrompt = loginPromptOf(PageKind.ACTIVITY, loggedIn = false),
+            )
+        }
+        return WidgetPage(
+            kind = PageKind.ACTIVITY,
+            title = PageKind.ACTIVITY.label,
+            items = activities.take(MAX_ITEMS).map { it.toLine(now) },
+            emptyText = "暂无动态",
+        )
+    }
+
+    /** 动态行：`作业  第二章作业        09:30`。 */
+    private fun EclassActivityLogic.EclassActivity.toLine(now: LocalDateTime): WidgetLine = WidgetLine(
+        lead = kind.label,
+        main = title,
+        trail = EclassActivityLogic.shortAgoText(time, now),
+        // 点一条动态 → 打开 App（动态页在「卷」里，这与课程行的做法一致）
+        openRoute = PageShowOnNav.Schedule.toPageData().value,
     )
 
     /**

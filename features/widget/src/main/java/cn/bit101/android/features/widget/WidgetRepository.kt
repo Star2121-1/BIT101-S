@@ -6,6 +6,7 @@ import cn.bit101.android.config.user.base.LoginStatus
 import cn.bit101.android.config.user.base.SeatLoginStatus
 import cn.bit101.android.data.repo.base.CoursesRepo
 import cn.bit101.android.data.repo.base.DDLScheduleRepo
+import cn.bit101.android.data.repo.base.EclassRepo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
 import java.time.LocalDateTime
@@ -27,6 +28,8 @@ class WidgetRepository @Inject constructor(
     private val courseScheduleSettings: CourseScheduleSettings,
     private val loginStatus: LoginStatus,
     private val seatLoginStatus: SeatLoginStatus,
+    /** 延河课堂的动态（第四页）。未登录时取不到，会走该页的登录引导。 */
+    private val eclassRepo: EclassRepo,
 ) {
 
     /**
@@ -52,11 +55,20 @@ class WidgetRepository @Inject constructor(
             coursesRepo.getCoursesFromLocal().first()
         }.getOrDefault(emptyList())
 
-        val ddls = runCatching {
-            ddlRepo.getFutureDDL(now.minusDays(LOOKBACK_DAYS)).first()
-        }.getOrDefault(emptyList())
+        // ⚠️ 取**全部** DDL（2026-09-23 用户要求「显示里面所有的 DDL，不要时间限制」）：
+        // 以前只取「未来 14 天 + 过去 7 天」，于是截止在 16 天/41 天后的作业在组件上
+        // 完全看不见 —— 用户在 App 里看得到、组件里看不到，只会当成 bug。
+        // 分区（未完成 / 已完成）与条数上限在 WidgetLogic 里处理。
+        val ddls = runCatching { ddlRepo.getAllDDL().first() }.getOrDefault(emptyList())
 
         val seat = runCatching { SeatWidgetSnapshot.read(context) }.getOrDefault(SeatWidgetSnapshot.Snapshot())
+
+        // 延河课堂动态：拉不到就是空（未登录 / 网络失败都算）。
+        // ⚠️ 空的时候再问一次会话是否有效 —— 用来区分「没登录」和「登录了但没动态」，
+        //    前者要显示登录引导，后者只显示空态。
+        val activities = runCatching { eclassRepo.fetchActivities() }.getOrDefault(emptyList())
+        val eclassLoggedIn = activities.isNotEmpty() ||
+            runCatching { eclassRepo.isSessionAlive() }.getOrDefault(false)
 
         // 登录态（与 App 内对应页面的门禁同一来源）。
         // ⚠️ 读取失败时按「已登录」处理（fail-open）：显示可能过期的数据，
@@ -75,7 +87,21 @@ class WidgetRepository @Inject constructor(
             timeTable = timeTable,
             bit101LoggedIn = bit101LoggedIn,
             seatLoggedIn = seatLoggedIn,
+            activities = activities,
+            eclassLoggedIn = eclassLoggedIn,
         )
+    }
+
+    /**
+     * 切换一条 DDL 的完成状态（组件里点条目即可，不必打开 App）。
+     *
+     * ⚠️ 只改 `done`，其余字段原样写回 —— 表里还有同步来的 title / time / group，
+     * 漏掉任何一个都会把数据改坏。取不到这条（已被删除）时静默什么都不做。
+     */
+    suspend fun toggleDdlDone(uid: String) {
+        val item = runCatching { ddlRepo.getDDLByUIDs(listOf(uid)).firstOrNull() }
+            .getOrNull() ?: return
+        runCatching { ddlRepo.updateDDL(item.copy(done = !item.done)) }
     }
 
     /**
@@ -87,14 +113,4 @@ class WidgetRepository @Inject constructor(
         runCatching { BIT101WidgetProvider.requestRenderAll(context) }
     }
 
-    private companion object {
-        /**
-         * DDL 往回看的天数。
-         *
-         * 已过期的未完成项**也要显示**（它们才真正要紧），但如果无限往回取，
-         * 一个学期前忘掉的作业会永久占据组件首行。取 7 天是个折中：
-         * 上周的漏项还能看到，更早的视为已放弃。
-         */
-        const val LOOKBACK_DAYS = 7L
-    }
 }

@@ -8,7 +8,7 @@ import retrofit2.http.GET
 import retrofit2.http.Path
 
 /**
- * 课程中心（eclass / 延河课堂）的服务端接口。
+ * 延河课堂（eclass / 延河课堂）的服务端接口。
  *
  * ## 会话形态
  *

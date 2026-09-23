@@ -80,6 +80,9 @@ internal class DefaultDDLScheduleRepo @Inject constructor(
         time: LocalDateTime
     ) = database.DDLScheduleDao().getFuture(time)
 
+    /** 全部 DDL（组件用：不筛时间）。 */
+    override fun getAllDDL() = database.DDLScheduleDao().getAll()
+
     override suspend fun getDDLByUIDs(
         uids: List<String>
     ) = withContext(Dispatchers.IO) {

@@ -101,7 +101,7 @@ private fun NotifySettingPageContent(
             items = listOf(
                 SettingItemData.Switch(
                     title = "启用作业提醒",
-                    subTitle = "DDL（课程中心 / 乐学 / 自定义）截止前提醒",
+                    subTitle = "DDL（延河课堂 / 乐学 / 自定义）截止前提醒",
                     checked = ddlEnabled,
                     onClick = onToggleDdl,
                 ),

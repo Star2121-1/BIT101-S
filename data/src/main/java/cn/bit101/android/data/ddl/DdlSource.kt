@@ -20,13 +20,13 @@ object DdlSource {
     /** 用户手动添加的日程（`DDLScheduleViewModel.addDDL` 的默认值）。 */
     const val CUSTOM = "main"
 
-    /** 课程中心（eclass）—— 学校 2026 年起的作业来源。 */
+    /** 延河课堂（eclass）—— 学校 2026 年起的作业来源。 */
     const val ECLASS = EclassDdlLogic.GROUP
 
     /** 展示用的中文名。 */
     fun displayName(group: String): String = when (group) {
         LEXUE -> "乐学"
-        ECLASS -> "课程中心"
+        ECLASS -> "延河课堂"
         CUSTOM, "" -> "自定义"
         // 未知来源原样显示：将来新增源时不会变成空白，也便于排查
         else -> group
@@ -35,7 +35,7 @@ object DdlSource {
     /**
      * 是否允许编辑 / 删除。
      *
-     * ⚠️ 只有**用户手动的**条目可改：来自乐学或课程中心的条目由同步生成，
+     * ⚠️ 只有**用户手动的**条目可改：来自乐学或延河课堂的条目由同步生成，
      * 改了下次同步就会被覆盖回去（同步逻辑只保留 `done` 状态），
      * 让用户去改一个必然被冲掉的字段是误导。
      */
