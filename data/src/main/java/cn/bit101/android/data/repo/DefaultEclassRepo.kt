@@ -47,6 +47,8 @@ internal class DefaultEclassRepo @Inject constructor(
     private class CourseActivities(
         val courseId: Int,
         val courseName: String,
+        /** 课程主页地址 —— 供动态页的点击跳转用（值未实测，见 `openUrlOf`）。 */
+        val courseUrl: String?,
         val activities: List<Activity>,
     )
 
@@ -64,7 +66,12 @@ internal class DefaultEclassRepo @Inject constructor(
     override suspend fun fetchActivities(limit: Int): List<EclassActivityLogic.EclassActivity> =
         EclassActivityLogic.recent(
             fetchRawActivities().flatMap {
-                EclassActivityLogic.toActivities(it.activities, it.courseId, it.courseName)
+                EclassActivityLogic.toActivities(
+                    activities = it.activities,
+                    courseId = it.courseId,
+                    courseName = it.courseName,
+                    courseUrl = it.courseUrl,
+                )
             },
             limit,
         )
@@ -104,6 +111,7 @@ internal class DefaultEclassRepo @Inject constructor(
                         CourseActivities(
                             courseId = course.id,
                             courseName = course.name,
+                            courseUrl = course.url,
                             activities = activities,
                         )
                     }

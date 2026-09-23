@@ -786,6 +786,8 @@ class WidgetLogicTest {
         title = title,
         kind = kind,
         time = time,
+        // 组件不消费它（点击统一回 App），给个占位即可
+        targetUrl = "https://zy-eclass.bit.edu.cn/user/index",
     )
 
     @Test

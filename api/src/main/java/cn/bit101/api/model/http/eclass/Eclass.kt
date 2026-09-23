@@ -33,7 +33,13 @@ class GetEclassCoursesDataModel private constructor() {
         val courseType: Int = 0,
         /** 开课学院。 */
         val department: Department? = null,
-        /** 课程主页地址。 */
+        /**
+         * 课程主页地址。
+         *
+         * 用于「动态」页的点击跳转（`EclassActivityLogic.openUrlOf`）。
+         * ⚠️ 它的**真实取值没被印证过**（抓包时响应前半段就截断了），
+         * 所以那边只接受 `http(s)://` 开头的完整地址，其余一律退回延河课堂首页。
+         */
         val url: String? = null,
         val currentUserIsMember: Boolean = false,
     )

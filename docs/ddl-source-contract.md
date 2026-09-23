@@ -147,7 +147,8 @@ department: { name: str } // 开课学院
 imported_from: str
 org_id: int
 teaching_unit_type: str
-url: str
+url: str                  // 课程页地址 —— ⚠️ 值未实测（见下「仍未确认」），
+                          //    仅作「动态」点击跳转用，非 http(s) 开头时回退首页
 course_attributes: { teaching_class_name: str|null }
 cover / grade / klass
 ```
@@ -164,6 +165,10 @@ cover / grade / klass
 
 - **作业类活动的 `type` 取值** —— 第 4 周课程里只有资料，没有作业
 - **`/api/todos` 项字段** —— 返回空列表
+- **单条活动的 URL**（活动对象里没有可用地址）→ 「动态」点击只能落到**课程页**
+- **课程对象 `url` 字段的真实取值** —— 抓包时响应被截断在前 400 字符（`url` 在后面），
+  只知其长度约 49。因此跳转做了保守处理：**只接受 `http(s)://` 开头的完整地址**，
+  否则回退延河课堂首页（相对路径直接交给 WebView 只会白屏）
 - 前端 JS 里搜 `todo_list` / `homework` / `deadline` / `end_time` 等关键词
   **只命中无关代码**（日期选择器文案、sentry 上报）—— 作业页面的 chunk 是
   **懒加载**的，首页不下载，所以静态搜不到

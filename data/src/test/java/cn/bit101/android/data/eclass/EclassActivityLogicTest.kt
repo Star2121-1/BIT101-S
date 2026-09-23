@@ -193,6 +193,7 @@ class EclassActivityLogicTest {
                 title = "第 $it 条",
                 kind = ActivityKind.MATERIAL,
                 time = LocalDateTime.of(2026, 9, 1, 0, 0).plusDays(it.toLong()),
+                targetUrl = EclassDdlLogic.LOGIN_URL,
             )
         }
 
@@ -220,5 +221,55 @@ class EclassActivityLogicTest {
         assertEquals("3 天前", EclassActivityLogic.shortAgoText(LocalDateTime.of(2026, 9, 20, 9, 30), now))
         assertEquals("8/25", EclassActivityLogic.shortAgoText(LocalDateTime.of(2026, 8, 25, 9, 30), now))
         assertTrue(EclassActivityLogic.shortAgoText(null, now).isEmpty())
+    }
+
+    // ------------------------------------------------------------ 点击跳转目标
+
+    /** 课程给了完整地址 → 就用它（落到课程页，而不是延河课堂首页）。 */
+    @Test
+    fun `有课程地址时跳到课程页`() {
+        assertEquals(
+            "https://zy-eclass.bit.edu.cn/user/courses/20268",
+            EclassActivityLogic.openUrlOf("https://zy-eclass.bit.edu.cn/user/courses/20268"),
+        )
+    }
+
+    /**
+     * ⚠️ 只认完整地址：`url` 字段的真实取值没被印证过，
+     * 万一是相对路径就直接交给 WebView 只会白屏，所以一律退回首页。
+     */
+    @Test
+    fun `地址不完整时退回首页`() {
+        val fallback = EclassDdlLogic.LOGIN_URL
+        assertEquals(fallback, EclassActivityLogic.openUrlOf(null))
+        assertEquals(fallback, EclassActivityLogic.openUrlOf(""))
+        assertEquals(fallback, EclassActivityLogic.openUrlOf("   "))
+        assertEquals(fallback, EclassActivityLogic.openUrlOf("/user/courses/20268"))
+        assertEquals(fallback, EclassActivityLogic.openUrlOf("zy-eclass.bit.edu.cn/user/index"))
+    }
+
+    @Test
+    fun `映射出的每条动态都带上跳转目标`() {
+        val list = EclassActivityLogic.toActivities(
+            activities = listOf(activity(id = 1), activity(id = 2, title = "第三章作业", submitTimes = 1)),
+            courseId = 20268,
+            courseName = "操作系统",
+            courseUrl = "https://zy-eclass.bit.edu.cn/user/courses/20268",
+        )
+
+        assertEquals(2, list.size)
+        assertTrue(list.all { it.targetUrl == "https://zy-eclass.bit.edu.cn/user/courses/20268" })
+    }
+
+    /** 没传课程地址（老调用点）也不能崩：目标退回首页。 */
+    @Test
+    fun `没传课程地址时退回首页`() {
+        val list = EclassActivityLogic.toActivities(
+            activities = listOf(activity()),
+            courseId = 20268,
+            courseName = "操作系统",
+        )
+
+        assertEquals(EclassDdlLogic.LOGIN_URL, list[0].targetUrl)
     }
 }

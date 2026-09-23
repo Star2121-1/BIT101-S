@@ -54,6 +54,14 @@ object EclassActivityLogic {
          * - 资料 / 其它：**开始时间**（即发布时刻）
          */
         val time: LocalDateTime?,
+        /**
+         * 点这条动态时该打开的地址（**已保证可用**，见 [openUrlOf]）。
+         *
+         * 单条活动自身的 URL 服务端没给过（抓包时 activities 里没有可用地址），
+         * 所以落到**这条动态所属的课程页** —— 动态就发生在课程里，
+         * 比丢到延河课堂首页更接近用户想看的东西。
+         */
+        val targetUrl: String,
     )
 
     /** 已知的资料类型 —— 唯一确认过取值的 type。 */
@@ -81,34 +89,59 @@ object EclassActivityLogic {
      * 把接口返回的 activities 映射成动态列表。
      *
      * 标题为空的活动直接丢弃：列表里出现一行空白没有任何意义。
+     *
+     * [courseUrl] 是这门课的 `url` 字段（调用方从课程列表里带进来）——
+     * 只用来决定点击跳转，缺失不影响列表本身。
      */
     fun toActivities(
         activities: List<Activity>,
         courseId: Int,
         courseName: String,
-    ): List<EclassActivity> = activities.mapNotNull { activity ->
-        val title = activity.title.trim()
-        if (title.isEmpty()) return@mapNotNull null
+        courseUrl: String? = null,
+    ): List<EclassActivity> {
+        val targetUrl = openUrlOf(courseUrl)
+        return activities.mapNotNull { activity ->
+            val title = activity.title.trim()
+            if (title.isEmpty()) return@mapNotNull null
 
-        val kind = kindOf(activity)
-        // 作业看截止时间；其余看开始时间。两个都没有 → time = null（界面显示占位）
-        val time = if (kind == ActivityKind.HOMEWORK) {
-            EclassDdlLogic.parseTime(activity.endTime)
-                ?: EclassDdlLogic.parseTime(activity.visibleEndAt)
-                ?: EclassDdlLogic.parseTime(activity.startTime)
-        } else {
-            EclassDdlLogic.parseTime(activity.startTime)
-                ?: EclassDdlLogic.parseTime(activity.endTime)
+            val kind = kindOf(activity)
+            // 作业看截止时间；其余看开始时间。两个都没有 → time = null（界面显示占位）
+            val time = if (kind == ActivityKind.HOMEWORK) {
+                EclassDdlLogic.parseTime(activity.endTime)
+                    ?: EclassDdlLogic.parseTime(activity.visibleEndAt)
+                    ?: EclassDdlLogic.parseTime(activity.startTime)
+            } else {
+                EclassDdlLogic.parseTime(activity.startTime)
+                    ?: EclassDdlLogic.parseTime(activity.endTime)
+            }
+
+            EclassActivity(
+                id = activity.id.toString(),
+                courseId = courseId,
+                courseName = courseName,
+                title = title,
+                kind = kind,
+                time = time,
+                targetUrl = targetUrl,
+            )
         }
+    }
 
-        EclassActivity(
-            id = activity.id.toString(),
-            courseId = courseId,
-            courseName = courseName,
-            title = title,
-            kind = kind,
-            time = time,
-        )
+    /**
+     * 点击跳转目标：**课程页地址**优先，拿不到时退回延河课堂首页（[EclassDdlLogic.LOGIN_URL]）。
+     *
+     * ⚠️ 只接受**完整地址**（`http://` / `https://` 开头）。
+     * 课程里的 `url` 字段值至今没被真机印证过（抓包时响应前半段就截断了），
+     * 万一是相对路径（`/courses/20268`），直接交给 WebView 只会白屏 ——
+     * 退回首页至少用户还能自己点进课程。宁可少走一步，也不要白屏。
+     */
+    fun openUrlOf(courseUrl: String?): String {
+        val url = courseUrl?.trim().orEmpty()
+        return if (url.startsWith("http://") || url.startsWith("https://")) {
+            url
+        } else {
+            EclassDdlLogic.LOGIN_URL
+        }
     }
 
     /**

@@ -43,12 +43,14 @@ import java.time.LocalDateTime
  * | DDL | 我**还有什么要交**（只列作业，带截止时间） |
  * | 动态 | 课程里**最近发生了什么**（资料、作业、公告都列，按时间倒序） |
  *
- * 点一条动态 → 用 **App 内 WebView** 打开延河课堂
+ * 点一条动态 → 用 **App 内 WebView** 打开**这条动态所属的课程页**
  * （只有 App 内 WebView 与 App 共用的 CookieManager 互通，用户已经登录过）。
  *
- * ⚠️ 目前只能落到延河课堂首页而不是具体那条动态：抓包时没拿到单条活动的
- * 稳定 URL（课程对象里的 `url` 字段就是首页地址），所以先跳到首页。
- * 等能确认活动的 URL 规则后再精确跳转 —— 见 `docs/ddl-source-contract.md`。
+ * 跳转地址由 [EclassActivityLogic.EclassActivity.targetUrl] 给出：
+ * 课程列表里的 `url` 字段优先，拿不到才退回延河课堂首页。
+ *
+ * ⚠️ 单条活动**自身**的 URL 服务端没给过（抓包时 activities 里没有可用地址），
+ * 所以落到课程页而不是那一条动态 —— 见 `docs/ddl-source-contract.md`。
  */
 @Composable
 internal fun EclassActivityScreen(mainController: MainController) {
@@ -84,7 +86,8 @@ internal fun EclassActivityScreen(mainController: MainController) {
         } else {
             itemsIndexed(activities) { _, item ->
                 ActivityRow(item = item, now = now) {
-                    mainController.openWebPage(EclassDdlLogic.LOGIN_URL)
+                    // 直接用逻辑层算好的目标地址：课程页优先，退回首页（保证非空可用）
+                    mainController.openWebPage(item.targetUrl)
                 }
             }
         }
