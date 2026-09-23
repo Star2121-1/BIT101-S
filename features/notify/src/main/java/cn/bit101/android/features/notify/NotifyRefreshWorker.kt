@@ -33,6 +33,8 @@ class NotifyRefreshWorker(
             val reminders = repository.plan()
             NotifyScheduler.schedule(applicationContext, reminders)
         }
+        // 出分检查也挂在这里：用户一周不开 App，期间出的分照样能报
+        runCatching { ScoreNotifyChecker.checkAndNotify(applicationContext) }
         return Result.success()
     }
 }

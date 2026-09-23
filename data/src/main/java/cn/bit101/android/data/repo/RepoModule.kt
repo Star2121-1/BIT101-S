@@ -82,4 +82,11 @@ internal abstract class RepoModule {
     abstract fun bindFreeClassroomRepo(
         freeClassroomRepo: DefaultFreeClassroomRepo
     ): FreeClassroomRepo
+
+    /** 成绩（BIT101 /scores）—— 目前只为「出分提醒」服务。 */
+    @Binds
+    @Singleton
+    abstract fun bindScoreRepo(
+        scoreRepo: DefaultScoreRepo
+    ): ScoreRepo
 }

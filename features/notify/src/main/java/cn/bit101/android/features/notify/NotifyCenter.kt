@@ -9,6 +9,8 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import cn.bit101.android.config.setting.base.PageShowOnNav
+import cn.bit101.android.config.setting.base.toPageData
 
 /**
  * 通知的发送出口。
@@ -33,9 +35,20 @@ internal object NotifyCenter {
      */
     private const val CHANNEL_SEAT = "seat_reminder"
 
+    /**
+     * 出分提醒。
+     *
+     * ⚠️ 通知里**只有课名、没有分数** —— 这是用户明确的隐私决定，
+     * 想看分数必须点进 App。DEFAULT 优先级：它是「知道了就行」的信息型提醒。
+     */
+    private const val CHANNEL_SCORE = "score_reminder"
+
     /** 点击通知打开 App 的入口（与组件共用同一套 `bit101_goto` 约定）。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"
     private const val EXTRA_GOTO = "bit101_goto"
+
+    /** 出分提醒用固定 id：多次出分只更新同一条，不刷屏。 */
+    private const val NOTIFY_ID_SCORES = 41001
 
     /** 建渠道。幂等，可重复调用（系统只在首次真正创建）。 */
     fun ensureChannels(context: Context) {
@@ -67,6 +80,15 @@ internal object NotifyCenter {
                     "座位签到",
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply { description = "预约座位的签到时限提醒（错过会记违约）" }
+            )
+        }
+        if (manager.getNotificationChannel(CHANNEL_SCORE) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_SCORE,
+                    "出分提醒",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { description = "有新课出分时提醒（通知里不含分数）" }
             )
         }
     }
@@ -106,6 +128,47 @@ internal object NotifyCenter {
         runCatching {
             NotificationManagerCompat.from(context).notify(reminder.key.hashCode(), notification)
         }
+    }
+
+    /**
+     * 发出分提醒（一条汇总通知）。
+     *
+     * ⚠️ [text] 由 `ScoreLogic.summaryText` 生成，**保证不含分数** ——
+     * 这里只负责展示，不做第二道判断。
+     */
+    fun notifyScores(context: Context, text: String) {
+        ensureChannels(context)
+        val notification = NotificationCompat.Builder(context, CHANNEL_SCORE)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("出分了")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(gotoScoresIntent(context))
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify(NOTIFY_ID_SCORES, notification)
+        }
+    }
+
+    private fun gotoScoresIntent(context: Context): PendingIntent {
+        val intent = Intent().apply {
+            setClassName(context.packageName, MAIN_ACTIVITY_CLASS)
+            // 成绩在「网」页里（bit101.cn/score/）—— 跳到「网」这个底栏页，
+            // 用户再点一次成绩入口。⚠️ 不能直接 navigate 到 Web 路由：
+            // 那是带 url 参数的顶层路由，而 GotoRequest 的消费方（IndexScreen）
+            // 只认底栏页的 route 值，写别的会被静默忽略（点了没反应）
+            putExtra(EXTRA_GOTO, PageShowOnNav.BIT101Web.toPageData().value)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            data = Uri.parse("bit101://notify/scores")
+        }
+        return PendingIntent.getActivity(
+            context,
+            NOTIFY_ID_SCORES,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun gotoIntent(context: Context, reminder: Reminder): PendingIntent {

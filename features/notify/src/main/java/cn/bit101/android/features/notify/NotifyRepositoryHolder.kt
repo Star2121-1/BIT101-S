@@ -42,4 +42,7 @@ internal object NotifyRepositoryHolder {
 @InstallIn(SingletonComponent::class)
 interface NotifyEntryPoint {
     fun notifyRepository(): NotifyRepository
+
+    /** 出分检查用的成绩仓库（绑定在 data 模块，见 `RepoModule.bindScoreRepo`）。 */
+    fun scoreRepo(): cn.bit101.android.data.repo.base.ScoreRepo
 }

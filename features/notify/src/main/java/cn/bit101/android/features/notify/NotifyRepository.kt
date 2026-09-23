@@ -149,4 +149,8 @@ class NotifyRepository @Inject constructor(
 
     /** 供排期器判断「是否该排提醒」（总开关关掉时要把已排的清掉）。 */
     suspend fun enabled(): Boolean = runCatching { notifySettings.enabled.get() }.getOrDefault(false)
+
+    /** 出分提醒是否打开（独立于总开关之外还要看这一项）。 */
+    suspend fun scoreNotifyEnabled(): Boolean =
+        enabled() && runCatching { notifySettings.scoreEnabled.get() }.getOrDefault(false)
 }

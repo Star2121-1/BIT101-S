@@ -36,4 +36,11 @@ interface NotifySettings {
 
     /** 座位签到提前量（分钟）。默认 15：规则是「开始后 60 分钟内刷卡」，提前一刻钟够从容。 */
     val seatSignInLeadMinutes: SettingItem<Long>
+
+    /**
+     * 出分提醒开关。
+     *
+     * ⚠️ 通知里**只有课名、没有分数**（用户定的隐私边界，见 `docs/codebase-survey.md`）。
+     */
+    val scoreEnabled: SettingItem<Boolean>
 }

@@ -48,6 +48,7 @@ private fun NotifySettingPageContent(
     ddlHourEnabled: Boolean,
     seatEnabled: Boolean,
     seatLead: Long,
+    scoreEnabled: Boolean,
     permissionGranted: Boolean,
 
     onToggleEnabled: (Boolean) -> Unit,
@@ -56,6 +57,7 @@ private fun NotifySettingPageContent(
     onToggleDdlDay: (Boolean) -> Unit,
     onToggleDdlHour: (Boolean) -> Unit,
     onToggleSeat: (Boolean) -> Unit,
+    onToggleScore: (Boolean) -> Unit,
     onOpenLeadDialog: () -> Unit,
     onOpenSeatLeadDialog: () -> Unit,
     onRequestPermission: () -> Unit,
@@ -138,6 +140,20 @@ private fun NotifySettingPageContent(
             ),
         )
 
+        SettingsGroup(
+            title = "出分提醒",
+            subTitle = "有新课出分时通知你。⚠️ 通知里只有课名，不含分数",
+            visible = enabled,
+            items = listOf(
+                SettingItemData.Switch(
+                    title = "出分提醒",
+                    subTitle = "点开通知到「网」里看成绩",
+                    checked = scoreEnabled,
+                    onClick = onToggleScore,
+                ),
+            ),
+        )
+
         if (!permissionGranted) {
             SettingsGroup(
                 title = "系统通知权限",
@@ -214,6 +230,7 @@ internal fun NotifySettingPage() {
     val ddlHourEnabled by vm.ddlHourEnabled.flow.collectAsState(initial = true)
     val seatEnabled by vm.seatEnabled.flow.collectAsState(initial = true)
     val seatLead by vm.seatSignInLeadMinutes.flow.collectAsState(initial = 15L)
+    val scoreEnabled by vm.scoreEnabled.flow.collectAsState(initial = true)
 
     var showLeadDialog by rememberSaveable { mutableStateOf(false) }
     var showSeatLeadDialog by rememberSaveable { mutableStateOf(false) }
@@ -227,6 +244,7 @@ internal fun NotifySettingPage() {
         ddlHourEnabled = ddlHourEnabled,
         seatEnabled = seatEnabled,
         seatLead = seatLead,
+        scoreEnabled = scoreEnabled,
         permissionGranted = permission.granted,
 
         onToggleEnabled = vm::setEnabled,
@@ -235,6 +253,7 @@ internal fun NotifySettingPage() {
         onToggleDdlDay = vm::setDdlDayEnabled,
         onToggleDdlHour = vm::setDdlHourEnabled,
         onToggleSeat = vm::setSeatEnabled,
+        onToggleScore = vm::setScoreEnabled,
         onOpenLeadDialog = { showLeadDialog = true },
         onOpenSeatLeadDialog = { showSeatLeadDialog = true },
         onRequestPermission = permission::request,

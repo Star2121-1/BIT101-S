@@ -135,6 +135,10 @@ internal class SettingDataStore @Inject constructor(
     private val NOTIFY_SEAT_LEAD_MINUTES = longPreferencesKey("notify_seat_lead_minutes")
     val notifySeatLeadMinutes = PreferencesDataStoreItem(NOTIFY_SEAT_LEAD_MINUTES, 15, preferences.SETTING_DATASTORE)
 
+    // 出分提醒（通知里只有课名、没有分数 —— 用户定的隐私边界）
+    private val NOTIFY_SCORE_ENABLED = booleanPreferencesKey("notify_score_enabled")
+    val notifyScoreEnabled = PreferencesDataStoreItem(NOTIFY_SCORE_ENABLED, true, preferences.SETTING_DATASTORE)
+
     // 空教室检索设置
     // 当前校区名
     private val FREE_CLASSROOM_CURRENT_CAMPUS_NAME = stringPreferencesKey("free_classroom_campus_name")

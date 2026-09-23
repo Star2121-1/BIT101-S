@@ -46,6 +46,9 @@ object NotifyAppStartup {
                         NotifyScheduler.schedule(context, repository.plan())
                     }
                     NotifyScheduler.ensurePeriodicReschedule(context)
+                    // 出分提醒不走排期（没有确定的未来时刻），启动时主动查一次。
+                    // 首次运行只建基线、不发通知（见 ScoreLogic.diff）
+                    ScoreNotifyChecker.checkAndNotify(context)
                 }
             }
         }

@@ -56,6 +56,10 @@ dependencies {
     // CookieJar
     implementation "net.gotev:cookie-store-okhttp:1.5.0"
 
+    // 成绩表解析（/scores 的真实形状未验证，用通用 JsonElement 防御式处理）。
+    // ⚠️ api 模块里 gson 是 implementation、不传递，这里要显式声明
+    implementation "com.google.code.gson:gson:2.10.1"
+
     // 引用 config 模块
     implementation project(':config')
 

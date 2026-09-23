@@ -29,6 +29,7 @@ internal class NotifySettingViewModel @Inject constructor(
     val ddlHourEnabled = notifySettings.ddlHourEnabled
     val seatEnabled = notifySettings.seatEnabled
     val seatSignInLeadMinutes = notifySettings.seatSignInLeadMinutes
+    val scoreEnabled = notifySettings.scoreEnabled
 
     /** 上课提前量的可选项（分钟）——不给自由输入，免得填出「提前 3 天」这种怪值。 */
     val leadOptions = listOf(5L, 10L, 15L, 20L, 30L)
@@ -56,6 +57,8 @@ internal class NotifySettingViewModel @Inject constructor(
     fun setSeatEnabled(value: Boolean) = write { notifySettings.seatEnabled.set(value) }
 
     fun setSeatLeadMinutes(minutes: Long) = write { notifySettings.seatSignInLeadMinutes.set(minutes) }
+
+    fun setScoreEnabled(value: Boolean) = write { notifySettings.scoreEnabled.set(value) }
 
     /**
      * 写设置 + 立即重排。

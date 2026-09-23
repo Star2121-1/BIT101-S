@@ -16,4 +16,5 @@ internal class DefaultNotifySettings @Inject constructor(
     override val ddlHourEnabled = settingDataStore.notifyDdlHourEnabled.toSettingItem()
     override val seatEnabled = settingDataStore.notifySeatEnabled.toSettingItem()
     override val seatSignInLeadMinutes = settingDataStore.notifySeatLeadMinutes.toSettingItem()
+    override val scoreEnabled = settingDataStore.notifyScoreEnabled.toSettingItem()
 }
