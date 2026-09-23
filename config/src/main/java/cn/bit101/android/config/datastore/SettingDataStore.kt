@@ -2,6 +2,7 @@ package cn.bit101.android.config.datastore
 
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import cn.bit101.android.config.datastore.basic.Preferences
@@ -103,6 +104,19 @@ internal class SettingDataStore @Inject constructor(
     // 日程过期继续显示天数
     private val DDL_SCHEDULE_AFTER_DAY = longPreferencesKey("ddl_schedule_after_day")
     val ddlScheduleAfterDay = PreferencesDataStoreItem(DDL_SCHEDULE_AFTER_DAY, 3, preferences.SETTING_DATASTORE)
+
+    // ── 动态页（延河课堂课程动态）设置 ────────────────────────────────
+    // 只看作业：默认关 —— 默认显示全部动态（资料、公告也显示）
+    private val ECLASS_ACTIVITY_ONLY_HOMEWORK = booleanPreferencesKey("eclass_activity_only_homework")
+    val eclassActivityOnlyHomework = PreferencesDataStoreItem(ECLASS_ACTIVITY_ONLY_HOMEWORK, false, preferences.SETTING_DATASTORE)
+
+    // 条数上限：默认 60（页面给 30 / 60 / 100 三选一）
+    private val ECLASS_ACTIVITY_LIMIT = intPreferencesKey("eclass_activity_limit")
+    val eclassActivityLimit = PreferencesDataStoreItem(ECLASS_ACTIVITY_LIMIT, 60, preferences.SETTING_DATASTORE)
+
+    // 是否显示已过期条目：默认开
+    private val ECLASS_ACTIVITY_SHOW_EXPIRED = booleanPreferencesKey("eclass_activity_show_expired")
+    val eclassActivityShowExpired = PreferencesDataStoreItem(ECLASS_ACTIVITY_SHOW_EXPIRED, true, preferences.SETTING_DATASTORE)
 
     // ── 提醒（通知）设置 ─────────────────────────────────────────────
     // 总开关

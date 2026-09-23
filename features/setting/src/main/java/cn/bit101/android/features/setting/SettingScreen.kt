@@ -128,6 +128,16 @@ fun SettingScreen(
             }
         }
 
+        composable("activity") {
+            SettingPage(
+                mainController = mainController,
+                title = "动态设置",
+                navController = navController,
+            ) {
+                ActivitySettingPage(mainController = mainController)
+            }
+        }
+
         composable("notify") {
             SettingPage(
                 mainController = mainController,

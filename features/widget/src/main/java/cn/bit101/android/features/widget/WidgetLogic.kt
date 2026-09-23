@@ -6,6 +6,8 @@ import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.config.setting.base.courseTimeText
 import cn.bit101.android.config.setting.base.hm
+import cn.bit101.android.config.common.FocusKeys
+import cn.bit101.android.config.setting.base.ScheduleTabs
 import cn.bit101.android.config.setting.base.sectionEnd
 import cn.bit101.android.config.setting.base.sectionStart
 import cn.bit101.android.config.setting.base.toPageData
@@ -94,16 +96,17 @@ enum class PageKind(val label: String) {
     /** 近期 DDL */
     DDL("DDL"),
 
-    /** 座位预约 */
-    SEAT("座位"),
-
     /**
      * 延河课堂的课程动态（作业 / 资料 / 公告）。
      *
-     * ⚠️ **追加在最后**而不是插在中间：页号存在 `WidgetPageStore` 里，
-     * 插队会让所有既有用户的组件跳到别的页。
+     * ⚠️ 与 [SEAT] **换过一次位置**（2026-09-23，用户要求「DDL 与动态挨着」）：
+     * 枚举顺序 = 页签顺序，所以重排后老用户的页号需要迁移 ——
+     * 页号本身已改成存**页名**（`WidgetPageStore`），历史 int 按旧顺序还原，不会错页。
      */
     ACTIVITY("动态"),
+
+    /** 座位预约 */
+    SEAT("座位"),
 }
 
 /**
@@ -126,6 +129,18 @@ data class WidgetLine(
     val muted: Boolean = false,
     /** 点这条打开 App 的哪个路由（如课表页 `"schedule"`）；null = 不可点 */
     val openRoute: String? = null,
+
+    /**
+     * 打开 App 后停在第几个 tab（取值见 `ScheduleTabs`）；null = 该页的第一个 tab。
+     * 只对课表页（`openRoute == "schedule"`）有意义。
+     */
+    val openTab: Int? = null,
+
+    /**
+     * 「聚焦到哪一条」的键：DDL 用 `uid`、动态用 `eclass:{id}`。
+     * App 侧据此滚到那一条（见 `GotoRequest.Focus`）。null = 不定位。
+     */
+    val focusKey: String? = null,
 
     /**
      * 是不是**栏目标题行**（如「未完成 · 3」「已完成 · 2」）。
@@ -422,9 +437,9 @@ object WidgetLogic {
             ),
             // ⚠️ DDL 页**不看登录态**（见 ddlPage 的说明）：它的数据来自本地库
             ddlPage(ddls, now),
-            seatPage(seat, loggedIn = seatLoggedIn),
-            // ⚠️ 顺序必须与 PageKind.entries 一致（页号按索引存）
+            // ⚠️ 顺序必须与 PageKind.entries 一致（页签按索引画、页号按页名存）
             activityPage(activities, now, loggedIn = eclassLoggedIn),
+            seatPage(seat, loggedIn = seatLoggedIn),
         )
     )
 
@@ -486,12 +501,9 @@ object WidgetLogic {
                 label = "立即预约",
                 route = PageShowOnNav.Seat.toPageData().value,
             )
-        // DDL 行的点击语义是「勾选/取消」，所以要另给一个进 App 的入口
-        page.kind == PageKind.DDL ->
-            WidgetAction(
-                label = "打开 DDL",
-                route = PageShowOnNav.Schedule.toPageData().value,
-            )
+        // ⚠️ DDL 页**不再有**「打开 DDL」动作键（2026-09-23 用户要求）：
+        // 条目本身点了就跳进 App 的 DDL 页，再放一个进 App 的键是重复的。
+        // 于是 DDL 页现在只在未登录/一键预约时有动作键。
         else -> null
     }
 
@@ -689,7 +701,14 @@ object WidgetLogic {
         // 已过期或 24 小时内到期 —— 都算紧急（已完成的不再标红）
         urgent = !done && time.isBefore(now.plusHours(URGENT_HOURS)),
         muted = done,
-        // 点一下切换完成状态（在组件里直接勾，不必打开 App）
+        // 点一下 = **打开 App 的 DDL 页并定位到这一条**（2026-09-23 用户要求；
+        // 以前是就地勾选，但组件上没法同时保留「跳转」与「勾选」两种点击语义 ——
+        // 一个 collection 只能挂一个点击模板，见 WidgetViews.build 的说明）。
+        openRoute = PageShowOnNav.Schedule.toPageData().value,
+        openTab = ScheduleTabs.DDL,
+        // 定位键带归属前缀：DDL 与动态列表在同一个 Pager 里都活着，键必须自描述
+        focusKey = FocusKeys.ddl(uid),
+        // 勾选语义**保留在数据里**：将来做「勾选模式」时换个模板就能直接用
         toggleDdlUid = uid,
     )
 
@@ -727,8 +746,11 @@ object WidgetLogic {
         lead = kind.label,
         main = title,
         trail = EclassActivityLogic.shortAgoText(time, now),
-        // 点一条动态 → 打开 App（动态页在「卷」里，这与课程行的做法一致）
+        // 点一条动态 → 打开 App 的**动态 tab**，并定位到这一条（2026-09-23 用户要求；
+        // 以前只打开 App 且停在课表 tab，用户还得自己再点一下「动态」）。
         openRoute = PageShowOnNav.Schedule.toPageData().value,
+        openTab = ScheduleTabs.ACTIVITY,
+        focusKey = FocusKeys.activity(id),
     )
 
     /**

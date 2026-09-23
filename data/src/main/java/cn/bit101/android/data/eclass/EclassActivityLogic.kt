@@ -144,6 +144,35 @@ object EclassActivityLogic {
         }
     }
 
+    /** 「只看作业」取数时的冗余倍数 —— 理由见 [fetchLimit]，**不是随手写的魔数**。 */
+    private const val OVER_FETCH_FACTOR = 4
+
+    /** 冗余放大后的取数硬顶：即使倍数再大也不超过它，避免无意义地拉取。 */
+    const val MAX_FETCH_LIMIT = 240
+
+    /**
+     * 取数时要向 repo 请求的条数上限。
+     *
+     * ⚠️ **必须比用户上限放大**，否则「只看作业」会吃不饱：
+     * repo 是在**混合列表**（资料 / 公告 / 作业混在一起）上截断的，
+     * 而「只看作业」的过滤发生在**截断之后**（见 [visible]）。若直接按用户的
+     * `limit`（如 60）去取，作业在混合列表里只占很少一部分，过滤完可能只剩几条，
+     * 更早的作业全被挡在这个上限之外 —— 用户开了「只看作业」，列表反而更长不了。
+     *
+     * 所以此时放大 [OVER_FETCH_FACTOR] 倍冗余去取，过滤完成后再由 [visible]
+     * 截到用户真正要的条数。放大**不是随手写的魔数**：多取的成本其实是零 ——
+     * repo 无论如何都要拉全部课程的动态，只是最后 `take` 的多少不同。
+     *
+     * @param limit 用户设置的展示条数（页面提供 30 / 60 / 100）。
+     * @param onlyHomework 只留作业时才有必要放大；否则原样返回 [limit]。
+     * @return 实际请求条数；放大结果被 [MAX_FETCH_LIMIT] 硬顶，避免无谓放大。
+     */
+    fun fetchLimit(limit: Int, onlyHomework: Boolean): Int {
+        val userLimit = limit.coerceAtLeast(0)
+        if (!onlyHomework) return userLimit
+        return (userLimit * OVER_FETCH_FACTOR).coerceAtMost(MAX_FETCH_LIMIT)
+    }
+
     /**
      * 排序 + 截断：**最新的在前**。
      *
@@ -157,6 +186,68 @@ object EclassActivityLogic {
                     .thenByDescending { it.time }
             )
             .take(limit.coerceAtLeast(0))
+
+    /**
+     * 按「动态设置」页的三项设置过滤列表（纯函数，单测锁）。
+     *
+     * 交给 ViewModel 在**取数之后**调用 —— 排序仍由 [recent] / `EclassRepo` 负责，
+     * 这里只做「留不留这一条」；要连截断一起做就用 [visible]。
+     *
+     * - [onlyHomework]：只留作业。默认关（资料、公告也显示）。
+     * - [showExpired]：关掉时丢掉**已过期的作业**。
+     *   ⚠️ 只判作业：资料 / 公告的 [EclassActivity.time] 是发布时刻，本来就都在过去，
+     *   一起判会把它们全部误杀。
+     * - [now]：由调用方传入，便于单测固定时间。
+     */
+    fun applySettings(
+        activities: List<EclassActivity>,
+        onlyHomework: Boolean,
+        showExpired: Boolean,
+        now: LocalDateTime,
+    ): List<EclassActivity> = activities.filter { activity ->
+        if (onlyHomework && activity.kind != ActivityKind.HOMEWORK) {
+            false
+        } else {
+            !isExpiredHomework(activity, showExpired, now)
+        }
+    }
+
+    /** 这条动态是不是「应被隐藏的过期作业」。 */
+    private fun isExpiredHomework(
+        activity: EclassActivity,
+        showExpired: Boolean,
+        now: LocalDateTime,
+    ): Boolean {
+        if (showExpired) return false
+        if (activity.kind != ActivityKind.HOMEWORK) return false
+        val deadline = activity.time ?: return false
+        return deadline.isBefore(now)
+    }
+
+    /**
+     * 过滤**并按上限截断** —— 界面最终显示的就是它（纯函数，单测锁）。
+     *
+     * ⚠️⚠️ **顺序不能反：先过滤、后截断。**
+     * 反过来的效果是「只看作业」时可见条数远小于上限：混合列表里作业本来就稀疏，
+     * 按上限截出来的那 60 条里可能只有几条是作业，而更早的作业全被截在窗口之外 ——
+     * 用户会以为「我的作业怎么少了」。调用方要配合**多取一些**原始数据
+     * （见 [fetchLimit]），否则这里再怎么截也无米下锅。
+     *
+     * 输入需已按时间**倒序**（最近在前，由 [recent] / `EclassRepo` 排好）：
+     * `take` 不打乱顺序，截出来的才是**最近 limit 条**而不是随便 limit 条。
+     */
+    fun visible(
+        activities: List<EclassActivity>,
+        onlyHomework: Boolean,
+        showExpired: Boolean,
+        limit: Int,
+        now: LocalDateTime,
+    ): List<EclassActivity> = applySettings(
+        activities = activities,
+        onlyHomework = onlyHomework,
+        showExpired = showExpired,
+        now = now,
+    ).take(limit.coerceAtLeast(0))
 
     /**
      * 相对时间文案：`今天` / `昨天` / `3 天前` / `8月25日` / `去年12月3日`。

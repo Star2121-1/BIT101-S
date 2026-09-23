@@ -8,6 +8,7 @@ import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.eclass.EclassDdlLogic
 import cn.bit101.android.data.repo.base.DDLScheduleRepo
 import cn.bit101.android.data.repo.base.EclassRepo
+import cn.bit101.android.data.school.LexueUrls
 import cn.bit101.android.features.common.helper.withScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -36,6 +37,13 @@ internal class DDLScheduleViewModel @Inject constructor(
      * 所以不删旧源，只是新增这一条（见 docs/ddl-migration-plan.md）。
      */
     private val eclassRepo: EclassRepo,
+    /**
+     * 乐学主页地址（学士帽弹窗里「去乐学」用的那一条）。
+     *
+     * 地址要按「校内 / 校外 WebVPN」两套环境选表，界面不该知道这些细节，
+     * 所以逻辑放在 [LexueUrls]，这里只做转发。动态页的设置页用的是同一份。
+     */
+    private val lexueUrls: LexueUrls,
 ) : ViewModel() {
     val lexueCalendarUrlFlow = ddlSettings.url.flow
     var beforeDay = 7
@@ -168,9 +176,16 @@ internal class DDLScheduleViewModel @Inject constructor(
 
 
 
+    /**
+     * 乐学主页地址 —— 学士帽弹窗里选「乐学主页」时打开的那一条。
+     *
+     * 校内 / 校外两套地址的选表逻辑在 [LexueUrls] 里（含回退链），这里只转发，
+     * 免得界面自己拼一个校外打不开的校内地址。
+     */
+    suspend fun lexueHomeUrl(): String = lexueUrls.home()
+
     // 从网络获取日程url 返回是否成功
-    suspend fun updateLexueCalendarUrl(): Boolean {
-        try {
+    suspend fun updateLexueCalendarUrl(): Boolean {        try {
             val url = ddlScheduleRepo.getCalendarUrl()
             if (url == null) {
                 Log.e("DDLScheduleViewModel", "get lexue calendar url error")

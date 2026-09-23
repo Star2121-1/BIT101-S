@@ -10,7 +10,9 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import cn.bit101.android.config.setting.base.ScheduleTabs
 import cn.bit101.android.config.setting.base.ThemeSettings
+import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.theme.BIT101Theme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.MainScope
@@ -28,8 +30,8 @@ class MainActivity : ComponentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        // 桌面组件的「立即预约」会带 extra 进来，交给 GotoRequest 让 IndexScreen 跳转
-        GotoRequest.request(intent?.getStringExtra(EXTRA_GOTO))
+        // 桌面组件的「立即预约 / 点条目」会带 extra 进来，交给 GotoRequest 让界面跳转
+        handleGoto(intent)
 
         var loading = true
 
@@ -70,7 +72,24 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        GotoRequest.request(intent.getStringExtra(EXTRA_GOTO))
+        handleGoto(intent)
+    }
+
+    /**
+     * 把 Intent 里的跳转请求交给 [GotoRequest]。
+     *
+     * 三个 extra 都可以单独出现：
+     * - `EXTRA_GOTO`：底栏页（必给的）
+     * - `EXTRA_TAB`：课表页里停在第几个 tab（组件点 DDL / 动态条目时给）
+     * - `EXTRA_FOCUS`：定位到哪一条（DDL uid / 动态 id）
+     */
+    private fun handleGoto(intent: Intent?) {
+        val route = intent?.getStringExtra(EXTRA_GOTO) ?: return
+        val tab = intent.getIntExtra(EXTRA_TAB, TAB_NONE)
+            .takeIf { ScheduleTabs.isValid(it) }
+        val focus = intent.getStringExtra(EXTRA_FOCUS)?.takeIf { it.isNotBlank() }
+
+        GotoRequest.request(route, tab = tab, key = focus)
     }
 
     companion object {
@@ -81,5 +100,22 @@ class MainActivity : ComponentActivity() {
          * 组件侧写、这里读，两边都别硬编码字符串常量。
          */
         const val EXTRA_GOTO = "bit101_goto"
+
+        /**
+         * 「停在第几个 tab」的 extra key（见 `ScheduleTabs`）。
+         *
+         * ⚠️ 与 `WidgetViews.TAB_EXTRA` 保持一致（跨模块，注释互相指向）。
+         */
+        const val EXTRA_TAB = "bit101_tab"
+
+        /**
+         * 「定位到哪一条」的 extra key：DDL 用 uid、动态用 `eclass:{id}`。
+         *
+         * ⚠️ 与 `WidgetViews.FOCUS_EXTRA` 保持一致。
+         */
+        const val EXTRA_FOCUS = "bit101_focus"
+
+        /** [EXTRA_TAB] 缺省值：不指定 tab（停在课表页）。 */
+        private const val TAB_NONE = -1
     }
 }

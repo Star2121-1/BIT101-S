@@ -54,9 +54,10 @@ class WidgetListService : RemoteViewsService() {
             items = runCatching {
                 runBlocking(Dispatchers.IO) {
                     val data = WidgetRepositoryHolder.load(context)
-                    val index = WidgetPageStore.read(context, appWidgetId)
-                        .coerceIn(0, (data.pages.size - 1).coerceAtLeast(0))
-                    data.pages.getOrNull(index)?.items.orEmpty()
+                    // ⚠️ 按**页名**取当前页：页序可以调整，索引已经不可靠（见 WidgetPageStore）
+                    val kind = WidgetPageStore.read(context, appWidgetId)
+                    (data.pages.firstOrNull { it.kind == kind } ?: data.pages.firstOrNull())
+                        ?.items.orEmpty()
                 }
             }.getOrDefault(emptyList())
         }

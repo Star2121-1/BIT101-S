@@ -36,14 +36,35 @@ internal data class TabPagerItem(
     val content: @Composable (active: Boolean) -> Unit
 )
 
+/**
+ * @param requestedPage 外部请求「切到第几个 tab」（组件点条目跳进来时用）；null = 不干预
+ * @param onRequestHandled 处理完请求后的回调 —— 调用方**必须**借此清掉请求，
+ *   否则下次进入本页会莫名再跳一次
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun TabPager(items: List<TabPagerItem>) {
+internal fun TabPager(
+    items: List<TabPagerItem>,
+    requestedPage: Int? = null,
+    onRequestHandled: () -> Unit = {},
+) {
     val pagerSate = rememberPagerState(
-        initialPage = 0,
+        // 冷启动（App 没在跑）直接停在对的 tab，不会闪一下再跳
+        initialPage = requestedPage ?: 0,
         initialPageOffsetFraction = 0f,
         pageCount = { items.size },
     )
+
+    // ⚠️ 热路径：App 已经在前台时（用户点了组件的第二条条目），NavHost 与这个 Pager
+    // 都还活着，`initialPage` 不会再生效 —— 必须用副作用响应**变化**。
+    LaunchedEffect(requestedPage) {
+        if (requestedPage == null) return@LaunchedEffect
+        if (requestedPage in items.indices && pagerSate.currentPage != requestedPage) {
+            pagerSate.animateScrollToPage(requestedPage)
+        }
+        onRequestHandled()
+    }
+
     val scope = rememberCoroutineScope() //供动画调用协程
     val indicator = @Composable { tabPositions: List<TabPosition> ->
         FancyAnimatedIndicator(

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.outlined.NotListedLocation
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.EditCalendar
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Info
@@ -59,6 +60,12 @@ internal fun SettingIndexPage(
             subTitle = "日程数据及显示方式",
             icon = Icons.AutoMirrored.Outlined.EventNote,
             onClick = { navController.navigate("ddl") },
+        ),
+        SettingItemData.IndexCard(
+            title = "动态设置",
+            subTitle = "动态的筛选与显示方式",
+            icon = Icons.Outlined.DynamicFeed,
+            onClick = { navController.navigate("activity") },
         ),
         SettingItemData.IndexCard(
             title = "话廊设置",

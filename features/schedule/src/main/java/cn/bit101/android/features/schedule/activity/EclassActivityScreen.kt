@@ -13,12 +13,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -28,9 +35,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.config.common.FocusKeys
 import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.eclass.EclassDdlLogic
+import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.nav.NavDest
 import java.time.LocalDateTime
 
 /**
@@ -62,38 +72,76 @@ internal fun EclassActivityScreen(mainController: MainController) {
 
     val now = LocalDateTime.now()
 
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        if (activities.isEmpty()) {
-            item {
-                if (loading) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(28.dp))
+    val listState = rememberLazyListState()
+
+    // 组件点动态条目跳进来时带着「定位到哪一条」的请求：数据到齐后滚过去。
+    // ⚠️ 只认 `activity:` 前缀的键 —— 同一个 Pager 里 DDL 页也活着，
+    //    不分归属两边会互相消费（见 FocusKeys 的说明）。
+    val focus by GotoRequest.focus.collectAsState()
+    LaunchedEffect(focus?.key, activities) {
+        val id = FocusKeys.activityTarget(focus?.key) ?: return@LaunchedEffect
+        // 还没取到数据就等下一次（activities 变化会重新触发）
+        if (activities.isEmpty()) return@LaunchedEffect
+
+        val index = activities.indexOfFirst { it.id == id }
+        if (index >= 0) listState.animateScrollToItem(index)
+        // 找不到也消费掉：活动可能已被删；留着它下次进页面会又跳一下
+        GotoRequest.consumeKey()
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomEnd,
+    ) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            if (activities.isEmpty()) {
+                item {
+                    if (loading) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                        }
+                    } else {
+                        ActivityEmptyCard(
+                            // 未登录 / 会话失效 → 给登录入口；否则只是「暂时没有」
+                            loggedIn = sessionAlive,
+                            onOpenEclass = { mainController.openWebPage(EclassDdlLogic.LOGIN_URL) },
+                            onRetry = vm::refresh,
+                        )
                     }
-                } else {
-                    ActivityEmptyCard(
-                        // 未登录 / 会话失效 → 给登录入口；否则只是「暂时没有」
-                        loggedIn = sessionAlive,
-                        onOpenEclass = { mainController.openWebPage(EclassDdlLogic.LOGIN_URL) },
-                        onRetry = vm::refresh,
-                    )
+                }
+            } else {
+                itemsIndexed(activities) { _, item ->
+                    ActivityRow(item = item, now = now) {
+                        // 直接用逻辑层算好的目标地址：课程页优先，退回首页（保证非空可用）
+                        mainController.openWebPage(item.targetUrl)
+                    }
                 }
             }
-        } else {
-            itemsIndexed(activities) { _, item ->
-                ActivityRow(item = item, now = now) {
-                    // 直接用逻辑层算好的目标地址：课程页优先，退回首页（保证非空可用）
-                    mainController.openWebPage(item.targetUrl)
-                }
-            }
+
+            // 列表底部留白：88dp ≈ 设置 FAB（42dp）+ 下边距，避免最后一条被按钮压住
+            item { Spacer(modifier = Modifier.height(88.dp)) }
         }
 
-        // 列表底部留白，避免最后一条贴着底栏
-        item { Spacer(modifier = Modifier.height(24.dp)) }
+        // 设置按钮 —— 与 DDL 页 FAB 同规格（42dp、右下角）
+        FloatingActionButton(
+            modifier = Modifier
+                .padding(end = 10.dp, bottom = 20.dp)
+                .size(42.dp),
+            onClick = { mainController.navigate(NavDest.Setting("activity")) },
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
+            contentColor = MaterialTheme.colorScheme.primary,
+            elevation = FloatingActionButtonDefaults.elevation(0.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Settings,
+                contentDescription = "settings",
+            )
+        }
     }
 }
 

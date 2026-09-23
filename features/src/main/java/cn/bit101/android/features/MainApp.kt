@@ -44,6 +44,7 @@ import cn.bit101.android.features.postedit.PostEditScreen
 import cn.bit101.android.features.poster.PosterScreen
 import cn.bit101.android.features.report.ReportScreen
 import cn.bit101.android.features.setting.SettingScreen
+import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.user.MyFollowListScreen
 import cn.bit101.android.features.user.UserScreen
 import cn.bit101.android.features.versions.UpdateDialog

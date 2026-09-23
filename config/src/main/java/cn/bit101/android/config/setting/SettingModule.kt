@@ -31,6 +31,12 @@ internal abstract class SettingModule {
 
     @Binds
     @Singleton
+    abstract fun bindActivitySettings(
+        activitySettings: DefaultActivitySettings
+    ): ActivitySettings
+
+    @Binds
+    @Singleton
     abstract fun bindThemeSettings(
         themeSettings: DefaultThemeSettings
     ): ThemeSettings

@@ -272,4 +272,244 @@ class EclassActivityLogicTest {
 
         assertEquals(EclassDdlLogic.LOGIN_URL, list[0].targetUrl)
     }
+
+    // ------------------------------------------------------------ 按设置过滤
+
+    private fun item(
+        id: Int = 1,
+        title: String = "一条动态",
+        kind: ActivityKind = ActivityKind.MATERIAL,
+        time: LocalDateTime? = null,
+    ) = EclassActivityLogic.EclassActivity(
+        id = "$id",
+        courseId = 1,
+        courseName = "课",
+        title = title,
+        kind = kind,
+        time = time,
+        targetUrl = EclassDdlLogic.LOGIN_URL,
+    )
+
+    /** 默认设置（只看作业关、显示过期开）→ 原样全留。 */
+    @Test
+    fun `默认设置下全部保留`() {
+        val list = listOf(
+            item(1, "资料", ActivityKind.MATERIAL, LocalDateTime.of(2026, 9, 22, 9, 30)),
+            item(2, "过期作业", ActivityKind.HOMEWORK, LocalDateTime.of(2026, 9, 20, 23, 59)),
+            item(3, "公告", ActivityKind.ANNOUNCEMENT, LocalDateTime.of(2026, 9, 21, 9, 0)),
+        )
+
+        val kept = EclassActivityLogic.applySettings(
+            activities = list,
+            onlyHomework = false,
+            showExpired = true,
+            now = now,
+        )
+
+        assertEquals(listOf("资料", "过期作业", "公告"), kept.map { it.title })
+    }
+
+    @Test
+    fun `只看作业时只留作业`() {
+        val list = listOf(
+            item(1, "资料", ActivityKind.MATERIAL, LocalDateTime.of(2026, 9, 22, 9, 30)),
+            item(2, "作业", ActivityKind.HOMEWORK, LocalDateTime.of(2026, 9, 30, 23, 59)),
+            item(3, "公告", ActivityKind.ANNOUNCEMENT, LocalDateTime.of(2026, 9, 21, 9, 0)),
+        )
+
+        val kept = EclassActivityLogic.applySettings(
+            activities = list,
+            onlyHomework = true,
+            showExpired = true,
+            now = now,
+        )
+
+        assertEquals(listOf("作业"), kept.map { it.title })
+    }
+
+    @Test
+    fun `关闭过期显示时丢掉截止已过的作业`() {
+        val list = listOf(
+            item(1, "过期作业", ActivityKind.HOMEWORK, LocalDateTime.of(2026, 9, 20, 23, 59)),
+            item(2, "未过期作业", ActivityKind.HOMEWORK, LocalDateTime.of(2026, 9, 30, 23, 59)),
+        )
+
+        val kept = EclassActivityLogic.applySettings(
+            activities = list,
+            onlyHomework = false,
+            showExpired = false,
+            now = now,
+        )
+
+        assertEquals(listOf("未过期作业"), kept.map { it.title })
+    }
+
+    /**
+     * ⚠️ 过期判定**只针对作业**：资料 / 公告的 time 是发布时间，本来就都在过去，
+     * 一起判会把它们全部误杀。
+     */
+    @Test
+    fun `关闭过期显示不误杀资料与公告`() {
+        val list = listOf(
+            item(1, "旧资料", ActivityKind.MATERIAL, LocalDateTime.of(2026, 8, 1, 9, 0)),
+            item(2, "旧公告", ActivityKind.ANNOUNCEMENT, LocalDateTime.of(2026, 8, 1, 9, 0)),
+        )
+
+        val kept = EclassActivityLogic.applySettings(
+            activities = list,
+            onlyHomework = false,
+            showExpired = false,
+            now = now,
+        )
+
+        assertEquals(2, kept.size)
+    }
+
+    /** 作业没时间（解析不出）时不能当成过期丢掉 —— 与排序里「没时间的保留」一致。 */
+    @Test
+    fun `没有时间的作业不当作过期`() {
+        val list = listOf(item(1, "无时间作业", ActivityKind.HOMEWORK, time = null))
+
+        val kept = EclassActivityLogic.applySettings(
+            activities = list,
+            onlyHomework = true,
+            showExpired = false,
+            now = now,
+        )
+
+        assertEquals(1, kept.size)
+    }
+
+    // ------------------------------------------------------------ 过滤 + 截断的顺序
+
+    /**
+     * ⚠️ 回归：**先过滤、后截断**。
+     *
+     * 反过来的话，「只看作业」会「吃不饱」—— 混合列表里作业稀疏，按上限先截出来的
+     * 那几条里可能一条作业都没有。这里上限 2、列表是「作业 + 两条资料」：
+     * 正确结果是那条作业**在**，而不是被资料挤出窗口。
+     */
+    @Test
+    fun `只看作业时先过滤再截断`() {
+        val list = listOf(
+            item(1, "第三章作业", ActivityKind.HOMEWORK, now.plusDays(3)),
+            item(2, "第二章课件", ActivityKind.MATERIAL, now.minusDays(1)),
+            item(3, "第一章课件", ActivityKind.MATERIAL, now.minusDays(2)),
+        )
+
+        val visible = EclassActivityLogic.visible(
+            activities = list,
+            onlyHomework = true,
+            showExpired = true,
+            limit = 2,
+            now = now,
+        )
+
+        assertEquals(listOf("第三章作业"), visible.map { it.title })
+    }
+
+    /** 上限在**过滤之后**生效：过滤后的条数多于上限时才截。 */
+    @Test
+    fun `上限在过滤之后生效`() {
+        val list = (1..5).map {
+            item(it, "作业$it", ActivityKind.HOMEWORK, now.plusDays(it.toLong()))
+        }
+
+        val visible = EclassActivityLogic.visible(
+            activities = list,
+            onlyHomework = false,
+            showExpired = true,
+            limit = 2,
+            now = now,
+        )
+
+        assertEquals(2, visible.size)
+        assertEquals(listOf("作业1", "作业2"), visible.map { it.title })
+    }
+
+    /** 上限为 0 / 负数时不应崩，也不应「全给」——那就是用户选了「不显示」。 */
+    @Test
+    fun `上限非正时返回空`() {
+        val list = listOf(item(1, "作业", ActivityKind.HOMEWORK, now.plusDays(1)))
+
+        assertEquals(
+            0,
+            EclassActivityLogic.visible(list, onlyHomework = false, showExpired = true, limit = 0, now = now).size,
+        )
+        assertEquals(
+            0,
+            EclassActivityLogic.visible(list, onlyHomework = false, showExpired = true, limit = -3, now = now).size,
+        )
+    }
+
+    // ------------------------------------------------------------ 取数上限的放大
+
+    /**
+     * 取数时「只看作业」要**放大**请求条数，否则过滤后无米下锅（[EclassActivityLogic.visible]）。
+     *
+     * 放大不是无脑翻倍：要有硬顶 [EclassActivityLogic.MAX_FETCH_LIMIT]，
+     * 否则用户把上限调大时请求量会失控。
+     */
+    @Test
+    fun `只看作业时取数上限放大且不超硬顶`() {
+        // 关着「只看作业」→ 原样，不多取
+        assertEquals(60, EclassActivityLogic.fetchLimit(limit = 60, onlyHomework = false))
+        assertEquals(0, EclassActivityLogic.fetchLimit(limit = 0, onlyHomework = false))
+
+        // 开着 → 4 倍
+        assertEquals(30 * 4, EclassActivityLogic.fetchLimit(limit = 30, onlyHomework = true))
+        assertEquals(60 * 4, EclassActivityLogic.fetchLimit(limit = 60, onlyHomework = true))
+
+        // 4 倍超过硬顶时被截到硬顶（100 * 4 = 400 → 240）
+        assertEquals(
+            EclassActivityLogic.MAX_FETCH_LIMIT,
+            EclassActivityLogic.fetchLimit(limit = 100, onlyHomework = true),
+        )
+        assertEquals(
+            EclassActivityLogic.MAX_FETCH_LIMIT,
+            EclassActivityLogic.fetchLimit(limit = 1000, onlyHomework = true),
+        )
+    }
+
+    /**
+     * ⚠️ 回归本 bug 的核心：**混合列表里作业稀疏时，「只看作业」仍要拿满上限**。
+     *
+     * 列表按时间倒序，每 4 条才有一条作业。若先按上限截断再过滤（旧实现），
+     * 上限 4 只能截到「作业、资料、资料、资料」，过滤后只剩 **1** 条；
+     * 先按放大上限取数、过滤之后再截断，才拿得到 **4** 条作业。
+     */
+    @Test
+    fun `混合列表里作业稀疏时只看作业仍能拿满上限`() {
+        val raw = (1..42).map { i ->
+            if (i % 4 == 1) {
+                item(i, "作业$i", ActivityKind.HOMEWORK, now.minusDays(i.toLong()))
+            } else {
+                item(i, "资料$i", ActivityKind.MATERIAL, now.minusDays(i.toLong()))
+            }
+        }
+        val limit = 4
+
+        // 取数阶段按放大后的上限「取」这么多条 —— 模拟 repo 的截断
+        val fetched = raw.take(EclassActivityLogic.fetchLimit(limit, onlyHomework = true))
+        val visible = EclassActivityLogic.visible(
+            activities = fetched,
+            onlyHomework = true,
+            showExpired = true,
+            limit = limit,
+            now = now,
+        )
+
+        assertEquals(limit, visible.size)
+        assertTrue(visible.all { it.kind == ActivityKind.HOMEWORK })
+
+        // 反向验证：不放大就「吃不饱」，只能拿到 1 条
+        val withoutWiden = EclassActivityLogic.visible(
+            activities = raw.take(limit),
+            onlyHomework = true,
+            showExpired = true,
+            limit = limit,
+            now = now,
+        )
+        assertEquals(1, withoutWiden.size)
+    }
 }

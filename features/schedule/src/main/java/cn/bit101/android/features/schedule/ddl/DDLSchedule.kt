@@ -13,10 +13,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
@@ -24,7 +26,9 @@ import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,8 +40,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.config.common.FocusKeys
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.eclass.EclassDdlLogic
+import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.nav.NavDest
 import kotlinx.coroutines.MainScope
@@ -79,6 +85,23 @@ internal fun DDLSchedule(
             })
     }
 
+    // 学士帽弹窗：去哪个平台的主页（两个平台都还能用，不替用户决定）
+    val showPlatformDialog = remember { mutableStateOf(false) }
+    if (showPlatformDialog.value) {
+        PlatformPickDialog(
+            onDismiss = { showPlatformDialog.value = false },
+            onEclass = {
+                showPlatformDialog.value = false
+                mainController.openWebPage(EclassDdlLogic.LOGIN_URL)
+            },
+            onLexue = {
+                showPlatformDialog.value = false
+                // 乐学地址要按「校内 / 校外」选表（读设置是挂起调用）→ 起个协程再开
+                MainScope().launch { mainController.openWebPage(vm.lexueHomeUrl()) }
+            },
+        )
+    }
+
     // 判断是否已经有订阅链接
     val url = vm.lexueCalendarUrlFlow.collectAsState(initial = null)
     if (url.value.isNullOrBlank()) {
@@ -113,7 +136,24 @@ internal fun DDLSchedule(
         ) {
             // 日程列表
             val events = vm.events.collectAsState()
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
+            val listState = rememberLazyListState()
+
+            // 组件点 DDL 条目跳进来时带着「定位到哪一条」的请求：数据到齐后滚过去。
+            // ⚠️ 只认自己那一种键（`ddl:` 前缀）—— 同一个 Pager 里动态页也活着，
+            //    不分归属的话两边会互相把请求消费掉（见 FocusKeys 的说明）。
+            val focus by GotoRequest.focus.collectAsState()
+            LaunchedEffect(focus?.key, events.value) {
+                val uid = FocusKeys.ddlTarget(focus?.key) ?: return@LaunchedEffect
+                // 数据还没到就等下一次（events 变化会重新触发这个副作用）
+                if (events.value.isEmpty()) return@LaunchedEffect
+
+                val index = DdlListOrder.flatIndexOf(events.value, uid)
+                if (index >= 0) listState.animateScrollToItem(index)
+                // 找不到也消费掉 —— 条目可能已被删除，留着它下次进页面会又跳一下
+                GotoRequest.consumeKey()
+            }
+
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                 if (events.value.isEmpty()) {
                     item {
                         Text(
@@ -129,11 +169,10 @@ internal fun DDLSchedule(
                         )
                     }
                 } else {
-                    // 分区显示（2026-09-23 用户要求）：未完成在上、已完成在下。
-                    // 以前两者混在一条时间轴上，做完了的作业会把待办往下挤。
-                    val pending = events.value.filter { !it.done }
-                    // 已完成的按时间倒序：最近做完的排前面
-                    val done = events.value.filter { it.done }.sortedByDescending { it.time }
+                    // 分区顺序由 DdlListOrder 定义 —— 与「定位到某一条」的下标换算同源，
+                    // 两处各写一遍 filter/sortedBy 早晚会改歪一处。
+                    val pending = DdlListOrder.pending(events.value)
+                    val done = DdlListOrder.done(events.value)
 
                     if (pending.isNotEmpty()) {
                         item { DdlSectionTitle("未完成 · ${pending.size}") }
@@ -197,20 +236,21 @@ internal fun DDLSchedule(
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
-                // 延河课堂（eclass）—— 学校 2026 年起用它替代乐学下发作业。
+                // 「学士帽」= 去作业平台的主页。**两个平台都还能用**，所以不默认只去一个，
+                // 而是弹窗问一句（用户 2026-09-23 要求）。
                 // ⚠️ 必须用 **App 内 WebView** 打开：只有它和我们共用的 CookieManager 互通，
                 //    换成系统浏览器登录的话，App 这边拿不到会话（见 WebViewCookieSync）
                 FloatingActionButton(
                     modifier = Modifier
                         .size(fabSize),
-                    onClick = { mainController.openWebPage(EclassDdlLogic.LOGIN_URL) },
+                    onClick = { showPlatformDialog.value = true },
                     containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
                     contentColor = MaterialTheme.colorScheme.primary,
                     elevation = FloatingActionButtonDefaults.elevation(0.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.School,
-                        contentDescription = "延河课堂",
+                        contentDescription = "作业平台主页",
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
@@ -248,5 +288,59 @@ private fun DdlSectionTitle(text: String) {
             .padding(start = 12.dp, top = 10.dp, bottom = 2.dp),
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * 学士帽按钮的弹窗：去**乐学**主页还是**延河课堂**主页。
+ *
+ * 为什么不是直接跳一个：两个平台**都还能用** —— 延河课堂是 2026 年起的作业与资料来源，
+ * 乐学（Moodle）是旧平台、历史数据仍在校内可访问。用户 2026-09-23 明确要求
+ * 「点之前问一句」，所以这里不替用户猜。
+ *
+ * ⚠️ 两个选项都是 **App 内 WebView**（`MainController.openWebPage`）：
+ * 只有它和 App 共用 CookieManager，延河课堂的会话才拿得到（见 `WebViewCookieSync`）。
+ * 乐学那边没有会话检查接口，所以文案里如实提示「可能需要重新登录」。
+ */
+@Composable
+private fun PlatformPickDialog(
+    onDismiss: () -> Unit,
+    onEclass: () -> Unit,
+    onLexue: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("打开哪个平台的主页？") },
+        text = {
+            Column {
+                Text(
+                    text = "两个平台都还能用，选一个打开它的主页：",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                Button(onClick = onEclass, modifier = Modifier.fillMaxWidth()) {
+                    Text("延河课堂")
+                }
+                Text(
+                    text = "2026 年起的作业与资料来源",
+                    modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(onClick = onLexue, modifier = Modifier.fillMaxWidth()) {
+                    Text("乐学")
+                }
+                Text(
+                    text = "旧平台（Moodle）· 可能需要重新登录",
+                    modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
     )
 }

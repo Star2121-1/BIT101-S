@@ -49,8 +49,10 @@ internal object WidgetViews {
         val rv = RemoteViews(context.packageName, R.layout.widget_root)
 
         val pages = data.pages
-        val pageIndex = WidgetPageStore.read(context, appWidgetId)
-            .coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+        // ⚠️ 按**页名**找当前页，不是按索引：页序调整后老用户的记录不会串页
+        //（历史 int 页号由 WidgetPageStore 迁移成页名）。
+        val currentKind = WidgetPageStore.read(context, appWidgetId)
+        val pageIndex = pages.indexOfFirst { it.kind == currentKind }.takeIf { it >= 0 } ?: 0
         val page = pages.getOrNull(pageIndex)
 
         renderTabs(context, rv, appWidgetId, pages, pageIndex)
@@ -74,7 +76,8 @@ internal object WidgetViews {
         pageIndex: Int,
     ) {
         TAB_IDS.forEachIndexed { i, id ->
-            val title = pages.getOrNull(i)?.title ?: PageKind.entries[i].label
+            val kind = pages.getOrNull(i)?.kind ?: PageKind.entries[i]
+            val title = pages.getOrNull(i)?.title ?: kind.label
             val selected = i == pageIndex
 
             rv.setTextViewText(id, title)
@@ -92,7 +95,7 @@ internal object WidgetViews {
                 "setBackgroundResource",
                 if (selected) R.drawable.widget_tab_selected else R.drawable.widget_tab_normal,
             )
-            rv.setOnClickPendingIntent(id, pagePendingIntent(context, appWidgetId, i))
+            rv.setOnClickPendingIntent(id, pagePendingIntent(context, appWidgetId, kind))
         }
     }
 
@@ -138,18 +141,11 @@ internal object WidgetViews {
         // 列表条目的点击模板（collection 的标准做法）：模板在这里挂一次，
         // 条目里用 setOnClickFillInIntent 补 extras —— 只有带 fillInIntent 的条目可点。
         //
-        // ⚠️ 模板按**当前页**切换：
-        // - DDL 页：点条目 = 勾选/取消（广播回 Provider 写库，**不打开 App**）
-        // - 其余页：点条目 = 打开 App 并跳到该行的 openRoute
-        // 一个列表只能挂一个模板，所以只能按页区分 —— 好在同一页里行的语义是一致的。
-        rv.setPendingIntentTemplate(
-            R.id.widget_list,
-            if (page?.kind == PageKind.DDL) {
-                ddlToggleTemplate(context, appWidgetId)
-            } else {
-                listTapTemplate(context, appWidgetId)
-            },
-        )
+        // ⚠️ 一个 collection **只能挂一个模板**，所以「整行跳转」与「整行勾选」
+        // 没法按视图分流。当前统一是**打开 App**（用户 2026-09-23 要求：
+        // 点 DDL / 动态条目要跳进 App 对应页）。`ddlToggleTemplate` 保留给将来的
+        // 「勾选模式」（点动作键把整页切成勾选语义），暂时没有调用方。
+        rv.setPendingIntentTemplate(R.id.widget_list, listTapTemplate(context, appWidgetId))
     }
 
     /**
@@ -184,14 +180,15 @@ internal object WidgetViews {
     }
 
     /**
-     * DDL 行的点击模板：切换完成状态。
+     * DDL 行的点击模板：**在组件里直接勾选/取消**（广播回 [BIT101WidgetProvider] 写库）。
      *
-     * 走**广播**回到 [BIT101WidgetProvider]（而不是打开 App）：勾一个 DDL
-     * 不该把用户从桌面拽进 App；Provider 写完库直接重绘，原地就能看到变化。
-     * 具体的 DDL uid 由条目的 fillInIntent 带上。
+     * ⚠️ **当前没有调用方**（2026-09-23 起条目点击改为「跳进 App 的 DDL 页」）。
+     * 保留它是为了将来的**「勾选模式」**：点动作键把整页切换成勾选语义、再点回到跳转。
+     * 之所以不能两者共存：一个 collection 只能挂一个点击模板（见 `renderBody` 的说明）。
      *
-     * ⚠️ 同样必须 `FLAG_MUTABLE`（要接 fill-in 的 uid），理由见 [listTapTemplate]。
+     * 数据（`WidgetLine.toggleDdlUid`）也一直带着，接上模板即可用。
      */
+    @Suppress("unused")
     private fun ddlToggleTemplate(context: Context, appWidgetId: Int): PendingIntent =
         broadcast(
             context,
@@ -272,19 +269,23 @@ internal object WidgetViews {
         rv.setTextColor(R.id.item_time, timeColor(context, line))
         rv.setTextViewText(R.id.item_trail, line.trail)
 
-        // 课程条目点一下 → 打开 App 跳到课表页（extras 经列表的 PendingIntentTemplate 合并）。
-        // ⚠️ 组件里没有「双击」可用：条目只收一次点击，且滑动不会误触发点击。
-        line.openRoute?.let { route ->
+        // 条目的点击语义（extras 经列表的 PendingIntentTemplate 合并后投递）：
+        // - 打开 App 并跳到某页：openRoute（+ openTab 停在第几个 tab、focusKey 定位到哪一条）
+        // - 在组件里勾选 DDL：toggleDdlUid（当前未接线，留给将来的「勾选模式」）
+        //
+        // ⚠️⚠️ **必须合成一个 fillInIntent**：`setOnClickFillInIntent` 对同一 view 是
+        // **覆盖**语义，连着调两次只会留下最后一次 —— 早先分开写两段时，
+        // DDL 行（两个字段都有）会把 openRoute 丢掉，点了变成「勾选」而不是跳转。
+        val clickable = line.openRoute != null || line.toggleDdlUid != null
+        if (clickable) {
             rv.setOnClickFillInIntent(
                 R.id.item_root,
-                Intent().putExtra(GOTO_EXTRA, route),
-            )
-        }
-        // DDL 条目点一下 → 切换完成状态（uid 经模板合并后由 Provider 收到）
-        line.toggleDdlUid?.let { uid ->
-            rv.setOnClickFillInIntent(
-                R.id.item_root,
-                Intent().putExtra(DDL_UID_EXTRA, uid),
+                Intent().apply {
+                    line.openRoute?.let { putExtra(GOTO_EXTRA, it) }
+                    line.openTab?.let { putExtra(TAB_EXTRA, it) }
+                    line.focusKey?.let { putExtra(FOCUS_EXTRA, it) }
+                    line.toggleDdlUid?.let { putExtra(DDL_UID_EXTRA, it) }
+                },
             )
         }
         return rv
@@ -380,22 +381,25 @@ internal object WidgetViews {
     /**
      * 页签点击。
      *
-     * ⚠️⚠️ **`data` 必须唯一**（appWidgetId + page 组合）。
+     * ⚠️⚠️ **`data` 必须唯一**（appWidgetId + 页名组合）。
      * `PendingIntent` 的唯一性只看 `requestCode` + `Intent.filterEquals`，
      * 而 **filterEquals 不比较 extras** —— 只靠 extras 区分的话，
      * 几个页签会判定为同一个 PendingIntent，被 `FLAG_UPDATE_CURRENT` 互相覆盖，
      * 表现就是「只有最后一个页签能用」。
+     *
+     * ⚠️ extra 里带的是**页名**（`PageKind.name`）而不是第几页 —— 页序调整后
+     * 老 PendingIntent 也不会把用户带到错的页上（见 `WidgetPageStore`）。
      */
     private fun pagePendingIntent(
         context: Context,
         appWidgetId: Int,
-        page: Int,
+        kind: PageKind,
     ): PendingIntent = broadcast(
         context,
         appWidgetId,
         BIT101WidgetProvider.ACTION_SET_PAGE,
-        Uri.parse("bit101://page/$appWidgetId/$page"),
-    ) { putExtra(BIT101WidgetProvider.EXTRA_PAGE, page) }
+        Uri.parse("bit101://page/$appWidgetId/${kind.name}"),
+    ) { putExtra(BIT101WidgetProvider.EXTRA_PAGE, kind.name) }
 
     private fun refreshPendingIntent(context: Context, appWidgetId: Int): PendingIntent =
         broadcast(
@@ -490,6 +494,12 @@ internal object WidgetViews {
 
     /** 与 `MainActivity.EXTRA_GOTO` 保持一致（跨模块，注释互相指向）。 */
     private const val GOTO_EXTRA = "bit101_goto"
+
+    /** 与 `MainActivity.EXTRA_TAB` 保持一致：打开 App 后停在第几个 tab。 */
+    private const val TAB_EXTRA = "bit101_tab"
+
+    /** 与 `MainActivity.EXTRA_FOCUS` 保持一致：定位到哪一条（DDL uid / 动态 id）。 */
+    private const val FOCUS_EXTRA = "bit101_focus"
 
     /** DDL 行 fillInIntent 里的 uid —— Provider 据此知道要切换哪一条。 */
     const val DDL_UID_EXTRA = "bit101_ddl_uid"

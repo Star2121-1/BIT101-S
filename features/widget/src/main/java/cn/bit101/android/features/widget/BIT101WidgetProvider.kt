@@ -97,11 +97,18 @@ class BIT101WidgetProvider : AppWidgetProvider() {
         appScope.launch {
             try {
                 when (action) {
-                    ACTION_SET_PAGE -> WidgetPageStore.write(
-                        context,
-                        appWidgetId,
-                        intent.getIntExtra(EXTRA_PAGE, 0),
-                    )
+                    ACTION_SET_PAGE -> {
+                        // 页名优先。老版本创建的 PendingIntent 还在系统里缓存着时，
+                        // 可能递来**旧格式的 int 页号**（升级瞬间的一次陈旧点击）——
+                        // 按旧顺序还原，别让它静默变成「点了没反应」。
+                        val kind = intent.getStringExtra(EXTRA_PAGE)
+                            ?.let { name -> PageKind.entries.firstOrNull { it.name == name } }
+                            ?: intent.getIntExtra(EXTRA_PAGE, -1)
+                                .takeIf { it >= 0 }
+                                ?.let { WidgetPageStore.legacyKindOf(it) }
+
+                        if (kind != null) WidgetPageStore.write(context, appWidgetId, kind)
+                    }
 
                     ACTION_QUICK_RESERVE -> quickReserve(context, appWidgetId, intent)
 

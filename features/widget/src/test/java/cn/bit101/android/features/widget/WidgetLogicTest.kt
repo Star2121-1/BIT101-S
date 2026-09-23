@@ -1,6 +1,8 @@
 package cn.bit101.android.features.widget
 
+import cn.bit101.android.config.common.FocusKeys
 import cn.bit101.android.config.setting.base.AppRoutes
+import cn.bit101.android.config.setting.base.ScheduleTabs
 import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
@@ -616,8 +618,9 @@ class WidgetLogicTest {
 
         assertEquals(4, data.pages.size)
         assertEquals(
-            // ⚠️ 动态页必须**排在最后**：页号按索引持久化，插队会让既有用户的组件跳页
-            listOf(PageKind.COURSE, PageKind.DDL, PageKind.SEAT, PageKind.ACTIVITY),
+            // ⚠️ 页序即页签顺序，用户 2026-09-23 要求「DDL 与动态挨着」：
+            // 顺序变了没关系 —— 页号现在存的是**页名**（WidgetPageStore），老用户不会串页
+            listOf(PageKind.COURSE, PageKind.DDL, PageKind.ACTIVITY, PageKind.SEAT),
             data.pages.map { it.kind },
         )
     }
@@ -632,13 +635,40 @@ class WidgetLogicTest {
             firstDay = firstDay,
         )
 
-        assertEquals("没课时课程页应只剩空闲段", 0, data.pages[0].courses().size)
+        // 按页名取页而不是按下标：页序是可以调的，测试不该跟着页序一起改
+        fun pageOf(kind: PageKind) = data.pages.first { it.kind == kind }
+
+        assertEquals("没课时课程页应只剩空闲段", 0, pageOf(PageKind.COURSE).courses().size)
         assertEquals(
             "要交的报告",
-            data.pages[1].items.first { !it.header }.main,
+            pageOf(PageKind.DDL).items.first { !it.header }.main,
         )
-        assertTrue("座位页应为空", data.pages[2].isEmpty)
-        assertTrue("没动态时动态页应为空", data.pages[3].isEmpty)
+        assertTrue("座位页应为空", pageOf(PageKind.SEAT).isEmpty)
+        assertTrue("没动态时动态页应为空", pageOf(PageKind.ACTIVITY).isEmpty)
+    }
+
+    // ------------------------------------------------ 页号迁移（页序调整后不错页）
+
+    /**
+     * ⚠️ 页序在 2026-09-23 被调整过（用户要求「DDL 与动态挨着」）：
+     * 旧序 = 课程 → DDL → 座位 → 动态；新序 = 课程 → DDL → 动态 → 座位。
+     *
+     * 老用户的页号是**旧索引**（int），必须按**旧顺序**还原语义 ——
+     * 否则原本停在「座位」的人会被静默带到「动态」页，而且没有任何报错。
+     */
+    @Test
+    fun `旧页号按旧顺序迁移而不是直接当新索引`() {
+        assertEquals(PageKind.COURSE, WidgetPageStore.legacyKindOf(0))
+        assertEquals(PageKind.DDL, WidgetPageStore.legacyKindOf(1))
+        assertEquals(PageKind.SEAT, WidgetPageStore.legacyKindOf(2))
+        assertEquals(PageKind.ACTIVITY, WidgetPageStore.legacyKindOf(3))
+
+        // 新旧顺序在 2/3 位上确实不同 —— 这就是不能直接复用旧 int 的原因
+        assertEquals(PageKind.ACTIVITY, PageKind.entries[2])
+        assertEquals(PageKind.SEAT, PageKind.entries[3])
+
+        assertNull("越界的老页号不迁移", WidgetPageStore.legacyKindOf(9))
+        assertNull("负数同理", WidgetPageStore.legacyKindOf(-1))
     }
 
     // ------------------------------------------------ 作息时间与「当前/下一节」高亮
@@ -794,14 +824,57 @@ class WidgetLogicTest {
         assertEquals("seat", action?.route)
     }
 
+    /**
+     * 课程页与 DDL 页都**没有**动作键。
+     *
+     * DDL 页以前有个「打开 DDL」键（因为条目点击被用来勾选），
+     * 2026-09-23 用户要求「点条目直接跳进 App 的 DDL 页」之后它就多余了 —— 已删。
+     * 现在只有未登录（登录引导）与座位页（一键/立即预约）才有动作键。
+     */
     @Test
-    fun `课程页没有动作键，DDL 页的动作键是打开 DDL`() {
+    fun `课程页与 DDL 页都没有动作键`() {
         assertNull(WidgetLogic.actionOf(WidgetLogic.coursePage(emptyList(), today, now, firstDay)))
+        assertNull(WidgetLogic.actionOf(WidgetLogic.ddlPage(emptyList(), now)))
+    }
 
-        // DDL 行的点击语义被用来「勾选/取消」，所以要另给一个进 App 的入口
-        val action = WidgetLogic.actionOf(WidgetLogic.ddlPage(emptyList(), now))
-        assertEquals("打开 DDL", action?.label)
-        assertEquals("schedule", action?.route)
+    /**
+     * DDL 行 = **点一下跳进 App 的 DDL 页并定位到这一条**（不再就地勾选）。
+     *
+     * 勾选信息（[WidgetLine.toggleDdlUid]）仍然带着，留给将来的「勾选模式」用。
+     */
+    @Test
+    fun `DDL 行点击跳进 App 的 DDL 页并带上定位键`() {
+        val page = WidgetLogic.ddlPage(
+            listOf(ddl(title = "第三章作业", time = now.plusDays(1))),
+            now,
+        )
+
+        val row = page.items.first { !it.header }
+        assertEquals("schedule", row.openRoute)
+        assertEquals(ScheduleTabs.DDL, row.openTab)
+        // 定位键 = 带归属前缀的 DDL uid（App 侧据此滚到那一条）
+        assertEquals(FocusKeys.ddl("u-第三章作业"), row.focusKey)
+        // 勾选信息仍是**裸 uid**（将来做「勾选模式」时按 uid 写库），别和定位键混
+        assertEquals("u-第三章作业", row.toggleDdlUid)
+    }
+
+    /**
+     * 动态行 = 点一下跳进 App 的**动态 tab**并定位到那一条。
+     *
+     * 以前只打开 App 且停在课表 tab（`openRoute = "schedule"` 没带 tab），
+     * 用户还得自己再点一下「动态」—— 2026-09-23 用户要求直接落到动态页。
+     */
+    @Test
+    fun `动态行点击跳进 App 的动态 tab 并带上定位键`() {
+        val page = WidgetLogic.activityPage(
+            listOf(activity(title = "第二章课件", kind = EclassActivityLogic.ActivityKind.MATERIAL)),
+            now,
+        )
+
+        val row = page.items.first()
+        assertEquals("schedule", row.openRoute)
+        assertEquals(ScheduleTabs.ACTIVITY, row.openTab)
+        assertEquals(FocusKeys.activity("a-第二章课件"), row.focusKey)
     }
 
     // ------------------------------------------------------------ 动态页
