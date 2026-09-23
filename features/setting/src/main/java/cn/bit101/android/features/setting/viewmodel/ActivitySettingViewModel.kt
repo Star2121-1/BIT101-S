@@ -3,6 +3,7 @@ package cn.bit101.android.features.setting.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.setting.base.ActivitySettings
+import cn.bit101.android.data.eclass.EclassRefreshBus
 import cn.bit101.android.data.repo.base.EclassRepo
 import cn.bit101.android.data.school.LexueUrls
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -26,6 +27,8 @@ internal class ActivitySettingViewModel @Inject constructor(
     private val activitySettings: ActivitySettings,
     private val eclassRepo: EclassRepo,
     private val lexueUrls: LexueUrls,
+    /** 跨页刷新总线：设置页发请求，活着的动态页 VM 收到就重新取数。 */
+    private val eclassRefreshBus: EclassRefreshBus,
 ) : ViewModel() {
 
     val onlyHomework = activitySettings.onlyHomework
@@ -61,6 +64,17 @@ internal class ActivitySettingViewModel @Inject constructor(
             _eclassSessionAlive.value =
                 runCatching { eclassRepo.isSessionAlive() }.getOrDefault(false)
         }
+    }
+
+    /**
+     * 「重新拉取动态」：广播给动态页（活着就立刻刷新），并顺手复查会话状态。
+     *
+     * ⚠️ 这里**不自己拉数据**：动态页的数据在它自己的 VM 里，这里拉了也存不进去；
+     * 总线（[EclassRefreshBus]）才是把两边接起来的通道。
+     */
+    fun pullActivities() {
+        eclassRefreshBus.request(EclassRefreshBus.Kind.ACTIVITY)
+        checkEclassSession()
     }
 
     private fun loadLexueHome() {

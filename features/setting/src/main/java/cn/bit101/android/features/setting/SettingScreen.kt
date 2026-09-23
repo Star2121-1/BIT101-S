@@ -124,7 +124,7 @@ fun SettingScreen(
                 title = "DDL设置",
                 navController = navController,
             ) {
-                DDLSettingPage(onSnackBar = onSnackBar)
+                DDLSettingPage(mainController = mainController, onSnackBar = onSnackBar)
             }
         }
 

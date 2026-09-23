@@ -53,9 +53,18 @@ private fun ActivitySettingPageContent(
     onToggleOnlyHomework: (Boolean) -> Unit,
     onToggleShowExpired: (Boolean) -> Unit,
     onOpenLimitDialog: () -> Unit,
+    onPullActivities: () -> Unit,
     onOpenEclass: () -> Unit,
     onOpenLexue: () -> Unit,
 ) {
+    val dataItems = listOf(
+        SettingItemData.Button(
+            title = "重新拉取动态",
+            subTitle = "从延河课堂重新获取课程动态",
+            onClick = onPullActivities,
+        ),
+    )
+
     val displayItems = listOf(
         SettingItemData.Switch(
             title = "只看作业",
@@ -94,6 +103,11 @@ private fun ActivitySettingPageContent(
     )
 
     SettingsColumn {
+        SettingsGroup(
+            title = "数据设置",
+            items = dataItems,
+        )
+
         SettingsGroup(
             title = "显示设置",
             subTitle = "控制「动态」页显示哪些内容",
@@ -182,6 +196,7 @@ internal fun ActivitySettingPage(mainController: MainController) {
         onToggleOnlyHomework = vm::setOnlyHomework,
         onToggleShowExpired = vm::setShowExpired,
         onOpenLimitDialog = { showLimitDialog = true },
+        onPullActivities = vm::pullActivities,
         onOpenEclass = { mainController.openWebPage(EclassDdlLogic.LOGIN_URL) },
         onOpenLexue = { mainController.openWebPage(lexueHome) },
     )

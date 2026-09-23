@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.setting.base.ActivitySettings
 import cn.bit101.android.data.eclass.EclassActivityLogic
+import cn.bit101.android.data.eclass.EclassRefreshBus
 import cn.bit101.android.data.repo.base.EclassRepo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +35,11 @@ import javax.inject.Inject
 internal class EclassActivityViewModel @Inject constructor(
     private val eclassRepo: EclassRepo,
     private val activitySettings: ActivitySettings,
+    /**
+     * 延河课堂刷新总线 —— 动态设置页点「重新拉取动态」时，这个 VM 活着的话
+     * 会立刻收到并重新取数（否则用户从设置页回来还得手动下拉）。
+     */
+    private val eclassRefreshBus: EclassRefreshBus,
 ) : ViewModel() {
 
     /** 是否正在加载（首次进入或下拉刷新）。 */
@@ -101,6 +107,12 @@ internal class EclassActivityViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .drop(1)
                 .collect { on -> if (on) refresh() }
+        }
+        // 设置页（或将来其它入口）点了「重新拉取动态」：活着就立刻重新取
+        viewModelScope.launch {
+            eclassRefreshBus.requests.collect { kind ->
+                if (kind == EclassRefreshBus.Kind.ACTIVITY) refresh()
+            }
         }
     }
 

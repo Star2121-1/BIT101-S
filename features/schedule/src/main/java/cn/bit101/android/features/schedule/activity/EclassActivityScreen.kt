@@ -1,3 +1,6 @@
+// ⚠️ 下拉刷新用的是 material3 1.2 的实验 API（与座位页任务列表同一套写法）
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package cn.bit101.android.features.schedule.activity
 
 import androidx.compose.foundation.background
@@ -24,6 +27,8 @@ import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -31,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -89,11 +95,27 @@ internal fun EclassActivityScreen(mainController: MainController) {
         GotoRequest.consumeKey()
     }
 
+    // 下拉刷新。本项目 material3 为 1.2.0-rc01，只有旧的 `PullToRefreshContainer`
+    // （`PullToRefreshBox` 要 1.3.0+），与座位页任务列表同一套写法。
+    val pullState = rememberPullToRefreshState()
+    if (pullState.isRefreshing) {
+        LaunchedEffect(Unit) {
+            vm.refresh()
+            // 刷新完成与否由页面自身的 loading 表现；指示器不等它（与座位页一致）
+            pullState.endRefresh()
+        }
+    }
+
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.BottomEnd,
     ) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(pullState.nestedScrollConnection),
+        ) {
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             if (activities.isEmpty()) {
                 item {
                     if (loading) {
@@ -125,6 +147,13 @@ internal fun EclassActivityScreen(mainController: MainController) {
 
             // 列表底部留白：88dp ≈ 设置 FAB（42dp）+ 下边距，避免最后一条被按钮压住
             item { Spacer(modifier = Modifier.height(88.dp)) }
+            }
+
+            // 下拉指示器（material3 1.2 的旧 API，覆盖在列表上方）
+            PullToRefreshContainer(
+                state = pullState,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
         }
 
         // 设置按钮 —— 与 DDL 页 FAB 同规格（42dp、右下角）

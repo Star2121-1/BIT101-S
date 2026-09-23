@@ -5,9 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.setting.base.DDLSettings
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
-import cn.bit101.android.data.eclass.EclassDdlLogic
+import cn.bit101.android.data.eclass.EclassRefreshBus
+import cn.bit101.android.data.repo.EclassDdlSyncer
 import cn.bit101.android.data.repo.base.DDLScheduleRepo
-import cn.bit101.android.data.repo.base.EclassRepo
 import cn.bit101.android.data.school.LexueUrls
 import cn.bit101.android.features.common.helper.withScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,12 +31,17 @@ internal class DDLScheduleViewModel @Inject constructor(
     private val ddlScheduleRepo: DDLScheduleRepo,
     private val ddlSettings: DDLSettings,
     /**
-     * 延河课堂（eclass）—— 学校 2026 年起用它替代乐学下发作业。
+     * 延河课堂（eclass）作业同步器 —— 学校 2026 年起用它替代乐学下发作业。
      *
      * 两个来源**并存**：乐学虽已停用，但已同步下来的历史数据仍然有用，
      * 所以不删旧源，只是新增这一条（见 docs/ddl-migration-plan.md）。
      */
-    private val eclassRepo: EclassRepo,
+    private val eclassDdlSyncer: EclassDdlSyncer,
+    /**
+     * 延河课堂刷新总线 —— DDL 设置页点「重新拉取延河课堂作业」时，
+     * 这个页面级的 VM 活着的话会立刻收到并重新同步。
+     */
+    private val eclassRefreshBus: EclassRefreshBus,
     /**
      * 乐学主页地址（学士帽弹窗里「去乐学」用的那一条）。
      *
@@ -75,6 +80,13 @@ internal class DDLScheduleViewModel @Inject constructor(
         // 与乐学源互不影响：未登录 / 网络不通时静默返回，不打扰用户。
         withScope {
             updateEclassDdl()
+        }
+
+        // 设置页（或将来其它入口）点了「重新拉取」：这个 VM 活着就立刻重新同步
+        withScope {
+            eclassRefreshBus.requests.collect { kind ->
+                if (kind == EclassRefreshBus.Kind.DDL) updateEclassDdl()
+            }
         }
     }
 
@@ -256,36 +268,16 @@ internal class DDLScheduleViewModel @Inject constructor(
      *
      * @return 是否成功拉到数据
      */
-    suspend fun updateEclassDdl(): Boolean {
-        return try {
-            val items = eclassRepo.fetchHomework()
-            if (items.isEmpty()) return false
-
-            val existItems = HashMap<String, DDLScheduleEntity>()
-            ddlScheduleRepo.getDDLByUIDs(items.map { it.uid }).forEach { existItems[it.uid] = it }
-
-            items.forEach { item ->
-                val entity = DDLScheduleEntity(
-                    id = 0,
-                    uid = item.uid,
-                    group = EclassDdlLogic.GROUP,
-                    title = item.title,
-                    text = item.text,
-                    time = item.time,
-                    done = false,
-                )
-                val old = existItems[item.uid]
-                if (old == null) {
-                    ddlScheduleRepo.insertDDL(entity)
-                } else {
-                    // 保留 id 与完成状态
-                    ddlScheduleRepo.updateDDL(entity.copy(id = old.id, done = old.done))
-                }
-            }
-            true
-        } catch (e: Exception) {
-            Log.e("DDLScheduleViewModel", "update eclass ddl error", e)
-            false
-        }
-    }
+    /**
+     * 从延河课堂（eclass）同步作业。
+     *
+     * 实现已抽到 [EclassDdlSyncer]（单例）：DDL 设置页的「重新拉取延河课堂作业」
+     * 也用同一份合并规则，两处不可能改歪一条。
+     *
+     * ⚠️ **未登录不是错误**：拉不到就静默返回 false —— 这条源是"有就更好"，
+     * 不该因为它没配好就打断使用。
+     *
+     * @return 是否成功拉到数据
+     */
+    suspend fun updateEclassDdl(): Boolean = eclassDdlSyncer.sync()
 }

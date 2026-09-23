@@ -52,10 +52,25 @@ internal class DefaultEclassRepo @Inject constructor(
         val activities: List<Activity>,
     )
 
-    override suspend fun isSessionAlive(): Boolean =
-        runCatching { apiManager.api.eclass.getVisitedCourses() }
-            .map { it.isSuccessful }
-            .getOrDefault(false)
+    /**
+     * 会话是否可用。
+     *
+     * ⚠️ **失败不等于未登录**：这是一次真实网络请求，超时 / 服务器 5xx /
+     * 校园网抖动都会让它失败 —— 曾经只试一次，结果「动态页显示未登录、
+     * 设置页检查又是已登录」，用户只能重启 App（v1.7.8 修复）。
+     * 所以这里：① 先把 WebView 的 cookie 同步过来（登录刚完成时 OkHttp
+     * 的 jar 里可能还是旧会话）；② 失败再试一次，两次都失败才说未登录。
+     */
+    override suspend fun isSessionAlive(): Boolean {
+        syncCookies()
+        repeat(2) {
+            val ok = runCatching { apiManager.api.eclass.getVisitedCourses() }
+                .map { it.isSuccessful }
+                .getOrDefault(false)
+            if (ok) return true
+        }
+        return false
+    }
 
     override suspend fun fetchHomework(now: LocalDateTime): List<EclassDdlItem> =
         fetchRawActivities()
