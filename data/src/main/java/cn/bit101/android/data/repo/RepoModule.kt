@@ -35,6 +35,13 @@ internal abstract class RepoModule {
         scheduleRepo: DefaultCoursesRepo
     ): CoursesRepo
 
+    /** 手动修改课程表（覆盖层）—— 只写 `course_overlay`，读路径的合并由 `CoursesRepo` 负责。 */
+    @Binds
+    @Singleton
+    abstract fun bindCourseOverlayRepo(
+        overlayRepo: DefaultCourseOverlayRepo
+    ): CourseOverlayRepo
+
     @Binds
     @Singleton
     abstract fun bindPosterRepo(

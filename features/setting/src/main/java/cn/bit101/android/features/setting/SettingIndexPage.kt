@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.EditCalendar
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NotificationsNone
@@ -54,6 +55,12 @@ internal fun SettingIndexPage(
             subTitle = "课程表数据及显示方式",
             icon = Icons.Outlined.EditCalendar,
             onClick = { navController.navigate("calendar") },
+        ),
+        SettingItemData.IndexCard(
+            title = "手动修改课程表",
+            subTitle = "改教室 / 隐藏课程 / 补录漏掉的课",
+            icon = Icons.Outlined.EditNote,
+            onClick = { navController.navigate("course-edit") },
         ),
         SettingItemData.IndexCard(
             title = "DDL设置",

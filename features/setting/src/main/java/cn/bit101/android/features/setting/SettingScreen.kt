@@ -138,6 +138,16 @@ fun SettingScreen(
             }
         }
 
+        composable("course-edit") {
+            SettingPage(
+                mainController = mainController,
+                title = "手动修改课程表",
+                navController = navController,
+            ) {
+                CourseEditPage(mainController = mainController)
+            }
+        }
+
         composable("notify") {
             SettingPage(
                 mainController = mainController,
