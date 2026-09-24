@@ -46,9 +46,6 @@ class WidgetRefreshWorker(
             // 顺带把「我的预约」也刷新一次 —— 组件上的座位状态（已预约/使用中/暂离）
             // 只有拉了数据才会变。失败在座位侧静默记日志，不影响组件重绘。
             SeatWidgetBridgeHolder.refreshReservations()
-            // 用 renderAllNow（而不是异步的 requestRenderAll）：
-            // 在 Worker 自己的协程里同步渲染完再返回，避免 doWork 返回后协程被收走、
-            // 渲染半途夭折。单次渲染是「读一次 Room + 构建布局 + 下发」，百毫秒级。
             BIT101WidgetProvider.renderAllNow(applicationContext)
         }
         return Result.success()

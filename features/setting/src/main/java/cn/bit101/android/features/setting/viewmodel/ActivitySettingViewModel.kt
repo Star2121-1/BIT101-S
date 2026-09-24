@@ -1,15 +1,14 @@
 package cn.bit101.android.features.setting.viewmodel
 
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.setting.base.ActivitySettings
 import cn.bit101.android.data.eclass.EclassRefreshBus
 import cn.bit101.android.data.repo.base.EclassRepo
-import cn.bit101.android.data.school.LexueUrls
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import cn.bit101.android.data.school.LexueUrls
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -25,11 +24,11 @@ import javax.inject.Inject
 @HiltViewModel
 internal class ActivitySettingViewModel @Inject constructor(
     private val activitySettings: ActivitySettings,
-    private val eclassRepo: EclassRepo,
+    override val eclassRepo: EclassRepo,
     private val lexueUrls: LexueUrls,
     /** 跨页刷新总线：设置页发请求，活着的动态页 VM 收到就重新取数。 */
     private val eclassRefreshBus: EclassRefreshBus,
-) : ViewModel() {
+) : EclassSessionViewModel() {
 
     val onlyHomework = activitySettings.onlyHomework
     val limit = activitySettings.limit
@@ -37,10 +36,6 @@ internal class ActivitySettingViewModel @Inject constructor(
 
     /** 条数上限的可选项 —— 不给自由输入，免得填出「只显示 1 条」这种怪值。 */
     val limitOptions = listOf(30, 60, 100)
-
-    /** 延河课堂会话是否可用：`null` = 还在检查。 */
-    private val _eclassSessionAlive = MutableStateFlow<Boolean?>(null)
-    val eclassSessionAlive: StateFlow<Boolean?> = _eclassSessionAlive.asStateFlow()
 
     /** 当前环境下的乐学主页地址；空表示还没取到。 */
     private val _lexueHome = MutableStateFlow("")
@@ -56,15 +51,6 @@ internal class ActivitySettingViewModel @Inject constructor(
     fun setLimit(value: Int) = write { activitySettings.limit.set(value) }
 
     fun setShowExpired(value: Boolean) = write { activitySettings.showExpired.set(value) }
-
-    /** 重新检查延河课堂会话 —— 用户可能刚在 WebView 里登录完回来。 */
-    fun checkEclassSession() {
-        viewModelScope.launch {
-            _eclassSessionAlive.value = null
-            _eclassSessionAlive.value =
-                runCatching { eclassRepo.isSessionAlive() }.getOrDefault(false)
-        }
-    }
 
     /**
      * 「重新拉取动态」：广播给动态页（活着就立刻刷新），并顺手复查会话状态。

@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.data.school.CampusCardLogic
 import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.component.Avatar
@@ -349,21 +350,14 @@ fun UserScreen(
  */
 @Composable
 private fun CampusServiceSection(mainController: MainController) {
-    val vm: CampusCardViewModel = hiltViewModel()
+    val vm: CampusServiceViewModel = hiltViewModel()
 
     val snapshot by vm.snapshot.collectAsState()
     val netInfo by vm.netInfo.collectAsState()
     val loading by vm.loading.collectAsState()
     val fetched by vm.fetched.collectAsState()
 
-    // 一卡通余额摘要：取解析出的第一个候选值（标签去重过）
-    val balanceText = when {
-        loading && !fetched -> "获取中…"
-        snapshot == null -> "获取失败，点重试"
-        snapshot?.loggedIn == false -> "点开登录后显示"
-        else -> snapshot?.entries?.firstOrNull()?.let { "¥${it.second}" }
-            ?: "未识别到余额"
-    }
+    val balanceText = CampusCardLogic.balanceText(snapshot, loading, fetched)
 
     // 校园网摘要：流量 + 余额；取不到时提示需校园网
     val netText = when {

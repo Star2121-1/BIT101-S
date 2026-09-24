@@ -21,11 +21,9 @@ object CampusCardLogic {
     /**
      * 解析首页响应。
      *
-     * ⚠️ **「未登录」用最终 URL 判定，绝不用 HTML 关键词** —— 首页正文里
-     * 完全可能含「统一身份认证」之类的文案（菜单/页脚），按关键词判会把
-     * 已登录页误判成登录页（v1.8.0 的实测 bug：登录后卡片永远显示
-     * 「点开登录后显示」）。未登录时服务端会 302 到 CAS，OkHttp 跟随重定向后
-     * `finalUrl` 的主机就是 `sso.bit.edu.cn` —— 这是唯一可靠的信号。
+     * ⚠️ **「未登录」只看最终 URL**：未登录时服务端 302 到 CAS（`finalUrl` 主机是
+     * `sso.bit.edu.cn`）。**不能按 HTML 关键词判** —— 首页正文本身含「统一身份认证」
+     * 文案，v1.8.0 因此把已登录页误判成未登录（卡片永远显示「点开登录」）。
      *
      * @param html 首页响应体（可能为空 = 网络失败）
      * @param finalUrl 跟随重定向之后的最终地址
@@ -48,5 +46,13 @@ object CampusCardLogic {
             htmlSnippet = html.take(1200),
             loggedIn = loggedIn,
         )
+    }
+
+    /** 余额摘要文案（「我」页卡片与详情页共用；纯函数，可单测）。 */
+    fun balanceText(snapshot: CampusCardSnapshot?, loading: Boolean, fetched: Boolean): String = when {
+        loading && !fetched -> "获取中…"
+        snapshot == null -> "获取失败"
+        !snapshot.loggedIn -> "未登录，点开登录后显示"
+        else -> snapshot.entries.firstOrNull()?.let { "¥${it.second}" } ?: "未识别到余额"
     }
 }

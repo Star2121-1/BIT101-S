@@ -23,12 +23,7 @@ import javax.inject.Singleton
  * `*.bit.edu.cn` 域内），cookie 落在全局 CookieManager；每次抓取前
  * 先把 WebView 的 cookie 同步进 OkHttp 的 jar。
  *
- * ## 登录判定
- *
- * **看重定向之后的最终 URL**（未登录时服务端 302 到 CAS gate），
- * 不看 HTML 内容 —— 首页正文里可能有「统一身份认证」文案，按内容判
- * 会把已登录页误判成登录页（v1.8.0 实测 bug）。解析逻辑在
- * [CampusCardLogic]（纯函数，有单测）。
+ * 登录判定与解析规则见 [CampusCardLogic]（纯函数，有单测）。
  */
 @Singleton
 internal class DefaultCampusCardRepo @Inject constructor(

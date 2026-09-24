@@ -154,25 +154,14 @@ internal class DDLScheduleViewModel @Inject constructor(
 
     // 获取和当前时间差的表述字符串
     fun remainTime(time: LocalDateTime): String {
-        val now = LocalDateTime.now()
-        var diff = now.until(time, java.time.temporal.ChronoUnit.MINUTES)
-        var s = ""
-        s += if (diff < 0) {
-            "已过 "
-        } else
-            "剩余 "
-        diff = Math.abs(diff)
-        val day = diff / 1440
-        val hour = (diff % 1440) / 60
-        val minute = diff % 60
-        s += if (day > 0) {
-            "${day}天 ${hour}小时 ${minute}分钟"
-        } else if (hour > 0) {
-            "${hour}小时 ${minute}分钟"
-        } else {
-            "${minute}分钟"
+        val diff = LocalDateTime.now().until(time, java.time.temporal.ChronoUnit.MINUTES)
+        val a = kotlin.math.abs(diff)
+        val span = when {
+            a >= 1440 -> "${a / 1440}天 ${a % 1440 / 60}小时 ${a % 60}分钟"
+            a >= 60 -> "${a / 60}小时 ${a % 60}分钟"
+            else -> "${a}分钟"
         }
-        return s
+        return if (diff < 0) "已过 $span" else "剩余 $span"
     }
 
 

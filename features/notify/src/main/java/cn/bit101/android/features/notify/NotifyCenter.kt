@@ -56,56 +56,30 @@ internal object NotifyCenter {
     /** 网费提醒固定 id：每天至多一条（NetFeeChecker 按天去重）。 */
     private const val NOTIFY_ID_NETFEE = 42001
 
+    /** 建一个渠道（幂等：已存在就跳过）。 */
+    private fun ensureChannel(
+        manager: NotificationManager,
+        id: String,
+        name: String,
+        importance: Int,
+        description: String,
+    ) {
+        if (manager.getNotificationChannel(id) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(id, name, importance).apply { this.description = description }
+        )
+    }
+
     /** 建渠道。幂等，可重复调用（系统只在首次真正创建）。 */
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
 
-        if (manager.getNotificationChannel(CHANNEL_CLASS) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_CLASS,
-                    "上课提醒",
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply { description = "上课前提醒，显示节次、课程名与教室" }
-            )
-        }
-        if (manager.getNotificationChannel(CHANNEL_DDL) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_DDL,
-                    "作业截止",
-                    NotificationManager.IMPORTANCE_HIGH,
-                ).apply { description = "作业/DDL 截止前提醒" }
-            )
-        }
-        if (manager.getNotificationChannel(CHANNEL_SEAT) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_SEAT,
-                    "座位签到",
-                    NotificationManager.IMPORTANCE_HIGH,
-                ).apply { description = "预约座位的签到时限提醒（错过会记违约）" }
-            )
-        }
-        if (manager.getNotificationChannel(CHANNEL_SCORE) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_SCORE,
-                    "出分提醒",
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply { description = "有新课出分时提醒（通知里不含分数）" }
-            )
-        }
-        if (manager.getNotificationChannel(CHANNEL_NETFEE) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_NETFEE,
-                    "网费不足",
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply { description = "校园网账户余额不足时提醒充值（每日至多一次）" }
-            )
-        }
+        ensureChannel(manager, CHANNEL_CLASS, "上课提醒", NotificationManager.IMPORTANCE_DEFAULT, "上课前提醒，显示节次、课程名与教室")
+        ensureChannel(manager, CHANNEL_DDL, "作业截止", NotificationManager.IMPORTANCE_HIGH, "作业/DDL 截止前提醒")
+        ensureChannel(manager, CHANNEL_SEAT, "座位签到", NotificationManager.IMPORTANCE_HIGH, "预约座位的签到时限提醒（错过会记违约）")
+        ensureChannel(manager, CHANNEL_SCORE, "出分提醒", NotificationManager.IMPORTANCE_DEFAULT, "有新课出分时提醒（通知里不含分数）")
+        ensureChannel(manager, CHANNEL_NETFEE, "网费不足", NotificationManager.IMPORTANCE_DEFAULT, "校园网账户余额不足时提醒充值（每日至多一次）")
     }
 
     /**
@@ -136,7 +110,9 @@ internal object NotifyCenter {
                 if (urgent) NotificationCompat.PRIORITY_HIGH
                 else NotificationCompat.PRIORITY_DEFAULT
             )
-            .setContentIntent(gotoIntent(context, reminder))
+            .setContentIntent(
+                gotoPendingIntent(context, reminder.key.hashCode(), reminder.route, reminder.key.hashCode().toString())
+            )
             .build()
 
         // 权限被拒时 notify 会抛 SecurityException —— 静默放弃（设置页会提示去授权）
@@ -160,7 +136,7 @@ internal object NotifyCenter {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(gotoScoresIntent(context))
+            .setContentIntent(gotoPendingIntent(context, NOTIFY_ID_SCORES, PageShowOnNav.BIT101Web.toPageData().value, "scores"))
             .build()
         runCatching {
             NotificationManagerCompat.from(context).notify(NOTIFY_ID_SCORES, notification)
@@ -183,58 +159,29 @@ internal object NotifyCenter {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(gotoMineIntent(context))
+            .setContentIntent(gotoPendingIntent(context, NOTIFY_ID_NETFEE, PageShowOnNav.Mine.toPageData().value, "netfee"))
             .build()
         runCatching {
             NotificationManagerCompat.from(context).notify(NOTIFY_ID_NETFEE, notification)
         }
     }
 
-    private fun gotoMineIntent(context: Context): PendingIntent {
+    /** 跳 App 的 PendingIntent（data 唯一化，避免系统复用导致跳错页）。 */
+    private fun gotoPendingIntent(
+        context: Context,
+        requestCode: Int,
+        route: String,
+        dataSuffix: String,
+    ): PendingIntent {
         val intent = Intent().apply {
             setClassName(context.packageName, MAIN_ACTIVITY_CLASS)
-            putExtra(EXTRA_GOTO, PageShowOnNav.Mine.toPageData().value)
+            putExtra(EXTRA_GOTO, route)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            data = Uri.parse("bit101://notify/netfee")
+            data = Uri.parse("bit101://notify/$dataSuffix")
         }
         return PendingIntent.getActivity(
             context,
-            NOTIFY_ID_NETFEE,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
-
-    private fun gotoScoresIntent(context: Context): PendingIntent {
-        val intent = Intent().apply {
-            setClassName(context.packageName, MAIN_ACTIVITY_CLASS)
-            // 成绩在「网」页里（bit101.cn/score/）—— 跳到「网」这个底栏页，
-            // 用户再点一次成绩入口。⚠️ 不能直接 navigate 到 Web 路由：
-            // 那是带 url 参数的顶层路由，而 GotoRequest 的消费方（IndexScreen）
-            // 只认底栏页的 route 值，写别的会被静默忽略（点了没反应）
-            putExtra(EXTRA_GOTO, PageShowOnNav.BIT101Web.toPageData().value)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            data = Uri.parse("bit101://notify/scores")
-        }
-        return PendingIntent.getActivity(
-            context,
-            NOTIFY_ID_SCORES,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
-
-    private fun gotoIntent(context: Context, reminder: Reminder): PendingIntent {
-        val intent = Intent().apply {
-            setClassName(context.packageName, MAIN_ACTIVITY_CLASS)
-            putExtra(EXTRA_GOTO, reminder.route)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            // data 唯一化：不同提醒各自一个 PendingIntent，避免系统复用导致跳错页
-            data = Uri.parse("bit101://notify/${reminder.key.hashCode()}")
-        }
-        return PendingIntent.getActivity(
-            context,
-            reminder.key.hashCode(),
+            requestCode,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

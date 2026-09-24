@@ -57,8 +57,8 @@ class CampusNetLogicTest {
 
     @Test
     fun `流量与时长格式化`() {
-        // 389049551406 B = 362.3 GiB → ≥100 只保留整数
-        assertEquals("362 GB", CampusNetLogic.formatTraffic(389049551406L))
+        // 389049551406 B = 362.3 GiB（统一保留一位小数）
+        assertEquals("362.3 GB", CampusNetLogic.formatTraffic(389049551406L))
         assertEquals("1.5 GB", CampusNetLogic.formatTraffic(1610612736L))
         assertEquals("0.1 GB", CampusNetLogic.formatTraffic(107374182L))
 

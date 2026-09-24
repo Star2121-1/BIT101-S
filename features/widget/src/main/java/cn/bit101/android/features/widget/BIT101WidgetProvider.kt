@@ -186,10 +186,8 @@ class BIT101WidgetProvider : AppWidgetProvider() {
         }
 
         /**
-         * 同步渲染所有实例，**返回时已全部下发完毕**。
-         *
-         * 供 [WidgetRefreshWorker] 在自己的协程里调用 ——
-         * Worker 用异步版的话，`doWork` 一返回协程就可能被收走，渲染半途而废。
+         * 同步渲染所有实例，**返回时已全部下发完毕**（Worker 内必须同步渲染，
+         * 否则 `doWork` 返回后协程被收走、渲染半途而废）。
          *
          * @param forceEclass 周期刷新是「兜底拿最新」的场景，默认强制重拉动态。
          */

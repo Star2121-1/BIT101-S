@@ -41,10 +41,8 @@ object CampusNetLogic {
     }
 
     /** 字节 → GB（1024 进制，保留 1 位小数）。 */
-    fun formatTraffic(bytes: Long): String {
-        val gb = bytes / 1024.0 / 1024.0 / 1024.0
-        return if (gb >= 100) "${gb.toInt()} GB" else String.format("%.1f GB", gb)
-    }
+    fun formatTraffic(bytes: Long): String =
+        "%.1f GB".format(bytes / 1024.0 / 1024.0 / 1024.0)
 
     /** 秒 → 「x 天 x 小时」/「x 小时 x 分」/「x 分钟」。 */
     fun formatDuration(seconds: Long): String {

@@ -102,4 +102,16 @@ class CampusCardLogicTest {
         assertTrue(snap.loggedIn)
         assertTrue(snap.entries.isEmpty())
     }
+
+    /** 余额文案：登录后取第一个条目；未登录 / 失败各有降级文案。 */
+    @Test
+    fun `余额文案分支`() {
+        val logged = CampusCardLogic.parse(homeHtml, "https://dkykt.info.bit.edu.cn/home/openHomePageByCas")
+        assertEquals("¥128.50", CampusCardLogic.balanceText(logged, loading = false, fetched = true))
+        assertEquals("获取中…", CampusCardLogic.balanceText(logged, loading = true, fetched = false))
+        assertEquals("获取失败", CampusCardLogic.balanceText(null, loading = false, fetched = true))
+
+        val gate = CampusCardLogic.parse(gateHtml, "https://sso.bit.edu.cn/gate")
+        assertEquals("未登录，点开登录后显示", CampusCardLogic.balanceText(gate, false, true))
+    }
 }

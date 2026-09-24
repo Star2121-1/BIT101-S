@@ -19,7 +19,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -27,64 +26,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import cn.bit101.android.data.school.CampusCardLogic
 import cn.bit101.android.data.school.CampusNetInfo
 import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.data.school.CampusCardSnapshot
-import cn.bit101.android.data.repo.base.CampusCardRepo
-import cn.bit101.android.data.repo.base.CampusNetRepo
 import cn.bit101.android.features.common.MainController
-import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-/**
- * 「校园服务」详情页的数据：一卡通快照 + 校园网在线信息，一次刷新同时取。
- */
-@HiltViewModel
-internal class CampusServiceViewModel @Inject constructor(
-    private val campusCardRepo: CampusCardRepo,
-    private val campusNetRepo: CampusNetRepo,
-) : ViewModel() {
-
-    private val _snapshot = MutableStateFlow<CampusCardSnapshot?>(null)
-    val snapshot: StateFlow<CampusCardSnapshot?> = _snapshot.asStateFlow()
-
-    private val _netInfo = MutableStateFlow<CampusNetInfo?>(null)
-    val netInfo: StateFlow<CampusNetInfo?> = _netInfo.asStateFlow()
-
-    private val _loading = MutableStateFlow(false)
-    val loading: StateFlow<Boolean> = _loading.asStateFlow()
-
-    /** 已完成过一次刷新（区分「获取中」与「失败」）。 */
-    private val _fetched = MutableStateFlow(false)
-    val fetched: StateFlow<Boolean> = _fetched.asStateFlow()
-
-    init {
-        refresh()
-    }
-
-    fun refresh() {
-        if (_loading.value) return
-        viewModelScope.launch {
-            _loading.value = true
-            try {
-                val card = async { runCatching { campusCardRepo.fetchSnapshot() }.getOrNull() }
-                val net = async { runCatching { campusNetRepo.fetchOnlineInfo() }.getOrNull() }
-                _snapshot.value = card.await()
-                _netInfo.value = net.await()
-                _fetched.value = true
-            } finally {
-                _loading.value = false
-            }
-        }
-    }
-}
 
 /**
  * 「校园服务」详情页 —— 一卡通（余额摘要，流水待 cardpay 接口摸清后接入）+
@@ -104,8 +50,6 @@ fun CampusServiceScreen(
     val netInfo by vm.netInfo.collectAsState()
     val loading by vm.loading.collectAsState()
     val fetched by vm.fetched.collectAsState()
-
-    LaunchedEffect(Unit) { vm.refresh() }
 
     Scaffold(
         topBar = {
@@ -131,13 +75,10 @@ fun CampusServiceScreen(
         ) {
             // 一卡通
             SectionCard(title = "一卡通") {
-                val balanceText = when {
-                    loading && !fetched -> "获取中…"
-                    snapshot == null -> "获取失败"
-                    snapshot?.loggedIn == false -> "未登录（点右上角刷新前先在 WebView 登录过一次）"
-                    else -> snapshot?.entries?.firstOrNull()?.let { "¥${it.second}" } ?: "未识别到余额"
-                }
-                InfoRow(label = "账户余额", value = balanceText)
+                InfoRow(
+                    label = "账户余额",
+                    value = CampusCardLogic.balanceText(snapshot, loading, fetched),
+                )
                 InfoRow(
                     label = "数据来源",
                     value = "延河一卡通（dkykt.info.bit.edu.cn）",

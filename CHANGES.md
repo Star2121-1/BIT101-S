@@ -1,5 +1,21 @@
 # CHANGES
 
+## 2026-09-25 v1.9.1 代码质量重构（重复合并 / 简化 / 注释精简，无行为变化）
+
+- **合并两个完全相同的 VM**：`CampusCardViewModel` 与 `CampusServiceViewModel`
+  → 统一为 `CampusServiceViewModel`（我页卡片与详情页共用）；顺带删掉详情页
+  多余的 `LaunchedEffect { refresh() }`（VM init 已刷新）
+- **设置页去重**：新增 `EclassSessionViewModel` 基类（DDL / 动态设置页共用会话检查）；
+  `eclassSessionText` 收敛为一份
+- **NotifyCenter 抽 helper**：5 段渠道创建 → `ensureChannel(...)`；
+  3 段 PendingIntent 构造 → `gotoPendingIntent(...)`（约省 46 行）
+- **简化**：`fold`→`getOrElse`、`if/else`→`||`、DDL `remainTime` 单表达式、
+  流量格式化统一一位小数；余额文案抽 `CampusCardLogic.balanceText`（卡片/详情共用，含单测）
+- **注释精简**：删 `WidgetRefreshWorker` 重复块、合并 `WidgetLogic` 双 KDoc、
+  跨文件重复讲解（eclass 会话判定 / 同步渲染）收敛到唯一出处、
+  删 `LexueUrls`「谁在用」套话、v1.7.x 迁移史压成一行
+- 五模块 270 条单测全过；行为无变化
+
 ## 2026-09-24 v1.9.0 校园网原生数据 + 校园服务详情页 + 网费不足提醒
 
 - **校园网（深澜 Srun）免登录接口接入**：`10.0.0.55/cgi-bin/rad_user_info`

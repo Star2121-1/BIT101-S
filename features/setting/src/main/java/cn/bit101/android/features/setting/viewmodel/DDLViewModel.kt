@@ -1,7 +1,6 @@
 package cn.bit101.android.features.setting.viewmodel
 
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.setting.base.DDLSettings
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
@@ -12,9 +11,6 @@ import cn.bit101.android.data.repo.base.LoginRepo
 import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.common.helper.withSimpleStateLiveData
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -25,8 +21,8 @@ internal class DDLViewModel @Inject constructor(
     private val ddlSettings: DDLSettings,
     /** 延河课堂作业同步器（与 DDL 页共用同一份合并规则，见类注释）。 */
     private val eclassDdlSyncer: EclassDdlSyncer,
-    private val eclassRepo: EclassRepo,
-) : ViewModel() {
+    override val eclassRepo: EclassRepo,
+) : EclassSessionViewModel() {
 
     val beforeDayFlow = ddlSettings.beforeDay.flow
 
@@ -38,21 +34,8 @@ internal class DDLViewModel @Inject constructor(
 
     val updateEclassDdlStateLiveData = MutableLiveData<SimpleState?>()
 
-    /** 延河课堂会话是否可用：`null` = 还在检查（与动态设置页同判据）。 */
-    private val _eclassSessionAlive = MutableStateFlow<Boolean?>(null)
-    val eclassSessionAlive: StateFlow<Boolean?> = _eclassSessionAlive.asStateFlow()
-
     init {
         checkEclassSession()
-    }
-
-    /** 重新检查延河课堂会话 —— 用户可能刚在 WebView 里登录完回来。 */
-    fun checkEclassSession() {
-        viewModelScope.launch {
-            _eclassSessionAlive.value = null
-            _eclassSessionAlive.value =
-                runCatching { eclassRepo.isSessionAlive() }.getOrDefault(false)
-        }
     }
 
     /**

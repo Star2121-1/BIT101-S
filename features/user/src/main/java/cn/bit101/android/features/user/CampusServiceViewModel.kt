@@ -2,10 +2,10 @@ package cn.bit101.android.features.user
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import cn.bit101.android.data.school.CampusCardSnapshot
-import cn.bit101.android.data.school.CampusNetInfo
 import cn.bit101.android.data.repo.base.CampusCardRepo
 import cn.bit101.android.data.repo.base.CampusNetRepo
+import cn.bit101.android.data.school.CampusCardSnapshot
+import cn.bit101.android.data.school.CampusNetInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,15 +15,13 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * 「我」页「校园服务」卡片的数据：一卡通快照 + 校园网在线信息，一次刷新同时取。
+ * 校园服务（一卡通 + 校园网）的唯一 ViewModel ——「我」页卡片与详情页共用。
  *
- * ⚠️ 一卡通快照**依赖 WebView 登录**：没登录过时首页 302 到 CAS →
- * `loggedIn = false`，UI 显示「点开登录」而不是报错。
- * 校园网数据免登录，但**仅校园网环境可取**（10.0.0.55 是内网地址），
- * 取不到时 `netInfo = null`。
+ * 两个数据源并发取，各自独立失败（一卡通靠 WebView 会话；校园网仅校园网内可达）：
+ * 任一失败其对应字段为 null，UI 自行降级，不互相影响。
  */
 @HiltViewModel
-internal class CampusCardViewModel @Inject constructor(
+internal class CampusServiceViewModel @Inject constructor(
     private val campusCardRepo: CampusCardRepo,
     private val campusNetRepo: CampusNetRepo,
 ) : ViewModel() {
@@ -37,7 +35,7 @@ internal class CampusCardViewModel @Inject constructor(
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
-    /** 已完成过一次刷新（决定卡片显示「获取中」还是「失败/点开登录」）。 */
+    /** 已完成过一次刷新（决定 UI 显示「获取中」还是降级文案）。 */
     private val _fetched = MutableStateFlow(false)
     val fetched: StateFlow<Boolean> = _fetched.asStateFlow()
 
