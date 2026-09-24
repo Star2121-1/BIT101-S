@@ -29,12 +29,19 @@ internal class DefaultCampusNetRepo @Inject constructor() : CampusNetRepo {
         .build()
 
     override suspend fun fetchOnlineInfo(): CampusNetInfo? = withContext(Dispatchers.IO) {
-        runCatching {
+        val (info, debug) = runCatching {
             client.newCall(
                 okhttp3.Request.Builder().url(URL).build()
             ).execute().use { resp ->
-                CampusNetLogic.parse(resp.body?.string().orEmpty())
+                val body = resp.body?.string().orEmpty()
+                CampusNetLogic.parse(body) to "status=${resp.code} len=${body.length} body=${body.take(120)}"
             }
-        }.getOrNull()
+        }.fold(
+            onSuccess = { it },
+            onFailure = { null to "请求异常: ${it.message}" },
+        )
+        // 调试：UI 直读（厂商压制 logcat，日志不可靠）
+        cn.bit101.android.data.school.CampusDebugStore.netDebug = debug
+        info
     }
 }

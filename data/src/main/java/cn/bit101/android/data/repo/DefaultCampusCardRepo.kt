@@ -66,7 +66,7 @@ internal class DefaultCampusCardRepo @Inject constructor(
 
         CampusCardLogic.parse(html, finalUrl).also {
             // 调试期：真机跑一次就能从 logcat 看到首页真实形态，据此写精确解析
-            android.util.Log.d(
+            android.util.Log.i(
                 "CampusCardRepo",
                 "finalUrl=$finalUrl len=${it.htmlSnippet.length} loggedIn=${it.loggedIn} " +
                     "entries=${it.entries} head=${it.htmlSnippet.take(200)}",

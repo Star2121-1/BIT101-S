@@ -37,6 +37,15 @@
         </trust-anchors>
     </base-config>
 
+    <!--
+      校园网自助（深澜 Srun）：`http://10.0.0.55` 是纯 HTTP 内网服务，
+      没有证书可言 —— 只对这个内网 IP 放行明文（2026-09-24）。
+      不影响其他域名的 HTTPS 校验策略。
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.0.55</domain>
+    </domain-config>
+
     <!-- 仅对 seatlib 追加缺失的中间证书 -->
     <domain-config>
         <domain includeSubdomains="true">seatlib.bit.edu.cn</domain>

@@ -58,13 +58,20 @@ fun main() = runBlocking {
         val openid = Regex("openid=([A-F0-9]+)").find(body)?.groupValues?.get(1)
         if (openid != null) {
             runCatching {
-                val acc = session.get("https://dkykt.info.bit.edu.cn/myaccount/openMyAccount?openid=$openid")
+                val myUrl = "https://dkykt.info.bit.edu.cn/myaccount/openMyAccount?openid=$openid"
+                // 先过一遍充值登录页（可能只是建立临时会话 cookie），再回查
+                val warm = session.get("https://dkykt.info.bit.edu.cn/cardpay/openCardRechargeLogin?temporaryopen=true")
+                println("[WARM] status=${warm.status}")
+                val acc = session.get(myUrl)
                 println("[ACC] status=${acc.status} len=${acc.bodyText.length} finalUrl=${acc.url}")
-                println("[ACC] head=${acc.bodyText.take(1200)}")
-                // 页内所有链接/表单 action
+                println("[ACC] head=${acc.bodyText.take(2000)}")
                 Regex("(?:href|action)=\"([^\"]+)\"[^>]*>([^<]{0,20})").findAll(acc.bodyText).forEach {
                     println("[ACC-LINK] ${it.groupValues[2].trim()} -> ${it.groupValues[1]}")
                 }
+                // 带学工号再试一次（cardpay 体系似乎只认学号）
+                val acc2 = session.get("https://dkykt.info.bit.edu.cn/myaccount/openMyAccount?openid=$openid&idserial=1120241355")
+                println("[ACC2] status=${acc2.status} len=${acc2.bodyText.length} finalUrl=${acc2.url}")
+                println("[ACC2] head=${acc2.bodyText.take(800)}")
             }.onFailure { println("[ACC] 失败: ${it.message}") }
         }
 
