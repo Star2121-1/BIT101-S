@@ -328,7 +328,15 @@ fun UserScreen(
             onOpenFollowingPage = { mainController.navigate(NavDest.FollowList(NavDest.FollowList.FOLLOWING)) },
         )
     } else {
-        ErrorMessageForPage()
+        // ⚠️ BIT101 接口失败时**校园服务卡仍要显示**：一卡通/校园网走的是
+        // 学校域（dkykt/netpay），与 BIT101 的可用性无关 —— 2026-09-24 实测
+        // BIT101 全站宕机时「我」页整页变成错误页，校园卡被连带挡住。
+        Column {
+            if (id == 0L) {
+                CampusServiceSection(mainController = mainController)
+            }
+            ErrorMessageForPage()
+        }
     }
 }
 

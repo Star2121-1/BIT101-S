@@ -38,3 +38,21 @@ dependencies {
 
     api 'com.github.BIT101-dev.BIT-Login:bit-login:v4.0.2'
 }
+// 临时探针：一卡通 CAS 登录 + 首页抓取（凭据走 -P 参数，不落盘）
+tasks.register("runProbe", JavaExec) {
+    group = "probe"
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = "cn.bit101.api.probe.CampusCardProbeKt"
+    standardInput = System.in
+    environment("probe.sid", project.findProperty("sid") ?: "")
+    environment("probe.pwd", project.findProperty("pwd") ?: "")
+    environment("probe.sms", project.findProperty("sms") ?: "")
+    doFirst {
+        mainClass.set("cn.bit101.api.probe.CampusCardProbeKt")
+    }
+}
+
+// 临时：探针需要 coroutines（随探针一起移除）
+dependencies {
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0'
+}
