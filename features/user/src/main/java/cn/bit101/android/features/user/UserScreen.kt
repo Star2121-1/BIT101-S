@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.component.Avatar
 import cn.bit101.android.features.common.component.CircularProgressIndicatorForPage
@@ -341,30 +342,35 @@ fun UserScreen(
 }
 
 /**
- * 「校园服务」卡片区（仅本人页显示）。
+ * 「校园服务」卡片区（仅本人页显示）—— 点击进**原生详情页**，不跳网页。
  *
- * 一卡通：余额摘要 + 点击进 App 内 WebView（CAS 登录在 WebView 里完成，
- * cookie 落在全局 CookieManager，[CampusCardViewModel] 的快照请求与之共享会话）。
- *
- * 校园网（`netpay.bit.edu.cn:8091`）：接口形态未确认（`entry=dingtalk` 疑似
- * 只认钉钉免登），首版只给 WebView 入口 —— 用户在 WebView 里登录一次后
- * 会话同样留在 CookieManager，等抓包确认接口后再升级原生。
+ * 一卡通：余额摘要（WebView 登录一次后 cookie 与快照请求共享会话）。
+ * 校园网：免登录 Srun 自助接口（仅校园网环境可取），显示已用流量与余额摘要。
  */
 @Composable
 private fun CampusServiceSection(mainController: MainController) {
     val vm: CampusCardViewModel = hiltViewModel()
 
     val snapshot by vm.snapshot.collectAsState()
+    val netInfo by vm.netInfo.collectAsState()
     val loading by vm.loading.collectAsState()
     val fetched by vm.fetched.collectAsState()
 
-    // 余额摘要：取解析出的第一个候选值（标签去重过）；没有就按状态给文案
+    // 一卡通余额摘要：取解析出的第一个候选值（标签去重过）
     val balanceText = when {
         loading && !fetched -> "获取中…"
         snapshot == null -> "获取失败，点重试"
         snapshot?.loggedIn == false -> "点开登录后显示"
-        else -> snapshot?.entries?.firstOrNull()?.let { "${it.first} ¥${it.second}" }
-            ?: "未识别到余额，点开查看"
+        else -> snapshot?.entries?.firstOrNull()?.let { "¥${it.second}" }
+            ?: "未识别到余额"
+    }
+
+    // 校园网摘要：流量 + 余额；取不到时提示需校园网
+    val netText = when {
+        loading && !fetched -> "获取中…"
+        netInfo == null -> "需连接校园网"
+        else -> "已用 " + CampusNetLogic.formatTraffic(netInfo!!.bytesTotal) +
+            " · 余额 ¥%.2f".format(netInfo!!.balanceYuan)
     }
 
     Row(
@@ -378,7 +384,7 @@ private fun CampusServiceSection(mainController: MainController) {
             modifier = Modifier
                 .weight(1f)
                 .clip(MaterialTheme.shapes.medium)
-                .clickable { mainController.openWebPage(CampusCardViewModel.CAMPUS_CARD_URL) },
+                .clickable { mainController.navigate(NavDest.CampusService) },
             color = MaterialTheme.colorScheme.secondaryContainer,
             shape = MaterialTheme.shapes.medium,
         ) {
@@ -409,7 +415,7 @@ private fun CampusServiceSection(mainController: MainController) {
             modifier = Modifier
                 .weight(1f)
                 .clip(MaterialTheme.shapes.medium)
-                .clickable { mainController.openWebPage(CampusCardViewModel.CAMPUS_NET_URL) },
+                .clickable { mainController.navigate(NavDest.CampusService) },
             color = MaterialTheme.colorScheme.secondaryContainer,
             shape = MaterialTheme.shapes.medium,
         ) {
@@ -421,12 +427,14 @@ private fun CampusServiceSection(mainController: MainController) {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "网费与套餐",
+                    text = netText,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "在 App 内打开",
+                    text = "点开详情",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
                 )

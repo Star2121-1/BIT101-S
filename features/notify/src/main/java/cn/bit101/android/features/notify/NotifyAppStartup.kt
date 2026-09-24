@@ -29,6 +29,7 @@ object NotifyAppStartup {
             NotifySentStore.init(context)
             NotifyCenter.ensureChannels(context)
             NotifySentStore.prune()
+            NetFeeCheckWorker.ensureScheduled(context)
         }
 
         runCatching {

@@ -31,6 +31,12 @@ internal abstract class RepoModule {
 
     @Binds
     @Singleton
+    abstract fun bindCampusNetRepo(
+        campusNetRepo: DefaultCampusNetRepo
+    ): CampusNetRepo
+
+    @Binds
+    @Singleton
     abstract fun bindVersionRepo(
         versionRepo: DefaultVersionRepo
     ): VersionRepo

@@ -43,12 +43,18 @@ internal object NotifyCenter {
      */
     private const val CHANNEL_SCORE = "score_reminder"
 
+    /** 网费不足提醒（校园网，与四类提醒独立：BIT101 不在线也该提醒）。 */
+    const val CHANNEL_NETFEE = "netfee_reminder"
+
     /** 点击通知打开 App 的入口（与组件共用同一套 `bit101_goto` 约定）。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"
     private const val EXTRA_GOTO = "bit101_goto"
 
     /** 出分提醒用固定 id：多次出分只更新同一条，不刷屏。 */
     private const val NOTIFY_ID_SCORES = 41001
+
+    /** 网费提醒固定 id：每天至多一条（NetFeeChecker 按天去重）。 */
+    private const val NOTIFY_ID_NETFEE = 42001
 
     /** 建渠道。幂等，可重复调用（系统只在首次真正创建）。 */
     fun ensureChannels(context: Context) {
@@ -89,6 +95,15 @@ internal object NotifyCenter {
                     "出分提醒",
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply { description = "有新课出分时提醒（通知里不含分数）" }
+            )
+        }
+        if (manager.getNotificationChannel(CHANNEL_NETFEE) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_NETFEE,
+                    "网费不足",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { description = "校园网账户余额不足时提醒充值（每日至多一次）" }
             )
         }
     }
@@ -150,6 +165,44 @@ internal object NotifyCenter {
         runCatching {
             NotificationManagerCompat.from(context).notify(NOTIFY_ID_SCORES, notification)
         }
+    }
+
+    /**
+     * 发网费不足提醒（固定 id：每天至多一条，去重在 [NetFeeChecker]）。
+     *
+     * 跳转走「我」底栏页 —— 校园服务卡在那儿（内网详情页校外打不开，
+     * 别把用户带到一张空页）。
+     */
+    fun notifyNetFee(context: Context, balance: Double) {
+        ensureChannels(context)
+        val text = "校园网余额仅剩 ¥%.2f（低于 ${NetFeeChecker.THRESHOLD_YUAN} 元），记得充值".format(balance)
+        val notification = NotificationCompat.Builder(context, CHANNEL_NETFEE)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("网费不足")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(gotoMineIntent(context))
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify(NOTIFY_ID_NETFEE, notification)
+        }
+    }
+
+    private fun gotoMineIntent(context: Context): PendingIntent {
+        val intent = Intent().apply {
+            setClassName(context.packageName, MAIN_ACTIVITY_CLASS)
+            putExtra(EXTRA_GOTO, PageShowOnNav.Mine.toPageData().value)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            data = Uri.parse("bit101://notify/netfee")
+        }
+        return PendingIntent.getActivity(
+            context,
+            NOTIFY_ID_NETFEE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun gotoScoresIntent(context: Context): PendingIntent {

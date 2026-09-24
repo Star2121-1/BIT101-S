@@ -25,6 +25,7 @@ import cn.bit101.android.features.common.nav.composableEdit
 import cn.bit101.android.features.common.nav.composableFollowList
 import cn.bit101.android.features.common.nav.composableIndex
 import cn.bit101.android.features.common.nav.composableLogin
+import cn.bit101.android.features.common.nav.composableCampusService
 import cn.bit101.android.features.common.nav.composableMessage
 import cn.bit101.android.features.common.nav.composablePost
 import cn.bit101.android.features.common.nav.composablePoster
@@ -46,6 +47,7 @@ import cn.bit101.android.features.report.ReportScreen
 import cn.bit101.android.features.setting.SettingScreen
 import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.user.MyFollowListScreen
+import cn.bit101.android.features.user.CampusServiceScreen
 import cn.bit101.android.features.user.UserScreen
 import cn.bit101.android.features.versions.UpdateDialog
 import cn.bit101.android.features.versions.VersionDialog
@@ -172,6 +174,12 @@ internal fun MainApp() {
         composableReport(navAnim, navController) { _, type, id ->
             Box(modifier = Modifier.navigationBarsPadding()) {
                 ReportScreen(mainController, type, id,)
+            }
+        }
+
+        composableCampusService(navAnim, navController) {
+            Box(modifier = Modifier.navigationBarsPadding()) {
+                CampusServiceScreen(mainController)
             }
         }
 

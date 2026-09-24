@@ -48,5 +48,31 @@ fun main() = runBlocking {
             .findAll(body)
             .forEach { println("[BAL] ${it.groupValues[1]} = ${it.groupValues[2]}") }
         println("[HEAD] ${body.take(1500)}")
+
+        // 一卡通首页全部链接（找「流水/交易/消费」页）
+        Regex("href=\"([^\"]+)\"[^>]*>([^<]{0,20})").findAll(body).forEach {
+            println("[LINK] ${it.groupValues[2].trim()} -> ${it.groupValues[1]}")
+        }
+
+        // 「我的账户」页：预期含消费流水
+        val openid = Regex("openid=([A-F0-9]+)").find(body)?.groupValues?.get(1)
+        if (openid != null) {
+            runCatching {
+                val acc = session.get("https://dkykt.info.bit.edu.cn/myaccount/openMyAccount?openid=$openid")
+                println("[ACC] status=${acc.status} len=${acc.bodyText.length} finalUrl=${acc.url}")
+                println("[ACC] head=${acc.bodyText.take(1200)}")
+                // 页内所有链接/表单 action
+                Regex("(?:href|action)=\"([^\"]+)\"[^>]*>([^<]{0,20})").findAll(acc.bodyText).forEach {
+                    println("[ACC-LINK] ${it.groupValues[2].trim()} -> ${it.groupValues[1]}")
+                }
+            }.onFailure { println("[ACC] 失败: ${it.message}") }
+        }
+
+        // 校园网自助（10.0.0.55，Srun）：看 302 落到哪、是什么形态
+        runCatching {
+            val r = session.get("http://10.0.0.55/")
+            println("[NET] status=${r.status} finalUrl=${r.url}")
+            println("[NET] head=${r.bodyText.take(600)}")
+        }.onFailure { println("[NET] 失败: ${it.message}") }
         session.close()
 }

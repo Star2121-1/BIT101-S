@@ -83,6 +83,11 @@ sealed interface NavDest {
             .replace("{url}", Uri.encode(url))
     }
 
+    data object CampusService : NavDest {
+        override val config = NavDestConfig.CampusService
+        override val route = config.route
+    }
+
     data class FollowList(
         val type: String
     ) : NavDest {

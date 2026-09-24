@@ -233,6 +233,20 @@ fun NavGraphBuilder.composableReport(
     }
 }
 
+fun NavGraphBuilder.composableCampusService(
+    navAnimation: NavAnimation = NavAnimation.none,
+    navController: NavHostController,
+    content: @Composable AnimatedVisibilityScope.(NavBackStackEntry) -> Unit
+) {
+    animatedComposable(
+        route = NavDestConfig.CampusService.route,
+        arguments = NavDestConfig.CampusService.arguments,
+        navAnimation = navAnimation,
+        navController = navController,
+        content = content
+    )
+}
+
 fun NavGraphBuilder.composableMessage(
     navAnimation: NavAnimation = NavAnimation.none,
     navController: NavHostController,

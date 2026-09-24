@@ -22,6 +22,7 @@ sealed interface NavDestConfig {
             Message,
             Web,
             FollowList,
+            CampusService,
         )
 
         fun fromRoute(route: String?): NavDestConfig? {
@@ -95,6 +96,11 @@ sealed interface NavDestConfig {
         override val arguments: List<NamedNavArgument> = listOf(
             navArgument("url") { type = NavType.StringType },
         )
+    }
+
+    data object CampusService : NavDestConfig {
+        override val route: String = "campus-service"
+        override val arguments: List<NamedNavArgument> = listOf()
     }
 
     data object FollowList : NavDestConfig {
