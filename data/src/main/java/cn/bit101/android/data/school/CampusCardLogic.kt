@@ -52,7 +52,7 @@ object CampusCardLogic {
     fun balanceText(snapshot: CampusCardSnapshot?, loading: Boolean, fetched: Boolean): String = when {
         loading && !fetched -> "获取中…"
         snapshot == null -> "获取失败"
-        !snapshot.loggedIn -> "未登录，点开登录后显示"
+        !snapshot.loggedIn -> "未登录，进详情页登录"
         else -> snapshot.entries.firstOrNull()?.let { "¥${it.second}" } ?: "未识别到余额"
     }
 }

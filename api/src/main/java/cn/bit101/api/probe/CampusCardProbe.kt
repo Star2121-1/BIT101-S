@@ -6,10 +6,12 @@ import cn.bit101.bitlogin.login.SsoLogin
 import kotlinx.coroutines.runBlocking
 
 /**
- * 一卡通 CAS 登录探针（临时工具）。
+ * 校内站点 CAS 登录探针（调试工具）。
  *
  * 用法：`gradlew :api:runProbe -Psid=<学号> -Ppwd=<密码>`
- * SMS 二次验证：触发时程序轮询工作目录 `sms.txt`，写入验证码即继续。
+ * SMS 二次验证：触发时轮询工作目录 `sms.txt`，写入验证码即继续。
+ *
+ * 现覆盖：一卡通（dkykt）登录 → 余额 → 首页链接 → 流水页可达性 → 校园网 Srun。
  */
 fun main() = runBlocking {
     val sid = System.getenv("probe.sid") ?: error("usage: -Psid=<学号> -Ppwd=<密码>")
@@ -17,69 +19,56 @@ fun main() = runBlocking {
 
     NetworkEnv.ensureInitialized()
 
-        val session = HttpClient()
-        val smsFile = java.io.File("sms.txt")
+    val session = HttpClient()
+    val smsFile = java.io.File("sms.txt")
 
-        val sso = SsoLogin(
-            session = session,
-            smsCodeCallback = { context ->
-                println("[SMS] 已发送到 ${context.maskedPhone}，请把验证码写入 api/sms.txt（UTF-8 纯数字）")
-                var code: String? = null
-                while (code.isNullOrBlank()) {
-                    Thread.sleep(2000)
-                    if (smsFile.exists() && smsFile.readText().trim().isNotEmpty()) {
-                        code = smsFile.readText().trim()
-                        smsFile.delete()
-                    }
+    val sso = SsoLogin(
+        session = session,
+        smsCodeCallback = { context ->
+            println("[SMS] 已发送到 ${context.maskedPhone}，请把验证码写入 api/sms.txt")
+            var code: String? = null
+            while (code.isNullOrBlank()) {
+                Thread.sleep(2000)
+                if (smsFile.exists() && smsFile.readText().trim().isNotEmpty()) {
+                    code = smsFile.readText().trim()
+                    smsFile.delete()
                 }
-                code
-            },
-        )
+            }
+            code
+        },
+    )
 
-        val service = "https://dkykt.info.bit.edu.cn/home/openHomePageByCas"
-        sso.login(sid, pwd, callbackUrl = service)
-        println("[OK] CAS 登录成功 cookies=${session.cookieMap().keys}")
+    val service = "https://dkykt.info.bit.edu.cn/home/openHomePageByCas"
+    sso.login(sid, pwd, callbackUrl = service)
+    println("[OK] CAS 登录成功 cookies=${session.cookieMap().keys}")
 
-        val resp = session.get(service)
-        val body = resp.bodyText
-        println("[HOME] status=${resp.status} finalUrl=${resp.url}")
-        println("[HOME] len=${body.length}")
-        Regex("(过渡余额|账户余额|余额|芯片余额)[^0-9]{0,16}([\\d,]+\\.\\d{1,2})")
-            .findAll(body)
-            .forEach { println("[BAL] ${it.groupValues[1]} = ${it.groupValues[2]}") }
-        println("[HEAD] ${body.take(1500)}")
+    // 一卡通首页：余额 + 链接
+    val resp = session.get(service)
+    val body = resp.bodyText
+    val openid = Regex("openid=([A-F0-9]+)").find(body)?.groupValues?.get(1)
+    println("[HOME] status=${resp.status} finalUrl=${resp.url} len=${body.length}")
+    Regex("(过渡余额|账户余额|余额|芯片余额)[^0-9]{0,16}([\\d,]+\\.\\d{1,2})")
+        .findAll(body)
+        .forEach { println("[BAL] ${it.groupValues[1]} = ${it.groupValues[2]}") }
+    Regex("href=\"([^\"]+)\"[^>]*>([^<]{0,20})").findAll(body).forEach {
+        println("[LINK] ${it.groupValues[2].trim()} -> ${it.groupValues[1]}")
+    }
 
-        // 一卡通首页全部链接（找「流水/交易/消费」页）
-        Regex("href=\"([^\"]+)\"[^>]*>([^<]{0,20})").findAll(body).forEach {
-            println("[LINK] ${it.groupValues[2].trim()} -> ${it.groupValues[1]}")
-        }
-
-        // 「我的账户」页：预期含消费流水
-        val openid = Regex("openid=([A-F0-9]+)").find(body)?.groupValues?.get(1)
-        if (openid != null) {
-            runCatching {
-                val myUrl = "https://dkykt.info.bit.edu.cn/myaccount/openMyAccount?openid=$openid"
-                // 先过一遍充值登录页（可能只是建立临时会话 cookie），再回查
-                val warm = session.get("https://dkykt.info.bit.edu.cn/cardpay/openCardRechargeLogin?temporaryopen=true")
-                println("[WARM] status=${warm.status}")
-                val acc = session.get(myUrl)
-                println("[ACC] status=${acc.status} len=${acc.bodyText.length} finalUrl=${acc.url}")
-                println("[ACC] head=${acc.bodyText.take(2000)}")
-                Regex("(?:href|action)=\"([^\"]+)\"[^>]*>([^<]{0,20})").findAll(acc.bodyText).forEach {
-                    println("[ACC-LINK] ${it.groupValues[2].trim()} -> ${it.groupValues[1]}")
-                }
-                // 带学工号再试一次（cardpay 体系似乎只认学号）
-                val acc2 = session.get("https://dkykt.info.bit.edu.cn/myaccount/openMyAccount?openid=$openid&idserial=1120241355")
-                println("[ACC2] status=${acc2.status} len=${acc2.bodyText.length} finalUrl=${acc2.url}")
-                println("[ACC2] head=${acc2.bodyText.take(800)}")
-            }.onFailure { println("[ACC] 失败: ${it.message}") }
-        }
-
-        // 校园网自助（10.0.0.55，Srun）：看 302 落到哪、是什么形态
+    // 流水页可达性 —— 结论：302 到卡务系统（cardpay）充值页，Web 端不可得
+    if (openid != null) {
         runCatching {
-            val r = session.get("http://10.0.0.55/")
-            println("[NET] status=${r.status} finalUrl=${r.url}")
-            println("[NET] head=${r.bodyText.take(600)}")
-        }.onFailure { println("[NET] 失败: ${it.message}") }
-        session.close()
+            val my = "https://dkykt.info.bit.edu.cn/myaccount/openMyAccount?openid=$openid"
+            session.get("https://dkykt.info.bit.edu.cn/cardpay/openCardRechargeLogin?temporaryopen=true")
+            val acc = session.get(my)
+            println("[ACC] status=${acc.status} finalUrl=${acc.url} len=${acc.bodyText.length}")
+        }.onFailure { println("[ACC] 失败: ${it.message}") }
+    }
+
+    // 校园网（Srun 自助）：仅校园网内可达
+    runCatching {
+        val r = session.get("http://10.0.0.55/cgi-bin/rad_user_info")
+        println("[NET] status=${r.status} body=${r.bodyText.take(200)}")
+    }.onFailure { println("[NET] 失败: ${it.message}") }
+
+    session.close()
 }

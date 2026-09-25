@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Button
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -39,6 +40,9 @@ import cn.bit101.android.features.common.MainController
  * ⚠️ 校园网数据仅校园网环境可取（`10.0.0.55` 是内网地址）——取不到时显示
  * 「需连接校园网」，不报错。
  */
+/** 一卡通首页（CAS service 指回这里；登录在 App 内 WebView 完成）。 */
+private const val CAMPUS_CARD_LOGIN_URL = "https://dkykt.info.bit.edu.cn/home/openHomePageByCas"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CampusServiceScreen(
@@ -84,6 +88,18 @@ fun CampusServiceScreen(
                     value = "延河一卡通（dkykt.info.bit.edu.cn）",
                     small = true,
                 )
+
+                // 未登录时给入口：CAS 登录只能在 WebView 里完成（App 内打开，
+                // 不跳外部浏览器）；登录后回来下拉刷新即出余额
+                if (snapshot?.loggedIn != true) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { mainController.openWebPage(CAMPUS_CARD_LOGIN_URL) },
+                    ) {
+                        Text(text = "登录一卡通")
+                    }
+                }
             }
 
             // 校园网

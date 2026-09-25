@@ -1,5 +1,18 @@
 # CHANGES
 
+## 2026-09-25 v1.9.2 一卡通补登录入口（修「点开登录后显示」无路可走）
+
+- 详情页一卡通区块新增「登录一卡通」按钮（仅在未登录时显示）：CAS 登录只能在
+  WebView 完成，**App 内打开**（不跳外部浏览器），登录后回详情页下拉刷新即出余额
+- 卡片文案改为「未登录，进详情页登录」——原来写「点开登录后显示」但详情页没有
+  登录入口，属于文案与实际能力不符
+- 一卡通流水：本轮深挖结论为**Web 端不可得**（详见下）
+  - `/myaccount/openMyAccount` 302 到卡务系统（cardpay）的**充值**登录页
+  - 该页只有「学工号 + 确认学工号 + 金额 + 支付方式」，无查询入口；
+    其 JS 只调充值/绑定订单接口（`temporaryUserBind` 等，涉及真实付款，不碰）
+  - 尝试过的其它路径（openCardLogin/cardLogin/openCardQuery/openMyAccountList 等）全部 302 errorPage
+  - 流水在 i北理 里走钉钉免登，Web 端无等价入口；待用户提供卡务查询密码或抓包
+
 ## 2026-09-25 v1.9.1 代码质量重构（重复合并 / 简化 / 注释精简，无行为变化）
 
 - **合并两个完全相同的 VM**：`CampusCardViewModel` 与 `CampusServiceViewModel`

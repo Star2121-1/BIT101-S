@@ -112,6 +112,6 @@ class CampusCardLogicTest {
         assertEquals("获取失败", CampusCardLogic.balanceText(null, loading = false, fetched = true))
 
         val gate = CampusCardLogic.parse(gateHtml, "https://sso.bit.edu.cn/gate")
-        assertEquals("未登录，点开登录后显示", CampusCardLogic.balanceText(gate, false, true))
+        assertEquals("未登录，进详情页登录", CampusCardLogic.balanceText(gate, false, true))
     }
 }
