@@ -1,6 +1,6 @@
 package cn.bit101.android.data.repo
 
-import cn.bit101.android.data.school.CampusDebugStore
+import android.util.Log
 import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.data.repo.base.CampusNetRepo
@@ -35,21 +35,16 @@ internal class DefaultCampusNetRepo @Inject constructor() : CampusNetRepo {
         .build()
 
     override suspend fun fetchOnlineInfo(): CampusNetResult = withContext(Dispatchers.IO) {
-        val (result, debug) = runCatching {
+        runCatching {
             client.newCall(Request.Builder().url(URL).build()).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                val parsed = if (resp.code == 200) {
+                Log.i("CampusNetRepo", "status=" + resp.code + " len=" + body.length + " body=" + body.take(120))
+                if (resp.code == 200) {
                     CampusNetLogic.parseResult(body)
                 } else {
-                    CampusNetResult.Failed("HTTP ${resp.code}")
+                    CampusNetResult.Failed("HTTP " + resp.code)
                 }
-                parsed to "status=${resp.code} result=${parsed::class.simpleName} body=${body.take(120)}"
             }
-        }.getOrElse {
-            CampusNetResult.Failed(it.message ?: "未知异常") to "请求异常: ${it.message}"
-        }
-        // 调试：UI 直读（厂商压制 logcat，日志不可靠）
-        CampusDebugStore.netDebug = debug
-        result
+        }.getOrElse { CampusNetResult.Failed(it.message ?: "未知异常") }
     }
 }
