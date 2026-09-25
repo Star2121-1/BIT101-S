@@ -1,5 +1,10 @@
 pluginManagement {
     repositories {
+        // 国内镜像放在最前：直连 Google / Maven Central 时大 jar（kotlin-compiler-embeddable
+        // 等）只有 ~14KB/s 会卡死构建，镜像实测 ~1.8MB/s。镜像不可达时会自动落到下面的官方源。
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -8,6 +13,8 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
         google()
         mavenCentral()
         maven { url "https://jitpack.io" }

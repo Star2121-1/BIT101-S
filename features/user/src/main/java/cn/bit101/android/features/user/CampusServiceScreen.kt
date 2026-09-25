@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Button
@@ -20,6 +21,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -33,15 +35,15 @@ import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.data.school.CampusCardSnapshot
 import cn.bit101.android.features.common.MainController
 
-/**
- * 「校园服务」详情页 —— 一卡通（余额摘要，流水待 cardpay 接口摸清后接入）+
- * 校园网（深澜自助：本次上线时间 / 累计流量 / 累计时长 / IP / 账户余额）。
- *
- * ⚠️ 校园网数据仅校园网环境可取（`10.0.0.55` 是内网地址）——取不到时显示
- * 「需连接校园网」，不报错。
- */
 /** 一卡通首页（CAS service 指回这里；登录在 App 内 WebView 完成）。 */
 private const val CAMPUS_CARD_LOGIN_URL = "https://dkykt.info.bit.edu.cn/home/openHomePageByCas"
+
+/**
+ * 「校园服务」详情页 —— 一卡通（余额摘要；流水卡在卡务系统，Web 端不可得）+
+ * 校园网（深澜自助：本次上线 / 累计流量 / 累计时长 / 本次收发 / IP / 余额）。
+ *
+ * ⚠️ 校园网只有校园网环境可取（`10.0.0.55` 是内网地址）——取不到时提示需连接校园网。
+ */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,6 +57,10 @@ fun CampusServiceScreen(
     val loading by vm.loading.collectAsState()
     val fetched by vm.fetched.collectAsState()
 
+    // 从「登录一卡通」的 WebView 返回时会重新进入组合，但 VM 保留、init 不会重跑，
+    // 所以这里补一次刷新；首次进入时 init 已发起请求，被 VM 里的 _loading 守卫挡掉。
+    LaunchedEffect(Unit) { vm.refresh() }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -65,6 +71,11 @@ fun CampusServiceScreen(
                             imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                             contentDescription = "返回",
                         )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { vm.refresh() }) {
+                        Icon(imageVector = Icons.Outlined.Refresh, contentDescription = "刷新")
                     }
                 },
             )
@@ -81,7 +92,10 @@ fun CampusServiceScreen(
             SectionCard(title = "一卡通") {
                 InfoRow(
                     label = "账户余额",
-                    value = CampusCardLogic.balanceText(snapshot, loading, fetched),
+                    value = CampusCardLogic.balanceText(
+                        snapshot, loading, fetched,
+                        notLoggedIn = "未登录，点下方「登录一卡通」",
+                    ),
                 )
                 InfoRow(
                     label = "数据来源",
@@ -116,6 +130,11 @@ fun CampusServiceScreen(
                         InfoRow(label = "已用流量", value = CampusNetLogic.formatTraffic(info.bytesTotal))
                         InfoRow(label = "累计在线时长", value = CampusNetLogic.formatDuration(info.durationSeconds))
                         InfoRow(label = "本次上线", value = CampusNetLogic.formatTime(info.loginEpochSeconds))
+                        InfoRow(
+                            label = "本次收发",
+                            value = "↓" + CampusNetLogic.formatTraffic(info.bytesIn) +
+                                "  ↑" + CampusNetLogic.formatTraffic(info.bytesOut),
+                        )
                         InfoRow(label = "本机 IP", value = info.ip)
                         InfoRow(label = "账户余额", value = "¥%.2f".format(info.balanceYuan))
                     }

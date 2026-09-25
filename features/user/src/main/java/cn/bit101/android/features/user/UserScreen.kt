@@ -397,7 +397,7 @@ private fun CampusServiceSection(mainController: MainController) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = if (loading && fetched) "刷新中…" else "点开流水",
+                    text = if (loading && fetched) "刷新中…" else "点开详情",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
                 )

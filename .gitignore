@@ -30,3 +30,6 @@ bin/
 
 # 本地凭据（用户授权存于本地，绝不提交）
 secrets.local.env
+
+# 探针（api/src/probe）等 SMS 验证码用的临时文件
+api/sms.txt

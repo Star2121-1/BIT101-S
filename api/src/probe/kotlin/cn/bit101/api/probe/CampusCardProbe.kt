@@ -6,7 +6,7 @@ import cn.bit101.bitlogin.login.SsoLogin
 import kotlinx.coroutines.runBlocking
 
 /**
- * 校内站点 CAS 登录探针（调试工具）。
+ * 校内站点 CAS 登录探针（调试工具，**独立源码集 `src/probe`，不进 main**）。
  *
  * 用法：`gradlew :api:runProbe -Psid=<学号> -Ppwd=<密码>`
  * SMS 二次验证：触发时轮询工作目录 `sms.txt`，写入验证码即继续。

@@ -1,5 +1,6 @@
 package cn.bit101.android.features.setting.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.config.setting.base.DDLSettings
@@ -11,6 +12,7 @@ import cn.bit101.android.data.repo.base.LoginRepo
 import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.common.helper.withSimpleStateLiveData
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -22,6 +24,7 @@ internal class DDLViewModel @Inject constructor(
     /** 延河课堂作业同步器（与 DDL 页共用同一份合并规则，见类注释）。 */
     private val eclassDdlSyncer: EclassDdlSyncer,
     override val eclassRepo: EclassRepo,
+    @ApplicationContext private val appContext: Context,
 ) : EclassSessionViewModel() {
 
     val beforeDayFlow = ddlSettings.beforeDay.flow
@@ -41,11 +44,15 @@ internal class DDLViewModel @Inject constructor(
     /**
      * 重新拉取延河课堂作业（设置页动作项）。
      *
-     * 同步直接写 Room，DDL 页的 `events` 是 Room 流 —— 写库后那边自动刷新，
-     * 不需要额外通知。
+     * 同步直接写 Room，DDL 页的 `events` 是 Room 流 —— 写库后那边自动刷新。
+     * 但**提醒排期要显式重排**：同步可能带来几小时内到期的作业（见 NotifyAppStartup.reschedule）。
      */
     fun updateEclassDdl() = withSimpleStateLiveData(updateEclassDdlStateLiveData) {
-        eclassDdlSyncer.sync()
+        val ok = eclassDdlSyncer.sync()
+        if (ok) {
+            runCatching { cn.bit101.android.features.notify.NotifyAppStartup.reschedule(appContext) }
+        }
+        ok
     }
 
     fun setBeforeDay(day: Long) {

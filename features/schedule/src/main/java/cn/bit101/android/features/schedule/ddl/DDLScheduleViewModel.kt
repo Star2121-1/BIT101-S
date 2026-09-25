@@ -1,5 +1,6 @@
 package cn.bit101.android.features.schedule.ddl
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -11,6 +12,7 @@ import cn.bit101.android.data.repo.base.DDLScheduleRepo
 import cn.bit101.android.data.school.LexueUrls
 import cn.bit101.android.features.common.helper.withScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +51,7 @@ internal class DDLScheduleViewModel @Inject constructor(
      * 所以逻辑放在 [LexueUrls]，这里只做转发。动态页的设置页用的是同一份。
      */
     private val lexueUrls: LexueUrls,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
     val lexueCalendarUrlFlow = ddlSettings.url.flow
     var beforeDay = 7
@@ -99,10 +102,21 @@ internal class DDLScheduleViewModel @Inject constructor(
         }
     }
 
+    /**
+     * DDL 变动后立刻重排提醒。
+     *
+     * 不能等下次冷启动或每日周期任务 —— 新加的 DDL 可能几小时后到期，排不上就漏提醒
+     * （座位预约那边也是这么做的，见 SeatViewModel）。
+     */
+    private fun notifyReschedule() {
+        runCatching { cn.bit101.android.features.notify.NotifyAppStartup.reschedule(appContext) }
+    }
+
     // 设置完成状态
     fun setDone(event: DDLScheduleEntity, done: Boolean) {
         viewModelScope.launch {
             ddlScheduleRepo.updateDDL(event.copy(done = done))
+            notifyReschedule()
         }
     }
 
@@ -124,6 +138,7 @@ internal class DDLScheduleViewModel @Inject constructor(
         )
         viewModelScope.launch {
             ddlScheduleRepo.insertDDL(item)
+            notifyReschedule()
         }
     }
 
@@ -142,6 +157,7 @@ internal class DDLScheduleViewModel @Inject constructor(
                     text = text
                 )
             )
+            notifyReschedule()
         }
     }
 
@@ -149,6 +165,7 @@ internal class DDLScheduleViewModel @Inject constructor(
     fun deleteDDL(item: DDLScheduleEntity) {
         viewModelScope.launch {
             ddlScheduleRepo.deleteDDL(item)
+            notifyReschedule()
         }
     }
 
@@ -246,27 +263,18 @@ internal class DDLScheduleViewModel @Inject constructor(
     }
 
     /**
-     * 从延河课堂（eclass）同步作业。
+     * 从延河课堂（eclass）同步作业。实现已抽到 [EclassDdlSyncer]（单例），
+     * DDL 设置页的「重新拉取延河课堂作业」用同一份合并规则 —— 不存在则插入、
+     * 存在则更新，且**保留 `done`**（手动勾掉的完成状态不能被一次同步冲掉）。
      *
-     * 沿用与 [updateLexueCalendar] 相同的「不存在则插入、存在则更新」策略 ——
-     * 关键是**保留 `done`**：用户手动勾掉的完成状态不能被一次同步冲掉。
-     *
-     * ⚠️ **未登录不是错误**：用户可能还没登录课程中心，或者压根不打算用。
-     * 所以拉不到就静默返回 false（不弹窗、不刷日志）—— 这条源是"有就更好"，
-     * 不该因为它没配好就打断使用。
+     * ⚠️ **未登录不是错误**：拉不到就静默返回 false（不弹窗、不刷日志）——
+     * 这条源是「有就更好」，不该因为它没配好就打断使用。
      *
      * @return 是否成功拉到数据
      */
-    /**
-     * 从延河课堂（eclass）同步作业。
-     *
-     * 实现已抽到 [EclassDdlSyncer]（单例）：DDL 设置页的「重新拉取延河课堂作业」
-     * 也用同一份合并规则，两处不可能改歪一条。
-     *
-     * ⚠️ **未登录不是错误**：拉不到就静默返回 false —— 这条源是"有就更好"，
-     * 不该因为它没配好就打断使用。
-     *
-     * @return 是否成功拉到数据
-     */
-    suspend fun updateEclassDdl(): Boolean = eclassDdlSyncer.sync()
+    suspend fun updateEclassDdl(): Boolean {
+        val ok = eclassDdlSyncer.sync()
+        if (ok) notifyReschedule()
+        return ok
+    }
 }

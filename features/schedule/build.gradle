@@ -48,4 +48,6 @@ dependencies {
     ksp "com.google.dagger:hilt-android-compiler:${versions.hilt}"
 
     implementation project(':features:common')
+    // DDL 增删改后立刻重排提醒（方向 schedule → notify，notify 不认识 schedule，不成环）
+    implementation project(':features:notify')
 }

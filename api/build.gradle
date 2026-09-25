@@ -38,21 +38,35 @@ dependencies {
 
     api 'com.github.BIT101-dev.BIT-Login:bit-login:v4.0.2'
 }
-// 临时探针：一卡通 CAS 登录 + 首页抓取（凭据走 -P 参数，不落盘）
+// ── 调试探针：独立源码集 `src/probe` ─────────────────────────────────────────
+// ⚠️ 不能放 main：app 的 release 是 minifyEnabled=false，main 的类会原样打进发布包，
+// 而探针含 main() 且会拿真实账号走 CAS 登录 —— 属调试工具，不该随包发布。
+sourceSets {
+    probe {
+        kotlin.srcDir 'src/probe/kotlin'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    probeImplementation.extendsFrom implementation
+    probeRuntimeOnly.extendsFrom runtimeOnly
+}
+
+dependencies {
+    // 只有探针用 coroutines（runBlocking），main 不依赖它
+    probeImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0'
+}
+
+// 用法：`gradlew :api:runProbe -Psid=<学号> -Ppwd=<密码>`（SMS 验证码写 api/sms.txt）
 tasks.register("runProbe", JavaExec) {
     group = "probe"
-    classpath = sourceSets.main.runtimeClasspath
+    description = "CAS 登录校内站点抓数据（凭据走 -P 参数，不落盘）"
+    classpath = sourceSets.probe.runtimeClasspath
     mainClass = "cn.bit101.api.probe.CampusCardProbeKt"
     standardInput = System.in
     environment("probe.sid", project.findProperty("sid") ?: "")
     environment("probe.pwd", project.findProperty("pwd") ?: "")
     environment("probe.sms", project.findProperty("sms") ?: "")
-    doFirst {
-        mainClass.set("cn.bit101.api.probe.CampusCardProbeKt")
-    }
-}
-
-// 临时：探针需要 coroutines（随探针一起移除）
-dependencies {
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0'
 }

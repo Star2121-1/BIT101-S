@@ -139,9 +139,13 @@ internal fun WebContent(
                 // App 的 CookieManager；丢给外部浏览器等于白登（2026-09-25 实测：
                 // 一卡通登录被踢去 nubia 浏览器，App 里始终显示未登录）
                 if (!isInternalUrl(request?.url?.toString())) {
-                    val intent = Intent(Intent.ACTION_VIEW, request?.url)
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
+                    // 设备上没有能接的浏览器也不能崩
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, request?.url)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
                     return true
                 }
                 return super.shouldOverrideUrlLoading(view, request)
@@ -229,8 +233,9 @@ fun WebScreen(
 
 /** 是否应留在 App 内 WebView：BIT101 自己的站 + 学校域名（含各子系统）。 */
 private fun isInternalUrl(url: String?): Boolean {
-    if (url == null) return false
-    val host = runCatching { java.net.URI(url).host }.getOrNull() ?: return false
+    if (url.isNullOrBlank()) return false
+    // 域名大小写不敏感；含非法字符的 URL 会让 URI 抛异常 —— 按外部链接处理
+    val host = runCatching { java.net.URI(url).host }.getOrNull()?.lowercase() ?: return false
     return host == "bit101.cn" || host.endsWith(".bit101.cn") ||
         host == "bit.edu.cn" || host.endsWith(".bit.edu.cn")
 }

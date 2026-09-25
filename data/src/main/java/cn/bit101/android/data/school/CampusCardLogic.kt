@@ -48,11 +48,21 @@ object CampusCardLogic {
         )
     }
 
-    /** 余额摘要文案（「我」页卡片与详情页共用；纯函数，可单测）。 */
-    fun balanceText(snapshot: CampusCardSnapshot?, loading: Boolean, fetched: Boolean): String = when {
+    /**
+     * 余额摘要文案（「我」页卡片与详情页共用；纯函数，可单测）。
+     *
+     * [notLoggedIn] 要按场景给：「我」页卡片说「进详情页登录」，详情页自己说「点下方按钮」——
+     * 同一句话在详情页里会变成「进详情页登录」（人已经在了）。
+     */
+    fun balanceText(
+        snapshot: CampusCardSnapshot?,
+        loading: Boolean,
+        fetched: Boolean,
+        notLoggedIn: String = "未登录，进详情页登录",
+    ): String = when {
         loading && !fetched -> "获取中…"
         snapshot == null -> "获取失败"
-        !snapshot.loggedIn -> "未登录，进详情页登录"
+        !snapshot.loggedIn -> notLoggedIn
         else -> snapshot.entries.firstOrNull()?.let { "¥${it.second}" } ?: "未识别到余额"
     }
 }
