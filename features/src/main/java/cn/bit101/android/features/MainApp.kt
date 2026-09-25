@@ -18,6 +18,7 @@ import cn.bit101.android.features.common.component.image.ImageHost
 import cn.bit101.android.features.common.component.image.rememberImageHostState
 import cn.bit101.android.features.common.component.snackbar.SnackbarHost
 import cn.bit101.android.features.common.component.snackbar.rememberSnackbarState
+import cn.bit101.android.features.common.helper.ScoreUrl
 import cn.bit101.android.features.common.helper.getAppVersion
 import cn.bit101.android.features.common.nav.NavAnimation
 import cn.bit101.android.features.common.nav.NavDestConfig
@@ -30,6 +31,7 @@ import cn.bit101.android.features.common.nav.composableMessage
 import cn.bit101.android.features.common.nav.composablePost
 import cn.bit101.android.features.common.nav.composablePoster
 import cn.bit101.android.features.common.nav.composableReport
+import cn.bit101.android.features.common.nav.composableScore
 import cn.bit101.android.features.common.nav.composableSetting
 import cn.bit101.android.features.common.nav.composableUser
 import cn.bit101.android.features.common.nav.composableWeb
@@ -181,6 +183,12 @@ internal fun MainApp() {
             Box(modifier = Modifier.navigationBarsPadding()) {
                 CampusServiceScreen(mainController)
             }
+        }
+
+        // 成绩页：出分通知经 AppRoutes.SCORE 走顶层兜底落到这里，
+        // 直接打开成绩查询页（WebScreen 在 /score 上会自动填学号密码）。
+        composableScore(navAnim, navController) {
+            WebScreen(mainController, url = ScoreUrl)
         }
 
         composableMessage(navAnim, navController) {

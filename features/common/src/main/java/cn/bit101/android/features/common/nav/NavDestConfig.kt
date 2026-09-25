@@ -23,6 +23,7 @@ sealed interface NavDestConfig {
             Web,
             FollowList,
             CampusService,
+            Score,
         )
 
         fun fromRoute(route: String?): NavDestConfig? {
@@ -100,6 +101,17 @@ sealed interface NavDestConfig {
 
     data object CampusService : NavDestConfig {
         override val route: String = "campus-service"
+        override val arguments: List<NamedNavArgument> = listOf()
+    }
+
+    /**
+     * 成绩页（WebView 打开 `ScoreUrl`）。
+     *
+     * ⚠️ **无参**是刻意的：出分通知靠 `AppRoutes.SCORE` 走顶层兜底进来，
+     * 而兜底用精确匹配，带参数的路由匹配不上。
+     */
+    data object Score : NavDestConfig {
+        override val route: String = AppRoutes.SCORE
         override val arguments: List<NamedNavArgument> = listOf()
     }
 

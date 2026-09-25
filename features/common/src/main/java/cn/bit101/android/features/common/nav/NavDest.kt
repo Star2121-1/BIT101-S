@@ -88,6 +88,11 @@ sealed interface NavDest {
         override val route = config.route
     }
 
+    data object Score : NavDest {
+        override val config = NavDestConfig.Score
+        override val route = config.route
+    }
+
     data class FollowList(
         val type: String
     ) : NavDest {

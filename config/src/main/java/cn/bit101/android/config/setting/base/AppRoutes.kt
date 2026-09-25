@@ -18,4 +18,15 @@ object AppRoutes {
      * 注意座位系统的登录是另一套（seatlib），入口在座位页自身的门禁里。
      */
     const val LOGIN = "login"
+
+    /**
+     * 成绩页（`NavDestConfig.Score.route` 与之一致）。
+     *
+     * 出分提醒点进来要**直接落到成绩页**（不是 Web 首页）—— 通知由 `features/notify`
+     * 发出，它同样够不着 `:features`，所以路由也下沉到这里。
+     *
+     * ⚠️ 必须是**无参路由**：`MainApp` 的顶层兜底用 `NavDestConfig.fromRoute` 做**精确匹配**
+     * （`it.route == route`），参数化路由（如 `web/{url}`）匹配不上，兜底不会触发。
+     */
+    const val SCORE = "score"
 }

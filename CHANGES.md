@@ -1,5 +1,25 @@
 # CHANGES
 
+## 2026-09-26 v1.9.8 成绩页深链修复 + 查明成绩接口已迁移（出分提醒当前不可用）
+
+- **出分通知不再跳到 Web 首页**：新增**无参**顶层路由 `score`（`AppRoutes.SCORE`，
+  单一来源放 `:config`——`features:notify` 够不着 `:features`，与组件跳登录同一个套路），
+  `NavDestConfig.Score` + `composableScore` + `MainApp` 注册，通知 route 由
+  `PageShowOnNav.BIT101Web` 改为 `AppRoutes.SCORE`。
+  ⚠️ 必须无参：`MainApp` 的顶层兜底是**精确匹配**（`it.route == route`），`web/{url}` 那类
+  参数化路由匹配不上，兜底根本不触发（这就是原来跳错页的原因）
+  - 验证：`adb shell am start -n cn.bit101.android/.features.MainActivity --es bit101_goto "score"`
+- ⛔ **查明：出分提醒当前不可能触发**（不是解析问题，是接口没了）
+  - `GET /scores` 实测恒返回 **404**（`/scores/report` 同样是死接口；上游 BIT101-Android 亦然）
+  - 真实契约已从网页版逆向出来：成绩改由**异步挑战流程**提供 ——
+    `POST login.bit101.flwfdd.xyz/api/jwb/bit101/score {username,password}` → `202`
+    `{challenge_id, access_token}` → `GET /api/auth/{challenge_id}`（头 `X-Challenge-Token`）
+    轮询到 `ready_services` 含 `jwb` → 再带 `Authorization: Bearer` 请求原路径，
+    返回 `data.data` 二维数组（第 0 行是表头，**与现有 `ScoreLogic` 的表头定位设计一致**）
+  - 阻因：实测轮询返回 `status = waiting_sms` —— 学校 SSO 触发**短信二次验证**，
+    而后台定时检查没有交互通道（再叠加 CAS 风控）。契约已写进 `ScoreApiService` 顶部注释
+- 临时诊断已撤（曾把 `/scores` 响应形状写到外部目录，查清后删除）
+
 ## 2026-09-26 v1.9.7 校园网流量阈值提醒（270G / 300G 各一次）+ 口径修正为本月
 
 - **新增流量提醒**（用户明确要求）：本月用量到 **270 GB 提醒一次**、到 **300 GB（限速阈值）

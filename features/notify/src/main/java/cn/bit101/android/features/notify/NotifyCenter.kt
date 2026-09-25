@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import cn.bit101.android.config.setting.base.AppRoutes
 import cn.bit101.android.config.setting.base.PageShowOnNav
 import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.data.school.CampusNetLogic
@@ -144,7 +145,7 @@ internal object NotifyCenter {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(gotoPendingIntent(context, NOTIFY_ID_SCORES, PageShowOnNav.BIT101Web.toPageData().value, "scores"))
+            .setContentIntent(gotoPendingIntent(context, NOTIFY_ID_SCORES, AppRoutes.SCORE, "scores"))
             .build()
         runCatching {
             NotificationManagerCompat.from(context).notify(NOTIFY_ID_SCORES, notification)

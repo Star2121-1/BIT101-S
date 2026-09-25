@@ -22,22 +22,30 @@
 
 **为什么排第一**：出分提醒的解析、worker、渠道、去重**全都写好了**，只有两个断点让它「可能永不触发 / 点了跳错地方」。修完就能宣称五类提醒全部可用。
 
-### A1 成绩页无参路由 + 通知深链（S，低风险）
-- **现状**：`NotifyCenter.kt:139` 出分通知跳 `PageShowOnNav.BIT101Web`（= Web 首页），不是成绩页。
-- **拦路石（已查实）**：`MainApp.kt:114-126` 的顶层兜底走 `NavDestConfig.fromRoute(route)`，而它是**精确匹配**（`NavDestConfig.kt:28-30` `all.find { it.route == route }`）；`Web.route` 是模式串 `web/{url}`，具体的 `web/https%3A…` 匹配不到 → 兜底不触发。
-- **做法**：新增**无参**路由 `score`（精确匹配即可命中）
-  - `NavDestConfig.kt`：`data object Score { override val route = "score" }`，并加入 `all`
-  - `NavDest.kt` + `NavComposables.kt`：`composableScore(...)`
-  - `MainApp.kt`：注册 `composableScore` → 渲染 `WebScreen("https://bit101.cn/score/")`
-  - `NotifyCenter.kt:139`：route 改 `"score"`（**纯字符串即可，notify 不必新增对 `:features:common` 的依赖**）
-- **验收**：`adb shell am start -n cn.bit101.android/.features.MainActivity --es bit101_goto "score"` → 直接落到成绩页（`EXTRA_GOTO = "bit101_goto"`，见 `MainActivity.kt:102`）。不依赖真的出分。
+### A1 ✅ 已完成（v1.9.8，真机验证通过）
+- **做法**：新增**无参**顶层路由 `score` —— 常量放 `:config` 的 `AppRoutes.SCORE`（`features:notify`
+  够不着 `:features`，与组件跳登录同一套路）；`NavDestConfig.Score` + `composableScore` +
+  `MainApp` 注册；通知 route 由 `PageShowOnNav.BIT101Web` 改为 `AppRoutes.SCORE`。
+- ⚠️ **必须无参**：`MainApp` 兜底是精确匹配，`web/{url}` 那类参数化路由匹配不上（跳错页的根因）。
+- **验收**：`adb shell am start -n cn.bit101.android/.features.MainActivity --es bit101_goto "score"`
+  → 真机截图确认落在**成绩查询页**（学号密码已自动填入，点「查询」即出成绩）。不必等真出分。
 
-### A2 `/scores` 真实响应形状验证（M，关键风险点）
-- **现状**：`ScoreLogic.kt` **找不到表头就返回空列表** → `DefaultScoreRepo` 拿到空就静默返回 → 出分提醒可能**永远不触发**，而单测只用合成数据，无法证明线上可用。
-- **做法**：仿 `CampusCardProbe` 写 `ScoresProbe`（`api/src/probe` 源码集，已有 `:api:runProbe` 基建）：
-  CAS 登录 → 换 BIT101 JWT → 调 `/scores` → 打印真实 JSON 形状 → 固化成 `ScoreLogicTest` 的样本
-- **验收**：`ScoreLogic.parseTable` 对真实响应的解析结果非空；样本入库后测试保护。
-- **风险**：中（涉及 BIT101 会话；但探针已跑通过同类链路）。**若解析不出来，A1 的价值也打折**。
+### A2 ⛔ 已查明：出分提醒不可能触发，需先解决认证（阻塞）
+- **`GET /scores` 恒返回 404**（`/scores/report` 同样是死接口；上游 BIT101-Android 亦然，非本 fork 回归）
+  → `fetchTable()` 永远返回 null → `syncAndDiff()` 早退 → **提醒从未触发过**（不是解析问题）
+- **真实契约已逆向出来**（写进 `ScoreApiService` 顶部注释）：
+  1. `POST https://login.bit101.flwfdd.xyz/api/jwb/bit101/score`，body `{username, password}`
+     → `202 {detail:{challenge_id, access_token, requested_services:["jwb"], expires_in}}`
+  2. `GET /api/auth/{challenge_id}`，头 `X-Challenge-Token: <access_token>` → 轮询
+     `{status, ready_services}`，`ready_services` 含 `jwb` 即就绪
+  3. 带 `Authorization: Bearer <access_token>` 再请求第 1 步路径 → `data.data` = 二维数组
+     （第 0 行表头，**与现有 `ScoreLogic` 的表头定位设计正好一致**，解析层不用大改）
+- **阻因（实测）**：第 2 步轮询返回 `status = waiting_sms` —— 学校 SSO 触发**短信二次验证**，
+  后台定时检查没有交互通道（再叠加 CAS 风控）。
+- **下轮两条候选路线**（择一，需先验证再动工）：
+  1. **前台触发**：用户在用 App 时查一次，短信验证走 App 已有的验证码弹窗通道（登录流程已有）
+  2. **复用学校会话**：App 已有有效 CAS cookie —— 试 `POST /api/jwb/bit101/score` 只带
+     `Cookie:` 不带账密（PC 探针可验，改 `api/src/probe` 十几行即可）
 
 ### A3 出分提醒的开关与去重复核（S，机会性）
 - 与 B2 合并做（提醒设置页统一加开关）。

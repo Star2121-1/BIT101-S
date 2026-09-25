@@ -36,7 +36,11 @@ internal class DefaultScoreRepo @Inject constructor(
     override suspend fun fetchTable(): JsonElement? = withContext(Dispatchers.IO) {
         runCatching {
             val response = apiManager.api.score.getScores(detail = null)
-            response.body()?.data?.takeIf { it.isJsonArray }
+            val data = response.body()?.data
+            // ⚠️ 后端已迁移（2026-09-26 实测）：`GET /scores` 恒返回 **404**（上游 BIT101-Android
+            // 同样如此），教务成绩改由异步挑战流程提供 —— 见 ScoreApiService 顶部说明。
+            // 所以这里永远拿不到数据、出分提醒**不会触发**（不是解析问题，是接口没了）。
+            data?.takeIf { it.isJsonArray }
         }.getOrNull()
     }
 
