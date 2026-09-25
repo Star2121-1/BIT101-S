@@ -8,6 +8,7 @@ import cn.bit101.android.data.repo.base.CampusNetRepo
 import cn.bit101.android.data.school.CampusCardSnapshot
 import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.features.notify.NetFeeChecker
+import cn.bit101.android.features.notify.NetFlowChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.async
@@ -65,9 +66,13 @@ internal class CampusServiceViewModel @Inject constructor(
                 val result = net.await()
                 _netResult.value = result
                 _fetched.value = true
-                // 网费不足提醒：拿到数据 = 人正在校内，是唯一可靠的判断时机
-                // （每日周期任务的固定时刻多半在校外，会被永远跳过）。按天去重。
-                runCatching { NetFeeChecker.check(appContext, result.infoOrNull) }
+                // 校园网提醒（余额不足 / 流量阈值）：拿到数据 = 人正在校内，是唯一可靠的时机
+                // （每日周期任务的固定时刻多半在校外，会被永远跳过）。各自内部去重。
+                val info = result.infoOrNull
+                runCatching {
+                    NetFeeChecker.check(appContext, info)
+                    NetFlowChecker.check(appContext, info)
+                }
             } finally {
                 _loading.value = false
             }

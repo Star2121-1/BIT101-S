@@ -347,7 +347,7 @@ fun UserScreen(
  * 「校园服务」卡片区（仅本人页显示）—— 点击进**原生详情页**，不跳网页。
  *
  * 一卡通：余额摘要（WebView 登录一次后 cookie 与快照请求共享会话）。
- * 校园网：免登录 Srun 自助接口（仅校园网环境可取），显示已用流量与余额摘要。
+ * 校园网：免登录 Srun 自助接口（仅校园网环境可取），显示本月已用流量与余额摘要。
  */
 @Composable
 private fun CampusServiceSection(mainController: MainController) {
@@ -365,7 +365,7 @@ private fun CampusServiceSection(mainController: MainController) {
     val netText = when (val r = netResult) {
         null -> "获取中…"
         is CampusNetResult.Online ->
-            "已用 " + CampusNetLogic.formatTraffic(r.info.bytesTotal) +
+            "本月 " + CampusNetLogic.formatTraffic(r.info.bytesTotal) +
                 " · 余额 ¥%.2f".format(r.info.balanceYuan)
         CampusNetResult.NotOnline -> "本机未认证"
         is CampusNetResult.Failed -> "不在校园网"

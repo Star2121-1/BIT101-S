@@ -43,7 +43,7 @@ private const val CAMPUS_NET_PORTAL_URL = "http://10.0.0.55/"
 
 /**
  * 「校园服务」详情页 —— 一卡通（余额摘要；流水卡在卡务系统，Web 端不可得）+
- * 校园网（深澜自助：本次上线 / 累计流量 / 累计时长 / 本次收发 / IP / 余额）。
+ * 校园网（深澜自助：本次上线 / 本月已用流量 / 本月在线时长 / 本次收发 / IP / 余额）。
  *
  * ⚠️ 校园网只有校园网环境可取（`10.0.0.55` 是内网地址）——取不到时提示需连接校园网。
  */
@@ -127,8 +127,8 @@ fun CampusServiceScreen(
                     is CampusNetResult.Online -> {
                         val info = r.info
                         InfoRow(label = "账号", value = info.userName)
-                        InfoRow(label = "已用流量", value = CampusNetLogic.formatTraffic(info.bytesTotal))
-                        InfoRow(label = "累计在线时长", value = CampusNetLogic.formatDuration(info.durationSeconds))
+                        InfoRow(label = "本月已用流量", value = CampusNetLogic.formatTraffic(info.bytesTotal))
+                        InfoRow(label = "本月在线时长", value = CampusNetLogic.formatDuration(info.durationSeconds))
                         InfoRow(label = "本次上线", value = CampusNetLogic.formatTime(info.loginEpochSeconds))
                         InfoRow(
                             label = "本次收发",

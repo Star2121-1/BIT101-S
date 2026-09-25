@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import cn.bit101.android.config.setting.base.PageShowOnNav
 import cn.bit101.android.config.setting.base.toPageData
+import cn.bit101.android.data.school.CampusNetLogic
 
 /**
  * 通知的发送出口。
@@ -46,6 +47,9 @@ internal object NotifyCenter {
     /** 网费不足提醒（校园网，与四类提醒独立：BIT101 不在线也该提醒）。 */
     const val CHANNEL_NETFEE = "netfee_reminder"
 
+    /** 校园网流量提醒（270 GB 临近 / 300 GB 超限，各一次）。 */
+    private const val CHANNEL_NETFLOW = "netflow_reminder"
+
     /** 点击通知打开 App 的入口（与组件共用同一套 `bit101_goto` 约定）。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"
     private const val EXTRA_GOTO = "bit101_goto"
@@ -55,6 +59,9 @@ internal object NotifyCenter {
 
     /** 网费提醒固定 id：每天至多一条（NetFeeChecker 按天去重）。 */
     private const val NOTIFY_ID_NETFEE = 42001
+
+    /** 流量提醒固定 id：一个周期内至多两条（270 / 300 GB），后发覆盖前一条。 */
+    private const val NOTIFY_ID_NETFLOW = 42002
 
     /** 建一个渠道（幂等：已存在就跳过）。 */
     private fun ensureChannel(
@@ -80,6 +87,7 @@ internal object NotifyCenter {
         ensureChannel(manager, CHANNEL_SEAT, "座位签到", NotificationManager.IMPORTANCE_HIGH, "预约座位的签到时限提醒（错过会记违约）")
         ensureChannel(manager, CHANNEL_SCORE, "出分提醒", NotificationManager.IMPORTANCE_DEFAULT, "有新课出分时提醒（通知里不含分数）")
         ensureChannel(manager, CHANNEL_NETFEE, "网费不足", NotificationManager.IMPORTANCE_DEFAULT, "校园网账户余额不足时提醒充值（每日至多一次）")
+        ensureChannel(manager, CHANNEL_NETFLOW, "校园网流量", NotificationManager.IMPORTANCE_DEFAULT, "本月流量接近 / 超过 300 GB 限速阈值时提醒（每周期至多两条）")
     }
 
     /**
@@ -163,6 +171,35 @@ internal object NotifyCenter {
             .build()
         runCatching {
             NotificationManagerCompat.from(context).notify(NOTIFY_ID_NETFEE, notification)
+        }
+    }
+
+    /**
+     * 发校园网流量提醒（270 GB 临近 / 300 GB 超限）。
+     *
+     * 跳「我」页（校园服务卡在那儿）—— 详情页在校外打不开，别把用户带到空页。
+     */
+    fun notifyNetFlow(context: Context, alert: NetFlowChecker.Alert, usedBytes: Long) {
+        ensureChannels(context)
+        val used = CampusNetLogic.formatTraffic(usedBytes)
+        val limit = CampusNetLogic.formatTraffic(NetFlowChecker.LIMIT_BYTES)
+        val (title, text) = when (alert) {
+            NetFlowChecker.Alert.Near ->
+                "校园网流量接近限速阈值" to "本月已用 $used（限速阈值 $limit），超出后将限速"
+            NetFlowChecker.Alert.Exceeded ->
+                "校园网流量已超限速阈值" to "本月已用 $used，已超过 $limit，网速可能被限制"
+        }
+        val notification = NotificationCompat.Builder(context, CHANNEL_NETFLOW)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(gotoPendingIntent(context, NOTIFY_ID_NETFLOW, PageShowOnNav.Mine.toPageData().value, "netflow"))
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify(NOTIFY_ID_NETFLOW, notification)
         }
     }
 

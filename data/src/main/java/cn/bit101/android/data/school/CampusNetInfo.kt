@@ -11,9 +11,14 @@ data class CampusNetInfo(
     val nowEpochSeconds: Long,
     val bytesIn: Long,
     val bytesOut: Long,
-    /** 累计流量（字节，Srun 按计费周期累计——展示为「已用流量」）。 */
+    /** 已用流量（字节）。Srun 的 `[6]` 是**按计费周期累计**，官方门户就显示为「本月」用量。 */
     val bytesTotal: Long,
-    /** 累计在线时长（秒）。 */
+    /**
+     * 本月在线时长（秒）。
+     *
+     * ⚠️ 同样是**按计费周期**累计，但计时是**按设备**的 —— 同时用多台设备会各记一份，
+     * 所以这个值可能超过一个月（用户 2026-09-26 确认的口径）。
+     */
     val durationSeconds: Long,
     val ip: String,
     /** 账户余额（元）——校园网网费不足提醒的数据源。 */

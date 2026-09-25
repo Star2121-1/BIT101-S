@@ -10,11 +10,12 @@ import dagger.hilt.android.EntryPointAccessors
 import java.util.concurrent.TimeUnit
 
 /**
- * 网费不足检查（每日一次）：校园网账户余额 < [NetFeeChecker.THRESHOLD_YUAN] 元时提醒。
+ * 校园网提醒的每日兜底检查：余额 < [NetFeeChecker.THRESHOLD_YUAN] 元，以及本月流量到
+ * 270 / 300 GB（见 [NetFlowChecker]）。
  *
- * 数据源是深澜自助接口（仅校园网环境可达）—— 取不到就**静默跳过**：
- * 不在校内是常态，不是故障；下一次周期到了自然会再查。
- * 去重键按天（`netfee_low_yyyy-MM-dd`）：同一天只提醒一次，别刷屏。
+ * 数据源是深澜自助接口（仅校园网环境可达）—— 取不到就**静默跳过**：不在校内是常态，
+ * 不是故障。⚠️ 正因如此，真正可靠的判断时机是 App 前台取到数据那一刻
+ * （见 `CampusServiceViewModel`）；这个周期任务只是兜底。
  */
 class NetFeeCheckWorker(
     context: Context,
@@ -28,7 +29,10 @@ class NetFeeCheckWorker(
         ).campusNetRepo()
 
         NotifySentStore.init(applicationContext)
-        NetFeeChecker.checkAndNotify(applicationContext) { repo.fetchOnlineInfo().infoOrNull }
+        // 取一次数据给两个检查共用（避免重复请求）
+        val info = runCatching { repo.fetchOnlineInfo().infoOrNull }.getOrNull()
+        NetFeeChecker.check(applicationContext, info)
+        NetFlowChecker.check(applicationContext, info)
         return Result.success()
     }
 
@@ -53,14 +57,6 @@ object NetFeeChecker {
 
     /** 低于该值（元）提醒充值。 */
     const val THRESHOLD_YUAN = 10.0
-
-    /**
-     * 查一次余额，低于阈值发通知（按天去重）。
-     * [fetch] 由调用方注入 —— worker 里是真的仓库，测试里可以是假数据。
-     */
-    suspend fun checkAndNotify(context: Context, fetch: suspend () -> cn.bit101.android.data.school.CampusNetInfo?) {
-        check(context, runCatching { fetch() }.getOrNull())
-    }
 
     /**
      * 已经有数据时直接判（App 前台路径）。
