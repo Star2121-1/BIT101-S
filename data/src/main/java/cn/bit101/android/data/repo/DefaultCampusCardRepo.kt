@@ -48,18 +48,21 @@ internal class DefaultCampusCardRepo @Inject constructor(
     override suspend fun fetchSnapshot(): CampusCardSnapshot = withContext(Dispatchers.IO) {
         syncCookies()
 
-        val (html, finalUrl) = runCatching {
+        val (html, finalUrl, failed) = runCatching {
             client.newCall(
                 Request.Builder()
                     .url(HOME_URL)
                     .header("Accept", "text/html,application/xhtml+xml")
                     .build()
             ).execute().use { resp ->
-                resp.body?.string().orEmpty() to resp.request.url.toString()
+                Triple(resp.body?.string().orEmpty(), resp.request.url.toString(), false)
             }
-        }.getOrDefault("" to HOME_URL)
+        }.getOrElse { Triple("", HOME_URL, true) }
 
-        CampusCardLogic.parse(html, finalUrl).also {
+        // ⚠️ 请求失败**不能**当成「未登录」：那会让 UI 说「点开登录」（用户明明登录过），
+        // 真正该说的是「获取失败，重试」
+        (if (failed) CampusCardSnapshot(emptyList(), "", loggedIn = false, failed = true)
+        else CampusCardLogic.parse(html, finalUrl)).also {
             // 调试期：真机跑一次就能从 logcat 看到首页真实形态，据此写精确解析
             android.util.Log.i(
                 "CampusCardRepo",

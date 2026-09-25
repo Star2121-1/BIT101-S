@@ -75,4 +75,28 @@ class CampusNetLogicTest {
         assertTrue(info.nowEpochSeconds >= info.loginEpochSeconds)
         assertFalse(info.durationSeconds < 0)
     }
+
+    /** 三种结果要分开：有数据 / 未认证 / 连不上（UI 文案全靠这个区分）。 */
+    @Test
+    fun `parseResult 区分三类结果`() {
+        val online = CampusNetLogic.parseResult(sample)
+        assertTrue(online is CampusNetResult.Online)
+        assertEquals(40.01, online.infoOrNull!!.balanceYuan, 0.001)
+
+        // Srun 在请求方没有在线会话时返回 not_online（短文本，非 CSV）
+        assertEquals(CampusNetResult.NotOnline, CampusNetLogic.parseResult("not_online"))
+        assertEquals(CampusNetResult.NotOnline, CampusNetLogic.parseResult("Not_Online\n"))
+
+        // 错误页 / 空串：不可识别（与「未认证」是两件事）
+        assertTrue(CampusNetLogic.parseResult("<html>error</html>") is CampusNetResult.Failed)
+        assertTrue(CampusNetLogic.parseResult("") is CampusNetResult.Failed)
+    }
+
+    /** 只有 Online 才算有数据 —— 其余两种都必须给出 null，避免 UI 误判成成功。 */
+    @Test
+    fun `infoOrNull 仅 Online 有值`() {
+        assertNull(CampusNetResult.NotOnline.infoOrNull)
+        assertNull(CampusNetResult.Failed("x").infoOrNull)
+        assertNull(CampusNetLogic.parseResult("not_online").infoOrNull)
+    }
 }

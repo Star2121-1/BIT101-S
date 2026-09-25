@@ -49,6 +49,7 @@ import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.data.school.CampusCardLogic
 import cn.bit101.android.data.school.CampusNetLogic
+import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.component.Avatar
 import cn.bit101.android.features.common.component.CircularProgressIndicatorForPage
@@ -353,18 +354,21 @@ private fun CampusServiceSection(mainController: MainController) {
     val vm: CampusServiceViewModel = hiltViewModel()
 
     val snapshot by vm.snapshot.collectAsState()
-    val netInfo by vm.netInfo.collectAsState()
+    val netResult by vm.netResult.collectAsState()
     val loading by vm.loading.collectAsState()
     val fetched by vm.fetched.collectAsState()
 
     val balanceText = CampusCardLogic.balanceText(snapshot, loading, fetched)
 
-    // 校园网摘要：流量 + 余额；取不到时提示需校园网
-    val netText = when {
-        loading && !fetched -> "获取中…"
-        netInfo == null -> "需连接校园网"
-        else -> "已用 " + CampusNetLogic.formatTraffic(netInfo!!.bytesTotal) +
-            " · 余额 ¥%.2f".format(netInfo!!.balanceYuan)
+    // 校园网摘要：区分「不在校内」与「在校内但未认证」—— 一律说「需连接校园网」
+    // 会让在校内的用户无从下手（2026-09-25 踩过）
+    val netText = when (val r = netResult) {
+        null -> "获取中…"
+        is CampusNetResult.Online ->
+            "已用 " + CampusNetLogic.formatTraffic(r.info.bytesTotal) +
+                " · 余额 ¥%.2f".format(r.info.balanceYuan)
+        CampusNetResult.NotOnline -> "本机未认证"
+        is CampusNetResult.Failed -> "不在校园网"
     }
 
     Row(

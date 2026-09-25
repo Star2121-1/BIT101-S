@@ -28,7 +28,7 @@ class NetFeeCheckWorker(
         ).campusNetRepo()
 
         NotifySentStore.init(applicationContext)
-        NetFeeChecker.checkAndNotify(applicationContext) { repo.fetchOnlineInfo() }
+        NetFeeChecker.checkAndNotify(applicationContext) { repo.fetchOnlineInfo().infoOrNull }
         return Result.success()
     }
 

@@ -30,13 +30,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.data.school.CampusCardLogic
-import cn.bit101.android.data.school.CampusNetInfo
+import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.data.school.CampusCardSnapshot
 import cn.bit101.android.features.common.MainController
 
 /** 一卡通首页（CAS service 指回这里；登录在 App 内 WebView 完成）。 */
 private const val CAMPUS_CARD_LOGIN_URL = "https://dkykt.info.bit.edu.cn/home/openHomePageByCas"
+
+/** 校园网认证门户（深澜 Srun）。点「去认证」在 App 内 WebView 打开。 */
+private const val CAMPUS_NET_PORTAL_URL = "http://10.0.0.55/"
 
 /**
  * 「校园服务」详情页 —— 一卡通（余额摘要；流水卡在卡务系统，Web 端不可得）+
@@ -53,7 +56,7 @@ fun CampusServiceScreen(
     val vm: CampusServiceViewModel = hiltViewModel()
 
     val snapshot by vm.snapshot.collectAsState()
-    val netInfo by vm.netInfo.collectAsState()
+    val netResult by vm.netResult.collectAsState()
     val loading by vm.loading.collectAsState()
     val fetched by vm.fetched.collectAsState()
 
@@ -103,9 +106,9 @@ fun CampusServiceScreen(
                     small = true,
                 )
 
-                // 未登录时给入口：CAS 登录只能在 WebView 里完成（App 内打开，
-                // 不跳外部浏览器）；登录后回来下拉刷新即出余额
-                if (snapshot?.loggedIn != true) {
+                // 未登录时给入口：CAS 登录只能在 WebView 里完成（App 内打开，不跳外部浏览器）。
+                // ⚠️ 请求失败时**不给**这个按钮 —— 问题不在登录，重试即可（文案已说明）
+                if (snapshot?.loggedIn != true && snapshot?.failed != true) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         modifier = Modifier.fillMaxWidth(),
@@ -118,14 +121,11 @@ fun CampusServiceScreen(
 
             // 校园网
             SectionCard(title = "校园网（Srun 自助）") {
-                when {
-                    loading && !fetched -> InfoRow(label = "状态", value = "获取中…")
-                    netInfo == null -> InfoRow(
-                        label = "状态",
-                        value = "需连接校园网后获取",
-                    )
-                    else -> {
-                        val info = netInfo!!
+                when (val r = netResult) {
+                    null -> InfoRow(label = "状态", value = "获取中…")
+
+                    is CampusNetResult.Online -> {
+                        val info = r.info
                         InfoRow(label = "账号", value = info.userName)
                         InfoRow(label = "已用流量", value = CampusNetLogic.formatTraffic(info.bytesTotal))
                         InfoRow(label = "累计在线时长", value = CampusNetLogic.formatDuration(info.durationSeconds))
@@ -137,6 +137,24 @@ fun CampusServiceScreen(
                         )
                         InfoRow(label = "本机 IP", value = info.ip)
                         InfoRow(label = "账户余额", value = "¥%.2f".format(info.balanceYuan))
+                    }
+
+                    // 接口通了但本机没有在线会话 —— 这是**能直接处置**的状态，给认证入口
+                    CampusNetResult.NotOnline -> {
+                        InfoRow(label = "状态", value = "本机未在校园网认证")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { mainController.openWebPage(CAMPUS_NET_PORTAL_URL) },
+                        ) {
+                            Text(text = "去认证")
+                        }
+                    }
+
+                    // 连不上：多半不在校园网（内网地址校外不可达），属正常
+                    is CampusNetResult.Failed -> {
+                        InfoRow(label = "状态", value = "连不上 10.0.0.55（不在校园网时属正常）")
+                        InfoRow(label = "诊断", value = r.reason, small = true)
                     }
                 }
                 InfoRow(

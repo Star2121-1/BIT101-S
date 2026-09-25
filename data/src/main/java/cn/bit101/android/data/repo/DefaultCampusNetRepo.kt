@@ -1,11 +1,13 @@
 package cn.bit101.android.data.repo
 
-import cn.bit101.android.data.school.CampusNetInfo
+import cn.bit101.android.data.school.CampusDebugStore
 import cn.bit101.android.data.school.CampusNetLogic
+import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.data.repo.base.CampusNetRepo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -13,8 +15,12 @@ import javax.inject.Singleton
 /**
  * [CampusNetRepo] 的实现：GET `http://10.0.0.55/cgi-bin/rad_user_info`。
  *
- * 经典 Srun 接口，免登录、免 cookie —— 但仅校园网内可达；
- * 校外请求会超时/拒绝 → 捕获后返回 null（UI 提示需校园网环境）。
+ * 经典 Srun 接口，免登录、免 cookie，返回**请求方所在 NAT** 的在线会话；
+ * 仅校园网内可达。
+ *
+ * ⚠️ 失败要分两类送出（见 [CampusNetResult]）：HTTP 通了但 `not_online`
+ * 与连不上是两件事。`http://` 明文能通是因为 `network_security_config.xml`
+ * 只对 `10.0.0.55` 放行了明文（2026-09-24 踩过：全局禁明文时请求被系统直接拒）。
  */
 @Singleton
 internal class DefaultCampusNetRepo @Inject constructor() : CampusNetRepo {
@@ -28,17 +34,22 @@ internal class DefaultCampusNetRepo @Inject constructor() : CampusNetRepo {
         .readTimeout(5, TimeUnit.SECONDS)
         .build()
 
-    override suspend fun fetchOnlineInfo(): CampusNetInfo? = withContext(Dispatchers.IO) {
-        val (info, debug) = runCatching {
-            client.newCall(
-                okhttp3.Request.Builder().url(URL).build()
-            ).execute().use { resp ->
+    override suspend fun fetchOnlineInfo(): CampusNetResult = withContext(Dispatchers.IO) {
+        val (result, debug) = runCatching {
+            client.newCall(Request.Builder().url(URL).build()).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                CampusNetLogic.parse(body) to "status=${resp.code} len=${body.length} body=${body.take(120)}"
+                val parsed = if (resp.code == 200) {
+                    CampusNetLogic.parseResult(body)
+                } else {
+                    CampusNetResult.Failed("HTTP ${resp.code}")
+                }
+                parsed to "status=${resp.code} result=${parsed::class.simpleName} body=${body.take(120)}"
             }
-        }.getOrElse { null to "请求异常: ${it.message}" }
+        }.getOrElse {
+            CampusNetResult.Failed(it.message ?: "未知异常") to "请求异常: ${it.message}"
+        }
         // 调试：UI 直读（厂商压制 logcat，日志不可靠）
-        cn.bit101.android.data.school.CampusDebugStore.netDebug = debug
-        info
+        CampusDebugStore.netDebug = debug
+        result
     }
 }

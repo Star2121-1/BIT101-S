@@ -61,7 +61,7 @@ object CampusCardLogic {
         notLoggedIn: String = "未登录，进详情页登录",
     ): String = when {
         loading && !fetched -> "获取中…"
-        snapshot == null -> "获取失败"
+        snapshot == null || snapshot.failed -> "获取失败，下拉/点刷新重试"
         !snapshot.loggedIn -> notLoggedIn
         else -> snapshot.entries.firstOrNull()?.let { "¥${it.second}" } ?: "未识别到余额"
     }

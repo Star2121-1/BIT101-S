@@ -109,8 +109,18 @@ class CampusCardLogicTest {
         val logged = CampusCardLogic.parse(homeHtml, "https://dkykt.info.bit.edu.cn/home/openHomePageByCas")
         assertEquals("¥128.50", CampusCardLogic.balanceText(logged, loading = false, fetched = true))
         assertEquals("获取中…", CampusCardLogic.balanceText(logged, loading = true, fetched = false))
-        assertEquals("获取失败", CampusCardLogic.balanceText(null, loading = false, fetched = true))
+        assertEquals("获取失败，下拉/点刷新重试", CampusCardLogic.balanceText(null, loading = false, fetched = true))
 
+        val gate = CampusCardLogic.parse(gateHtml, "https://sso.bit.edu.cn/gate")
+        assertEquals("未登录，进详情页登录", CampusCardLogic.balanceText(gate, false, true))
+    }
+
+    /** 请求失败要说「重试」，不能说「未登录」—— 后者会让用户白去登一次。 */
+    @Test
+    fun `请求失败不等于未登录`() {
+        val failed = CampusCardSnapshot(emptyList(), "", loggedIn = false, failed = true)
+        assertEquals("获取失败，下拉/点刷新重试", CampusCardLogic.balanceText(failed, false, true))
+        // 未登录（请求成功但没会话）仍是登录引导
         val gate = CampusCardLogic.parse(gateHtml, "https://sso.bit.edu.cn/gate")
         assertEquals("未登录，进详情页登录", CampusCardLogic.balanceText(gate, false, true))
     }

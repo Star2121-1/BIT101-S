@@ -18,6 +18,18 @@ package cn.bit101.android.data.school
 object CampusNetLogic {
 
     /**
+     * 解析响应并**区分**「未在线」与「响应不可识别」。
+     *
+     * Srun 在请求方没有在线会话时返回短文本 `not_online`（不是 CSV）——
+     * 这与「不在校内 / 请求失败」是两件事，分开才能给出可处置的提示。
+     */
+    fun parseResult(body: String): CampusNetResult {
+        parse(body)?.let { return CampusNetResult.Online(it) }
+        if (body.contains("not_online", ignoreCase = true)) return CampusNetResult.NotOnline
+        return CampusNetResult.Failed("响应无法识别")
+    }
+
+    /**
      * 解析 CSV；不是合法响应（`not_online` / 错误页 / 空串）时返回 null。
      */
     fun parse(body: String): CampusNetInfo? {

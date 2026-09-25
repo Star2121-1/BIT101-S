@@ -229,10 +229,14 @@ fun WebScreen(
 }
 
 /** 是否应留在 App 内 WebView：BIT101 自己的站 + 学校域名（含各子系统）。 */
+/** 校园网认证门户（深澜 Srun，纯 HTTP 内网）—— 点「去认证」要留在 App 内。 */
+private const val CAMPUS_NET_PORTAL_HOST = "10.0.0.55"
+
 private fun isInternalUrl(url: String?): Boolean {
     if (url.isNullOrBlank()) return false
     // 域名大小写不敏感；含非法字符的 URL 会让 URI 抛异常 —— 按外部链接处理
     val host = runCatching { java.net.URI(url).host }.getOrNull()?.lowercase() ?: return false
     return host == "bit101.cn" || host.endsWith(".bit101.cn") ||
-        host == "bit.edu.cn" || host.endsWith(".bit.edu.cn")
+        host == "bit.edu.cn" || host.endsWith(".bit.edu.cn") ||
+        host == CAMPUS_NET_PORTAL_HOST
 }
