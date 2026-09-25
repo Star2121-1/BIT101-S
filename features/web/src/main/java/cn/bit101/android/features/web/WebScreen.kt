@@ -134,8 +134,11 @@ internal fun WebContent(
                 view: WebView?,
                 request: WebResourceRequest?
             ): Boolean {
-                // 拦截外部链接 使用默认浏览器打开
-                if (request?.url?.toString()?.startsWith(vm.BASE_URL) != true) {
+                // 外部链接交给系统浏览器；**学校域名（*.bit.edu.cn）必须留在 WebView 内**
+                // —— 统一身份认证（CAS）登录只有留在 App 内，会话 cookie 才会落进
+                // App 的 CookieManager；丢给外部浏览器等于白登（2026-09-25 实测：
+                // 一卡通登录被踢去 nubia 浏览器，App 里始终显示未登录）
+                if (!isInternalUrl(request?.url?.toString())) {
                     val intent = Intent(Intent.ACTION_VIEW, request?.url)
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
@@ -222,4 +225,12 @@ fun WebScreen(
         WebContent(mainController, url)
     }
 
+}
+
+/** 是否应留在 App 内 WebView：BIT101 自己的站 + 学校域名（含各子系统）。 */
+private fun isInternalUrl(url: String?): Boolean {
+    if (url == null) return false
+    val host = runCatching { java.net.URI(url).host }.getOrNull() ?: return false
+    return host == "bit101.cn" || host.endsWith(".bit101.cn") ||
+        host == "bit.edu.cn" || host.endsWith(".bit.edu.cn")
 }
