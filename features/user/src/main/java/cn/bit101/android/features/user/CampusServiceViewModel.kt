@@ -1,12 +1,15 @@
 package cn.bit101.android.features.user
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.data.repo.base.CampusCardRepo
 import cn.bit101.android.data.repo.base.CampusNetRepo
 import cn.bit101.android.data.school.CampusCardSnapshot
 import cn.bit101.android.data.school.CampusNetInfo
+import cn.bit101.android.features.notify.NetFeeChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +27,7 @@ import javax.inject.Inject
 internal class CampusServiceViewModel @Inject constructor(
     private val campusCardRepo: CampusCardRepo,
     private val campusNetRepo: CampusNetRepo,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
     private val _snapshot = MutableStateFlow<CampusCardSnapshot?>(null)
@@ -51,8 +55,12 @@ internal class CampusServiceViewModel @Inject constructor(
                 val card = async { runCatching { campusCardRepo.fetchSnapshot() }.getOrNull() }
                 val net = async { runCatching { campusNetRepo.fetchOnlineInfo() }.getOrNull() }
                 _snapshot.value = card.await()
-                _netInfo.value = net.await()
+                val info = net.await()
+                _netInfo.value = info
                 _fetched.value = true
+                // 网费不足提醒：拿到数据 = 人正在校内，是唯一可靠的判断时机
+                // （每日周期任务的固定时刻多半在校外，会被永远跳过）。按天去重。
+                runCatching { NetFeeChecker.check(appContext, info) }
             } finally {
                 _loading.value = false
             }

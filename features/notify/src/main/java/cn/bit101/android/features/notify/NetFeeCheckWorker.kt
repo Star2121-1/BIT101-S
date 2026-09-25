@@ -27,6 +27,7 @@ class NetFeeCheckWorker(
             NetFeeEntryPoint::class.java,
         ).campusNetRepo()
 
+        NotifySentStore.init(applicationContext)
         NetFeeChecker.checkAndNotify(applicationContext) { repo.fetchOnlineInfo() }
         return Result.success()
     }
@@ -58,11 +59,21 @@ object NetFeeChecker {
      * [fetch] 由调用方注入 —— worker 里是真的仓库，测试里可以是假数据。
      */
     suspend fun checkAndNotify(context: Context, fetch: suspend () -> cn.bit101.android.data.school.CampusNetInfo?) {
-        val info = runCatching { fetch() }.getOrNull() ?: return
+        check(context, runCatching { fetch() }.getOrNull())
+    }
 
-        val today = java.time.LocalDate.now().toString()
-        val key = "netfee_low_$today"
+    /**
+     * 已经有数据时直接判（App 前台路径）。
+     *
+     * ⚠️ 为什么必须有这条：深澜接口**只有校园网环境可达**，而每日周期任务的触发时刻是固定的
+     * （约等于首次启动 App 的时刻）—— 若那个点人在校外，检查会被永远跳过，等于没做。
+     * 而「刚成功取到数据」正是**人在校内**的确证，是唯一可靠的判断时机。按天去重。
+     */
+    suspend fun check(context: Context, info: cn.bit101.android.data.school.CampusNetInfo?) {
+        if (info == null) return
         if (info.balanceYuan >= THRESHOLD_YUAN) return
+
+        val key = "netfee_low_" + java.time.LocalDate.now()
         if (NotifySentStore.contains(key)) return
 
         NotifyCenter.notifyNetFee(context, info.balanceYuan)

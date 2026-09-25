@@ -48,4 +48,6 @@ dependencies {
     ksp "com.google.dagger:hilt-android-compiler:${versions.hilt}"
 
     implementation project(':features:common')
+    // 网费不足提醒：取到校园网数据时立刻判（见 CampusServiceViewModel）
+    implementation project(':features:notify')
 }

@@ -43,7 +43,6 @@ import com.google.accompanist.web.WebView
 import com.google.accompanist.web.rememberSaveableWebViewState
 import com.google.accompanist.web.rememberWebViewNavigator
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 @Composable
 internal fun WebContent(
@@ -154,16 +153,15 @@ internal fun WebContent(
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
                 super.doUpdateVisitedHistory(view, url, isReload)
 
-                val sid = runBlocking {
-                    vm.sid.get()
-                }
+                // 自动填充成绩查询学号密码。
+                // ⚠️ 这里在主线程回调里：原来无条件 runBlocking 读两次 DataStore（磁盘 IO），
+                // **每次页面导航都卡一下** → 先按 URL 短路，再放进协程里读。
+                if (url != "${vm.BASE_URL}/score/" && url != "${vm.BASE_URL}/score") return
 
-                val password = runBlocking {
-                    vm.password.get()
-                }
-
-                // 自动填充成绩查询学号密码
-                if ((url == "${vm.BASE_URL}/score/" || url == "${vm.BASE_URL}/score") && sid.isNotEmpty() && password.isNotEmpty()) {
+                scope.launch {
+                    val sid = vm.sid.get()
+                    val password = vm.password.get()
+                    if (sid.isEmpty() || password.isEmpty()) return@launch
                     val script = """
                     document.getElementById("sid").value = "$sid";
                     document.getElementById("sid").dispatchEvent(new Event('input'));
@@ -171,7 +169,6 @@ internal fun WebContent(
                     document.getElementById("password").dispatchEvent(new Event('input'));
                 """.trimIndent()
                     view.evaluateJavascript(script, null)
-
                 }
             }
         },
