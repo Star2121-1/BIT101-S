@@ -49,6 +49,8 @@ private fun NotifySettingPageContent(
     seatEnabled: Boolean,
     seatLead: Long,
     scoreEnabled: Boolean,
+    scoreStatus: String?,
+    checking: Boolean,
     permissionGranted: Boolean,
 
     onToggleEnabled: (Boolean) -> Unit,
@@ -58,6 +60,7 @@ private fun NotifySettingPageContent(
     onToggleDdlHour: (Boolean) -> Unit,
     onToggleSeat: (Boolean) -> Unit,
     onToggleScore: (Boolean) -> Unit,
+    onCheckScore: () -> Unit,
     onOpenLeadDialog: () -> Unit,
     onOpenSeatLeadDialog: () -> Unit,
     onRequestPermission: () -> Unit,
@@ -147,9 +150,21 @@ private fun NotifySettingPageContent(
             items = listOf(
                 SettingItemData.Switch(
                     title = "出分提醒",
-                    subTitle = "点开通知到「网」里看成绩",
+                    subTitle = "点开通知直接进成绩页",
                     checked = scoreEnabled,
                     onClick = onToggleScore,
+                ),
+                SettingItemData.Button(
+                    title = "立即检查一次",
+                    subTitle = "平时每 12 小时自动查一次；想知道现在的状态时点这里",
+                    text = if (checking) "检查中…" else "检查",
+                    enable = !checking,
+                    onClick = onCheckScore,
+                ),
+                SettingItemData.Card(
+                    title = "最近检查",
+                    subTitle = "成绩要经学校统一身份认证（每 12 小时至多查一次，避免触发风控）",
+                    text = scoreStatus ?: "…",
                 ),
             ),
         )
@@ -231,6 +246,8 @@ internal fun NotifySettingPage() {
     val seatEnabled by vm.seatEnabled.flow.collectAsState(initial = true)
     val seatLead by vm.seatSignInLeadMinutes.flow.collectAsState(initial = 15L)
     val scoreEnabled by vm.scoreEnabled.flow.collectAsState(initial = true)
+    val scoreStatus by vm.scoreStatus.collectAsState()
+    val checking by vm.checkingScore.collectAsState()
 
     var showLeadDialog by rememberSaveable { mutableStateOf(false) }
     var showSeatLeadDialog by rememberSaveable { mutableStateOf(false) }
@@ -245,6 +262,8 @@ internal fun NotifySettingPage() {
         seatEnabled = seatEnabled,
         seatLead = seatLead,
         scoreEnabled = scoreEnabled,
+        scoreStatus = scoreStatus,
+        checking = checking,
         permissionGranted = permission.granted,
 
         onToggleEnabled = vm::setEnabled,
@@ -253,7 +272,8 @@ internal fun NotifySettingPage() {
         onToggleDdlDay = vm::setDdlDayEnabled,
         onToggleDdlHour = vm::setDdlHourEnabled,
         onToggleSeat = vm::setSeatEnabled,
-        onToggleScore = vm::setScoreEnabled,
+        onToggleScore = { vm.setScoreEnabled(it); vm.refreshScoreStatus() },
+        onCheckScore = vm::checkScoreNow,
         onOpenLeadDialog = { showLeadDialog = true },
         onOpenSeatLeadDialog = { showSeatLeadDialog = true },
         onRequestPermission = permission::request,

@@ -30,25 +30,18 @@
 - **验收**：`adb shell am start -n cn.bit101.android/.features.MainActivity --es bit101_goto "score"`
   → 真机截图确认落在**成绩查询页**（学号密码已自动填入，点「查询」即出成绩）。不必等真出分。
 
-### A2 ⛔ 已查明：出分提醒不可能触发，需先解决认证（阻塞）
-- **`GET /scores` 恒返回 404**（`/scores/report` 同样是死接口；上游 BIT101-Android 亦然，非本 fork 回归）
-  → `fetchTable()` 永远返回 null → `syncAndDiff()` 早退 → **提醒从未触发过**（不是解析问题）
-- **真实契约已逆向出来**（写进 `ScoreApiService` 顶部注释）：
-  1. `POST https://login.bit101.flwfdd.xyz/api/jwb/bit101/score`，body `{username, password}`
-     → `202 {detail:{challenge_id, access_token, requested_services:["jwb"], expires_in}}`
-  2. `GET /api/auth/{challenge_id}`，头 `X-Challenge-Token: <access_token>` → 轮询
-     `{status, ready_services}`，`ready_services` 含 `jwb` 即就绪
-  3. 带 `Authorization: Bearer <access_token>` 再请求第 1 步路径 → `data.data` = 二维数组
-     （第 0 行表头，**与现有 `ScoreLogic` 的表头定位设计正好一致**，解析层不用大改）
-- **阻因（实测）**：第 2 步轮询返回 `status = waiting_sms` —— 学校 SSO 触发**短信二次验证**，
-  后台定时检查没有交互通道（再叠加 CAS 风控）。
-- **下轮两条候选路线**（择一，需先验证再动工）：
-  1. **前台触发**：用户在用 App 时查一次，短信验证走 App 已有的验证码弹窗通道（登录流程已有）
-  2. **复用学校会话**：App 已有有效 CAS cookie —— 试 `POST /api/jwb/bit101/score` 只带
-     `Cookie:` 不带账密（PC 探针可验，改 `api/src/probe` 十几行即可）
-
-### A3 出分提醒的开关与去重复核（S，机会性）
-- 与 B2 合并做（提醒设置页统一加开关）。
+### A2 ✅ 已完成（v1.9.9，真机实测已同步 50 门课）
+- **`GET /scores` 恒 404**（上游 BIT101-Android 亦然）→ 出分提醒**从未触发过**（不是解析问题）。
+- **新链路已接上**（逆向网页版得到的契约）：`POST login.bit101.flwfdd.xyz/api/jwb/bit101/score
+  {username,password}` → `202` challenge_id + access_token → `GET /api/auth/{id}`
+  （头 `X-Challenge-Token`）轮询到 `ready_services` 含 `jwb` → 带 `Authorization: Bearer`
+  再请求原路径；`data` 是「第 0 行表头」的二维数组 —— **正好喂给现有 `ScoreLogic`**。
+- ⚠️ **12h 限频必须有**：每次检查 = 一次学校统一身份认证登录，而触发点是「App 启动 + 每日任务」，
+  不限频必撞风控（昨晚实测短时间多次登录 → `waiting_sms`；今早冷却后再试即通过）。
+- ⚠️ **顺带修掉一个真 bug**：真实表头里 `课程编号` 在 `课程名称` 之前，原实现
+  `contains("课程")` 取第一个 → 会把 `09000410` 当课名。已改「关键词优先级 + 排除词」并用真实表头锁进单测。
+- **可见性**：设置 → 提醒 显示「最近检查：MM-dd HH:mm · 已同步 N 门课 / 学校要求短信验证，已暂停 /
+  获取失败 / 未登录」+ **「立即检查一次」**按钮（跳过限频）。
 
 ---
 
@@ -140,6 +133,8 @@
 |---|---|---|---|
 | ✅ 完成 | **B1 流量阈值提醒**（270/300 各一次） | — | v1.9.7，真机已验证 |
 | ✅ 完成 | **B3 口径确认 + 文案改「本月」** | — | v1.9.7 |
+| ✅ 完成 | **A1 成绩页深链** | — | v1.9.8，真机截图确认 |
+| ✅ 完成 | **A2 成绩链路迁移**（异步挑战流程 + 限频 + 状态可见） | — | v1.9.9，真机「已同步 50 门课」 |
 | ✅ 关闭 | **B2 提醒开关与阈值** | 用户决定硬编码 | 不做 |
 | 1 | **A1 成绩页路由** | 无 | ✅ 可独立做完 + 真机验证 |
 | 2 | **A2 `/scores` 形状验证** | 需探针跑一次（凭据已在 `secrets.local.env`） | ✅ |

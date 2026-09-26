@@ -17,11 +17,3 @@ class GetScoreDataModel private constructor() {
         val data: com.google.gson.JsonElement? = null,
     )
 }
-
-// 获取可信成绩单，需要登录
-class GetScoreReport private constructor() {
-    data class Response(
-        // 图片链接列表
-        val data: ArrayList<String>,
-    )
-}

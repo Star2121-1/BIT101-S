@@ -33,7 +33,9 @@ object ScoreLogic {
         val key: String get() = "${course.trim()}|${term?.trim().orEmpty()}"
     }
 
+    /** 按优先级找列：先试更具体的词，再退回宽泛的词；带排除词避开「课程**编号**」这类。 */
     private val COURSE_KEYWORDS = listOf("课程名", "课程")
+    private val COURSE_EXCLUDE = listOf("编号", "代码", "号")
     private val SCORE_KEYWORDS = listOf("成绩", "分数", "总评", "得分")
     private val TERM_KEYWORDS = listOf("学期", "学年")
 
@@ -57,10 +59,10 @@ object ScoreLogic {
         if (headerIndex == -1) return emptyList()
         val header = rows[headerIndex]
 
-        val courseCol = header.indexOfFirst { c -> COURSE_KEYWORDS.any { c.contains(it) } }
+        val courseCol = findColumn(header, COURSE_KEYWORDS, COURSE_EXCLUDE)
         if (courseCol < 0) return emptyList()
-        val scoreCol = header.indexOfFirst { c -> SCORE_KEYWORDS.any { c.contains(it) } }
-        val termCol = header.indexOfFirst { c -> TERM_KEYWORDS.any { c.contains(it) } }
+        val scoreCol = findColumn(header, SCORE_KEYWORDS)
+        val termCol = findColumn(header, TERM_KEYWORDS)
 
         return rows.drop(headerIndex + 1).mapNotNull { row ->
             val course = row.getOrNull(courseCol)?.trim().orEmpty()
@@ -71,6 +73,24 @@ object ScoreLogic {
                 term = termCol.takeIf { it >= 0 }?.let { row.getOrNull(it)?.trim()?.ifBlank { null } },
             )
         }
+    }
+
+    /**
+     * 按**关键词优先级**找列。
+     *
+     * ⚠️ 真实表头（2026-09-26 实测）是
+     * `['序号','开课学期','课程编号','课程名称','成绩','成绩标识',...]` ——
+     * 直接 `contains("课程")` 取第一个会命中**课程编号**（拿到 `09000410` 当课名）。
+     * 所以先试「课程名」，再退回「课程」并排除编号/代码。
+     */
+    private fun findColumn(header: List<String>, keywords: List<String>, exclude: List<String> = emptyList()): Int {
+        for (keyword in keywords) {
+            val index = header.indexOfFirst { cell ->
+                cell.contains(keyword) && exclude.none { cell.contains(it) }
+            }
+            if (index >= 0) return index
+        }
+        return -1
     }
 
     private fun rowsOf(root: JsonElement?): List<List<String>> {

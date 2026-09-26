@@ -7,7 +7,7 @@ import cn.bit101.api.service.bit101.MessageApiService
 import cn.bit101.api.service.bit101.PapersApiService
 import cn.bit101.api.service.bit101.PostersApiService
 import cn.bit101.api.service.bit101.ReactionApiService
-import cn.bit101.api.service.bit101.ScoreApiService
+import cn.bit101.api.service.bit101.ScoreQueryApiService
 import cn.bit101.api.service.bit101.UploadApiService
 import cn.bit101.api.service.bit101.UserApiService
 import cn.bit101.api.service.bit101.VariablesApiService
@@ -23,6 +23,7 @@ import retrofit2.create
 
 class Bit101Api internal constructor(
     bit101Retrofit: Retrofit,
+    loginRetrofit: Retrofit,
     appRetrofit: Retrofit,
     jwmsRetrofit: Retrofit,
     jwcRetrofit: Retrofit,
@@ -35,10 +36,16 @@ class Bit101Api internal constructor(
     val papers: PapersApiService = bit101Retrofit.create()
     val posters: PostersApiService = bit101Retrofit.create()
     val reaction: ReactionApiService = bit101Retrofit.create()
-    val score: ScoreApiService = bit101Retrofit.create()
     val upload: UploadApiService = bit101Retrofit.create()
     val user: UserApiService = bit101Retrofit.create()
     val variables: VariablesApiService = bit101Retrofit.create()
+
+    /**
+     * 成绩（异步挑战流程，挂在**认证主机**上）。
+     *
+     * ⚠️ 旧的 `GET /scores`（业务主机）已失效（404），教务成绩改由这里转发。
+     */
+    val scoreQuery: ScoreQueryApiService = loginRetrofit.create()
 
     val app: AppApiService = appRetrofit.create()
 

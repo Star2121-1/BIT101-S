@@ -17,8 +17,17 @@ interface ScoreRepo {
     /**
      * 同步并差分。
      *
+     * @param force 跳过 12h 限频（用户点「立即检查一次」时用）。⚠️ 每次检查都要走一遍学校登录，别在自动路径上用。
      * @return 本次**新出分**的课程。首次运行只建立基线、返回空；
      *   解析失败 / 未登录也返回空 —— 出分提醒是尽力而为，绝不做错。
      */
-    suspend fun syncAndDiff(): List<ScoreEntry>
+    suspend fun syncAndDiff(force: Boolean = false): List<ScoreEntry>
+
+    /**
+     * 最近一次检查的结果（设置页展示）。
+     *
+     * ⚠️ 检查要经学校 SSO，**可能被风控拦成「要短信验证」**，而它是后台静默跑的 ——
+     * 没有这个状态，「为什么没提醒」就无从判断。见 [cn.bit101.android.data.score.ScoreCheckStore]。
+     */
+    suspend fun lastCheck(): cn.bit101.android.data.score.ScoreCheckStore.Status?
 }

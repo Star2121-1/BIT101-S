@@ -36,6 +36,13 @@ object Bit101ApiFactory {
                 .baseUrl(urls.bit101Url)
                 .build(),
 
+            // 认证/代理主机（成绩等教务数据的异步挑战流程走这里）
+            loginRetrofit = Retrofit.Builder()
+                .client(option.bit101Client)
+                .addConverterFactory(converterFactory)
+                .baseUrl(urls.loginBit101Url)
+                .build(),
+
             appRetrofit = Retrofit.Builder()
                 .addConverterFactory(converterFactory)
                 .baseUrl(urls.androidUrl)

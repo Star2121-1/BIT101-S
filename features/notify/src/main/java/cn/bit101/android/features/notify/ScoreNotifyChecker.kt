@@ -20,14 +20,14 @@ import android.content.Context
  * 通知里**只有课名、没有分数**。文案由 `ScoreLogic.summaryText` 生成
  * （那里有单测锁住这条），这里不做任何拼接。
  */
-internal object ScoreNotifyChecker {
+object ScoreNotifyChecker {
 
     /**
      * 检查一次并按需发通知。
      *
      * @return 本次通知了几门课（0 = 没有新课或被开关/错误拦下）
      */
-    suspend fun checkAndNotify(context: Context): Int {
+    suspend fun checkAndNotify(context: Context, force: Boolean = false): Int {
         val repository = NotifyRepositoryHolder.ensureRepository(context) ?: return 0
         if (!runCatching { repository.scoreNotifyEnabled() }.getOrDefault(false)) return 0
 
@@ -38,7 +38,7 @@ internal object ScoreNotifyChecker {
             ).scoreRepo()
         }.getOrNull() ?: return 0
 
-        val newScores = runCatching { scoreRepo.syncAndDiff() }.getOrDefault(emptyList())
+        val newScores = runCatching { scoreRepo.syncAndDiff(force = force) }.getOrDefault(emptyList())
         if (newScores.isEmpty()) return 0
 
         val text = cn.bit101.android.data.score.ScoreLogic.summaryText(newScores)
