@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.data.school.CampusCardBalanceLogic
 import cn.bit101.android.data.school.CampusCardLogic
 import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.data.school.CampusNetLogic
@@ -59,6 +60,7 @@ fun CampusServiceScreen(
     val netResult by vm.netResult.collectAsState()
     val loading by vm.loading.collectAsState()
     val fetched by vm.fetched.collectAsState()
+    val balanceTrend by vm.balanceTrend.collectAsState()
 
     // 从「登录一卡通」的 WebView 返回时会重新进入组合，但 VM 保留、init 不会重跑，
     // 所以这里补一次刷新；首次进入时 init 已发起请求，被 VM 里的 _loading 守卫挡掉。
@@ -96,8 +98,10 @@ fun CampusServiceScreen(
                 val entries = snapshot?.entries.orEmpty()
                 if (snapshot?.loggedIn == true && entries.isNotEmpty()) {
                     // 服务端可能下发多条（余额 / 过渡余额 / 芯片余额…），全都列出来 ——
-                    // 只显示第一条会把「过渡余额」这类对得上账的信息漏掉
-                    entries.forEach { (label, value) -> InfoRow(label = label, value = value) }
+                    // 只显示第一条会把「过渡余额」这类对得上账的信息漏掉。
+                    // ⚠️ 解析出来的是**裸数字**（如 `34.05`），金额前缀得自己补：
+                    // 少了 ¥ 这一行看着和「学号」「IP」是一类字段
+                    entries.forEach { (label, value) -> InfoRow(label = label, value = "¥$value") }
                 } else {
                     InfoRow(
                         label = "账户余额",
@@ -105,6 +109,15 @@ fun CampusServiceScreen(
                             snapshot, loading, fetched,
                             notLoggedIn = "未登录，点下方「登录一卡通」",
                         ),
+                    )
+                }
+                // 余额变化：**本地按次记录的余额差**（`CampusCardBalanceLogic`）。
+                // 一卡通流水拿不到（钉钉客户端专属），这是替代方案 —— 不精确，但能看出花得快不快。
+                // 只在已登录时显示：未登录时页面上那几个数字来自登录页，算趋势没有意义
+                if (snapshot?.loggedIn == true) {
+                    InfoRow(
+                        label = "余额变化",
+                        value = CampusCardBalanceLogic.trendRowText(balanceTrend),
                     )
                 }
                 InfoRow(

@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowRight
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material3.*
@@ -22,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -155,11 +157,18 @@ internal fun ClassroomList(
         }
 }
 
+/**
+ * 三级折叠的**中间层：教学楼**。
+ *
+ * @param subtitle 副标题（一般是校区名）。**分组之后传 null** —— 上面那层
+ *   校区分组已经写着校区名了，再来一行是纯噪音
+ */
 @Composable
 internal fun BuildingItem(
     buildingInfo: BuildingInfo,
     expanded: Boolean,
     onSwitchActive: () -> Unit,
+    subtitle: String? = buildingInfo.campusName,
 ) {
     // 这里如果用 PrimaryContainer 系颜色的话, 就会和右下角的按钮完美地糊在一块, 用 SecondaryContainer 系的又会和教室完美地糊在一块
     // 于是调了半天调出了个勉强不会糊在一块的颜色
@@ -202,8 +211,85 @@ internal fun BuildingItem(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+            Icon(
+                Icons.AutoMirrored.Outlined.ArrowRight,
+                contentDescription = null,
+                modifier = Modifier
+                    .scale(1.25f)
+                    .padding(horizontal = 5.dp)
+                    .rotate(arrowRotateDegrees)
+            )
+        }
+    }
+}
+
+/**
+ * 三级折叠的**最外层：校区**。
+ *
+ * 颜色刻意用中性的 `surfaceContainerHigh`：PrimaryContainer 系会和右下角那组 FAB
+ * 糊在一起、SecondaryContainer 系又和教室卡片糊在一起（见 [BuildingItem] 的注释）。
+ * 层级靠「色块明度 + 缩进 + 字号」区分，而不是靠再加一种主题色。
+ */
+@Composable
+internal fun CampusItem(
+    campusName: String,
+    buildingCount: Int,
+    isCurrent: Boolean,
+    expanded: Boolean,
+    onSwitchActive: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(10.dp, 5.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .clickable { onSwitchActive() },
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        val arrowRotateDegrees: Float by animateFloatAsState(if (expanded) 90f else 0f)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(15.dp, 15.dp, 5.dp, 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Place,
+                contentDescription = null,
+                modifier = Modifier
+                    .scale(1.15f)
+                    .padding(end = 10.dp),
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+            ) {
                 Text(
-                    text = buildingInfo.campusName,
+                    text = campusName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = buildString {
+                        append("$buildingCount 栋教学楼")
+                        if (isCurrent) append(" · 默认")
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -254,11 +340,26 @@ internal fun FreeClassroomSearch(
 ) {
     val getBuildingTypeStatus by vm.getBuildingTypeStatusLiveData.observeAsState()
 
-    val currentBuildings = (getBuildingTypeStatus as? SimpleDataState.Success)?.data ?: emptyList()
+    // 接口一次把**所有校区**的楼都拿回来，这里按校区分组 → 三级折叠的最外层
+    val allBuildings = (getBuildingTypeStatus as? SimpleDataState.Success)?.data ?: emptyList()
 
     val currentCampusCode by vm.nowCampusFlow.collectAsState(initial = null)
 
     val currentCampusName by vm.nowCampusNameFlow.collectAsState(initial = null)
+
+    val campusGroups = remember(allBuildings, currentCampusCode, currentCampusName) {
+        CampusGrouping.group(
+            buildings = allBuildings,
+            currentCampusCode = currentCampusCode.orEmpty(),
+            currentCampusName = currentCampusName.orEmpty(),
+        )
+    }
+
+    // 进来先展开「默认校区」：改版前这里直接就是教学楼列表，多一层之后不自动展开
+    // 会让人觉得白白多点一次（只在用户没动过展开状态时做一次）
+    LaunchedEffect(campusGroups) {
+        campusGroups.firstOrNull { it.isCurrent }?.let { vm.autoExpandCampus(it.campusCode) }
+    }
 
     val getClassroomStatusMap = vm.getClassroomsStatesMap
 
@@ -268,7 +369,11 @@ internal fun FreeClassroomSearch(
 
     val freeMinutesThreshold by vm.freeMinutesThresholdFlow.collectAsState(initial = null)
 
-    val selectedIndices = vm.selectedIndices
+    // ⚠️ 用 SnapshotStateList 本身做状态源（读它的地方会自动重组），
+    // 别把它拷进普通 List —— 拷了之后展开/收起就不会触发重组了
+    val expandedCampuses = vm.expandedCampuses
+
+    val expandedBuildings = vm.expandedBuildings
 
     val listState = rememberLazyListState()
 
@@ -284,7 +389,7 @@ internal fun FreeClassroomSearch(
 
             vm.loadBuildingTypes()
 
-            vm.clearSelectState()
+            vm.clearExpanded()
             listState.scrollToItem(0)
         }
     }
@@ -335,94 +440,123 @@ internal fun FreeClassroomSearch(
         LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
             if (getBuildingTypeStatus is SimpleDataState.Loading) {
                 item { LoadingTip("正在拉取教学楼列表...") }
+            } else if (campusGroups.isEmpty()) {
+                item {
+                    // 空态说得保守一点：以前会点名「没有获取到 XX 校区的教学楼」，
+                    // 但现在列表是**所有校区**的，再点名某个校区就不准确了
+                    Text(
+                        text = "没有获取到教学楼QwQ\n(确认已登录学校账号，或到设置里切换默认校区)",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp, 5.dp)
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                            .padding(10.dp, 5.dp),
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
             } else {
-                if(currentBuildings.isEmpty()) {
-                    if(!currentCampusName.isNullOrEmpty()) {
-                        item {
-                            Text(
-                                text = "没有获取到${
-                                    if (currentCampusName!!.endsWith("校区"))
-                                        currentCampusName
-                                    else
-                                        "${currentCampusName}校区"
-                                }的教学楼QwQ\n(请尝试在设置中切换校区)",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp, 5.dp)
-                                    .clip(MaterialTheme.shapes.medium)
-                                    .background(MaterialTheme.colorScheme.secondaryContainer)
-                                    .padding(10.dp, 5.dp),
-                                textAlign = TextAlign.Center,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
-                        }
+                itemsIndexed(
+                    campusGroups,
+                    // 用校区代码做 key：分组顺序变化（比如换了默认校区）时不会张冠李戴
+                    key = { _, group -> "campus:${group.campusCode}" },
+                ) { _, group ->
+                    val campusExpanded by remember {
+                        derivedStateOf { expandedCampuses.contains(group.campusCode) }
                     }
-                } else {
-                    itemsIndexed(currentBuildings) { index, item ->
-                        val nowExpanded by remember { derivedStateOf { selectedIndices.contains(index) } }
 
-                        BuildingItem(
-                            buildingInfo = item,
-                            expanded = nowExpanded,
-                            onSwitchActive = {
-                                if(!nowExpanded) {
-                                    vm.loadClassroomInfos(item.buildingIndex)
+                    CampusItem(
+                        campusName = group.campusName,
+                        buildingCount = group.buildings.size,
+                        isCurrent = group.isCurrent,
+                        expanded = campusExpanded,
+                        onSwitchActive = { vm.switchCampus(group.campusCode) },
+                    )
+
+                    AnimatedVisibility(
+                        visible = campusExpanded,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(start = 25.dp)
+                        ) {
+                            group.buildings.forEach { building ->
+                                val buildingExpanded by remember(building.buildingIndex) {
+                                    derivedStateOf {
+                                        expandedBuildings.contains(building.buildingIndex)
+                                    }
                                 }
 
-                                vm.switchSelectState(index)
-                            }
-                        )
+                                BuildingItem(
+                                    buildingInfo = building,
+                                    expanded = buildingExpanded,
+                                    // 上面那层校区分组已经写着校区名了，副标题再来一遍是噪音
+                                    subtitle = null,
+                                    onSwitchActive = {
+                                        if (!buildingExpanded) {
+                                            vm.loadClassroomInfos(building.buildingIndex)
+                                        }
 
-                        AnimatedVisibility(
-                            visible = nowExpanded,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically()
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(start = 25.dp)
-                            ) {
-                                if (getClassroomStatusMap[item.buildingIndex] is SimpleState.Loading) {
-                                    LoadingTip("正在获取教室列表...")
-                                } else {
-                                    if (currentClassroomData.containsKey(item.buildingIndex)) {
-                                        vm.refreshClassroomInfoIfInvalid(item.buildingIndex)
+                                        vm.switchBuilding(building.buildingIndex)
                                     }
+                                )
 
-                                    val currentClassrooms =
-                                        currentClassroomData[item.buildingIndex]
-                                            .orEmpty()
-                                            .filter {
-                                                !hideBusyClassroom.value || vm.isFreeNow(
-                                                    it,
-                                                    nowTime,
-                                                    freeMinutesThreshold ?: 0
-                                                )
+                                AnimatedVisibility(
+                                    visible = buildingExpanded,
+                                    enter = fadeIn() + expandVertically(),
+                                    exit = fadeOut() + shrinkVertically()
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(start = 25.dp)
+                                    ) {
+                                        if (getClassroomStatusMap[building.buildingIndex] is SimpleState.Loading) {
+                                            LoadingTip("正在获取教室列表...")
+                                        } else {
+                                            if (currentClassroomData.containsKey(building.buildingIndex)) {
+                                                vm.refreshClassroomInfoIfInvalid(building.buildingIndex)
                                             }
 
-                                    if (currentClassrooms.isEmpty()) {
-                                        Text(
-                                            text = "未找到教室 :(",
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(10.dp, 5.dp)
-                                                .clip(MaterialTheme.shapes.medium)
-                                                .background(MaterialTheme.colorScheme.secondaryContainer)
-                                                .padding(10.dp, 5.dp),
-                                            textAlign = TextAlign.Center,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        )
-                                    } else {
-                                        ClassroomList(
-                                            currentClassrooms = currentClassrooms,
-                                            nowTime = nowTime,
-                                            isFreeNow = { vm.isFreeNow(it, nowTime, freeMinutesThreshold ?: 0) },
-                                        )
+                                            val currentClassrooms =
+                                                currentClassroomData[building.buildingIndex]
+                                                    .orEmpty()
+                                                    .filter {
+                                                        !hideBusyClassroom.value || vm.isFreeNow(
+                                                            it,
+                                                            nowTime,
+                                                            freeMinutesThreshold ?: 0
+                                                        )
+                                                    }
+
+                                            if (currentClassrooms.isEmpty()) {
+                                                Text(
+                                                    text = "未找到教室 :(",
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(10.dp, 5.dp)
+                                                        .clip(MaterialTheme.shapes.medium)
+                                                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                                                        .padding(10.dp, 5.dp),
+                                                    textAlign = TextAlign.Center,
+                                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                )
+                                            } else {
+                                                ClassroomList(
+                                                    currentClassrooms = currentClassrooms,
+                                                    nowTime = nowTime,
+                                                    isFreeNow = { vm.isFreeNow(it, nowTime, freeMinutesThreshold ?: 0) },
+                                                )
+                                            }
+                                        }
                                     }
+
                                 }
                             }
-
                         }
                     }
                 }

@@ -40,9 +40,20 @@ internal class FreeClassroomSearchViewModel @Inject constructor(
 
     val freeMinutesThresholdFlow = settingData.freeMinutesThreshold.flow
 
+    /**
+     * 教学楼列表状态 —— **一次拿全部校区的楼**，前端再用 [CampusGrouping] 分组成
+     * 「校区 → 教学楼 → 教室」三级。
+     */
     val getBuildingTypeStatusLiveData = MutableLiveData<SimpleDataState<List<BuildingInfo>>?>(null)
 
-    val selectedIndices = mutableStateListOf<Int>()
+    /** 已展开的校区（存校区代码；用 code 而不是下标，分组顺序变了也不会串页）。 */
+    val expandedCampuses = mutableStateListOf<String>()
+
+    /** 已展开的教学楼（存教学楼代码，即 `buildingIndex`）。 */
+    val expandedBuildings = mutableStateListOf<String>()
+
+    /** 自动展开「当前校区」是否已经做过（见 [autoExpandCampus]）。 */
+    private var autoExpandDone = false
 
     data class ClassroomBusyData(
         val classroom: ClassroomInfo,
@@ -51,13 +62,27 @@ internal class FreeClassroomSearchViewModel @Inject constructor(
         val nextFreeTime: LocalTime? = null,    // 只在 busy 时有值, 记录还有多久才会迎来下一个 (长于阈值的) 空闲时间
     )
 
+    /**
+     * 拉教学楼列表。
+     *
+     * ⚠️ **不带 campusCode**：SDK 在不给校区时压根不加过滤参数
+     * （见 `Campus.getBuildingList`），服务端会把**所有校区**的楼一起返回 ——
+     * 正好用来做「先按校区分组」。每栋楼自带 `XXXQDM` / `XXXQDM_DISPLAY`，
+     * 所以不必再为每个校区单独发一次请求。
+     *
+     * ⚠️ 万一服务端在这种调用下返回空 / 报错，就**退回「只取当前校区」**——
+     * 也就是这个功能支持分校区之前的老行为。宁可少一层分组，也不能比原来更差。
+     */
     private suspend fun getBuildingTypesWithoutState(): List<BuildingInfo> {
-        val nowCampusCode = nowCampusFlow.first()
+        val currentCode = nowCampusFlow.first()
 
-        return if (nowCampusCode.isEmpty())
-            freeClassroomRepo.getBuildingInfos()
-        else
-            freeClassroomRepo.getBuildingInfos(nowCampusCode)
+        val all = runCatching { freeClassroomRepo.getBuildingInfos() }
+        if (all.getOrNull()?.isNotEmpty() == true) return all.getOrThrow()
+
+        // 没有退路（连当前校区都没设过）→ 如实抛出失败，让 UI 提示"拉取失败"
+        if (currentCode.isEmpty()) return all.getOrElse { throw it }
+
+        return freeClassroomRepo.getBuildingInfos(currentCode)
     }
 
     fun loadBuildingTypes() = withSimpleDataStateLiveData(getBuildingTypeStatusLiveData) {
@@ -279,13 +304,34 @@ internal class FreeClassroomSearchViewModel @Inject constructor(
                 || classroomBusyData.nextBusyTime.toSecondOfDay() >= nowTime.toSecondOfDay() + freeMinutesThreshold * 60
     }
 
-    fun switchSelectState(index:Int){
-        if(selectedIndices.contains(index))
-            selectedIndices.remove(index)
-        else
-            selectedIndices.add(index)
+    // ------------------------------------------------------------------ 展开状态
+
+    /** 展开 / 收起一个校区。 */
+    fun switchCampus(campusCode: String) = toggle(expandedCampuses, campusCode)
+
+    /** 展开 / 收起一栋教学楼（展开时要由调用方先触发 [loadClassroomInfos]）。 */
+    fun switchBuilding(buildingId: String) = toggle(expandedBuildings, buildingId)
+
+    /**
+     * 加载完之后自动展开**当前校区**（只做一次）。
+     *
+     * 改版前空教室页进来直接就是教学楼列表；现在多了一层「校区」，
+     * 不自动展开的话老用户会觉得白白多了一次点击。
+     */
+    fun autoExpandCampus(campusCode: String) {
+        if (autoExpandDone || campusCode.isEmpty()) return
+        autoExpandDone = true
+        if (!expandedCampuses.contains(campusCode)) expandedCampuses.add(campusCode)
     }
-    fun clearSelectState() {
-        selectedIndices.clear()
+
+    /** 校区切换 / 下拉刷新时清空展开状态（下次会重新自动展开当前校区）。 */
+    fun clearExpanded() {
+        expandedCampuses.clear()
+        expandedBuildings.clear()
+        autoExpandDone = false
+    }
+
+    private fun toggle(list: MutableList<String>, key: String) {
+        if (list.contains(key)) list.remove(key) else list.add(key)
     }
 }

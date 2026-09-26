@@ -328,16 +328,25 @@ class WidgetLogicTest {
         assertEquals(listOf("高等数学"), page.courses().map { it.main })
     }
 
-    /** 课程行可点（跳课表），空闲行不可点。 */
+    /**
+     * 课程行与空闲行**都可点**，并且都要带 `openTab = COURSE`。
+     *
+     * ⚠️ `openTab` 不能省：`GotoRequest.Focus(tab=null, key=null)` 会被 `takeIf`
+     * 判成「没有附加信息」丢掉，`TabPager` 拿到 `requestedPage = null` 就不切页 ——
+     * App 已经停在课表页的 DDL / 动态 tab 上时，点课程行会「毫无反应」
+     * （用户 2026-09-26 反馈的正是这个）。
+     */
     @Test
-    fun `课程行带 openRoute 空闲行不带`() {
+    fun `课程页每行都带 openRoute 与课表 tab`() {
         val courses = listOf(course(name = "高等数学", weekday = 3, start = 1, end = 2))
 
         val page = WidgetLogic.coursePage(courses, today, now = null, firstDay = firstDay)
 
         assertEquals(2, page.items.size)
-        assertEquals("schedule", page.items[0].openRoute)
-        assertNull(page.items[1].openRoute)
+        page.items.forEach { line ->
+            assertEquals("schedule", line.openRoute)
+            assertEquals(ScheduleTabs.COURSE, line.openTab)
+        }
     }
 
     @Test

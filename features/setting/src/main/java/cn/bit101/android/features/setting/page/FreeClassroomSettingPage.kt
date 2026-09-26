@@ -44,7 +44,7 @@ internal fun CampusSelectDialog(
     AlertDialog(
         modifier = Modifier.fillMaxHeight(0.9f),
         onDismissRequest = onDismiss,
-        title = { Text(text = "切换校区") },
+        title = { Text(text = "选择默认校区") },
         text = {
             if (loading) {
                 Box(
@@ -107,7 +107,10 @@ private fun FreeClassroomSettingPageContent(
 ) {
     val hideSettings = listOf(
         SettingItemData.Button(
-            title = "当前校区",
+            // 空教室页现在会把**全部校区**都列出来（校区 → 教学楼 → 教室），
+            // 这个设置项只决定「哪个校区排最前、进来就自动展开」，所以叫「默认校区」
+            title = "默认校区",
+            subTitle = "空教室页优先展开的校区",
             text = settingData.currentCampus.displayName,
             onClick = onOpenEditCampusDialog,
         ),

@@ -131,8 +131,12 @@ data class WidgetLine(
     val openRoute: String? = null,
 
     /**
-     * 打开 App 后停在第几个 tab（取值见 `ScheduleTabs`）；null = 该页的第一个 tab。
+     * 打开 App 后停在第几个 tab（取值见 `ScheduleTabs`）。
      * 只对课表页（`openRoute == "schedule"`）有意义。
+     *
+     * ⚠️ **不要留 null**：`GotoRequest.Focus(tab = null, key = null)` 会被
+     * `takeIf` 判成「没有附加信息」而丢掉，`TabPager` 收到 `requestedPage = null`
+     * 就不切页 —— App 已经停在课表页的别的 tab 时，点条目会「毫无反应」。
      */
     val openTab: Int? = null,
 
@@ -540,9 +544,17 @@ object WidgetLogic {
                 block.course.toLine(
                     state = if (focus?.first == courseNo) focus.second else null,
                     table = timeTable,
-                ).copy(openRoute = PageShowOnNav.Schedule.toPageData().value)
+                ).copy(
+                    openRoute = PageShowOnNav.Schedule.toPageData().value,
+                    openTab = ScheduleTabs.COURSE,
+                )
             } else {
-                freeLine(block, timeTable)
+                // 空闲行同样可点：整页的语义都是「进 App 看课表」，
+                // 只有课程行能点会让空档处点了没反应（用户 2026-09-26 反馈）
+                freeLine(block, timeTable).copy(
+                    openRoute = PageShowOnNav.Schedule.toPageData().value,
+                    openTab = ScheduleTabs.COURSE,
+                )
             }
         }
 
