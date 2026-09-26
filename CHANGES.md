@@ -1,5 +1,23 @@
 # CHANGES
 
+## 2026-09-26 v1.9.10 详情页字段补全 + 工程卫生清理
+
+- **一卡通详情页**：遍历展示服务端下发的**全部条目**（余额 / 过渡余额 / 芯片余额…）——
+  原来只显示第一条，会把「过渡余额」这类对账信息漏掉
+- **校园网详情页**：「本月已用流量」改为 **`366.4 GB / 300 GB（已超限速阈值）`**，
+  一眼看到离限速还有多远（`CampusNetLogic.trafficStatusText`，纯函数 + 单测）
+- **限额常量单一来源**：`LIMIT_BYTES` / `WARN_BYTES` 从 `features/notify` 移到
+  `data/school/CampusNetLogic`，提醒侧（`NetFlowChecker` / `NotifyCenter`）反向引用
+  —— 原来两处各写一份 300 / 270 GB
+- 卫生清理：
+  - 删 3 个从未使用的权限（READ_PHONE_STATE / ACCESS_WIFI_STATE / ACCESS_NETWORK_STATE）
+  - 删死常量 `PaperUrl` / `CourseUrl` / `MessageUrl`（`ScoreUrl` 保留：v1.9.8 起在用）
+  - 删零调用函数 `NotifyAppStartup.resetAndReschedule()` / `cancelAll()`
+  - `nowEpochSeconds` 注释写明用途（界面不展示，用于数据新鲜度校验 / 单测）
+- 评估后**决定不做**：网络超时统一 —— OkHttp 默认 read 超时 10s 已能防挂死，
+  且没有超时投诉；统一改动反而可能影响 webvpn 慢链路
+- 单测：`CampusNetLogicTest` 9（新增本月流量文案）、`NotifyLogicTest` 36、`NetFlowLogicTest` 4
+
 ## 2026-09-26 v1.9.9 出分提醒复活：成绩接口迁移到异步挑战流程（真机已通）
 
 **背景**：v1.9.8 查明旧的 `GET /scores` 恒 404 —— 出分提醒**从未触发过**（不是解析问题）。

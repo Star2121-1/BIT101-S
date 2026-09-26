@@ -29,7 +29,7 @@ class NetFlowLogicTest {
         // 阈值本身就是边界（>= 才算到）
         assertEquals(
             NetFlowChecker.Alert.Near,
-            NetFlowChecker.decide(NetFlowChecker.WARN_BYTES, false, false),
+            NetFlowChecker.decide(cn.bit101.android.data.school.CampusNetLogic.WARN_BYTES, false, false),
         )
     }
 

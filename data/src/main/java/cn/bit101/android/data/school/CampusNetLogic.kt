@@ -18,6 +18,12 @@ package cn.bit101.android.data.school
  */
 object CampusNetLogic {
 
+    /** 限速阈值：本月 300 GB 后限速（套餐固定，故硬编码；与官方门户同口径）。 */
+    const val LIMIT_BYTES = 300L * 1024 * 1024 * 1024
+
+    /** 提前提醒线：270 GB（限速阈值的 90%）。 */
+    const val WARN_BYTES = 270L * 1024 * 1024 * 1024
+
     /**
      * 解析响应并**区分**「未在线」与「响应不可识别」。
      *
@@ -51,6 +57,17 @@ object CampusNetLogic {
                 balanceYuan = fields[11].toDouble(),
             )
         }.getOrNull()
+    }
+
+    /**
+     * 本月流量的完整表述：`366.4 GB / 300 GB（已超限速阈值）`。
+     *
+     * 限额常量就在本文件（提醒侧 `NetFlowChecker` 也引用它们），不需要再传参。
+     */
+    fun trafficStatusText(bytes: Long): String {
+        val used = formatTraffic(bytes)
+        val limit = formatTraffic(LIMIT_BYTES)
+        return if (bytes >= LIMIT_BYTES) "$used / $limit（已超限速阈值）" else "$used / $limit"
     }
 
     /** 字节 → GB（1024 进制，保留 1 位小数）。 */

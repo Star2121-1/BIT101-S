@@ -183,7 +183,7 @@ internal object NotifyCenter {
     fun notifyNetFlow(context: Context, alert: NetFlowChecker.Alert, usedBytes: Long) {
         ensureChannels(context)
         val used = CampusNetLogic.formatTraffic(usedBytes)
-        val limit = CampusNetLogic.formatTraffic(NetFlowChecker.LIMIT_BYTES)
+        val limit = CampusNetLogic.formatTraffic(CampusNetLogic.LIMIT_BYTES)
         val (title, text) = when (alert) {
             NetFlowChecker.Alert.Near ->
                 "校园网流量接近限速阈值" to "本月已用 $used（限速阈值 $limit），超出后将限速"

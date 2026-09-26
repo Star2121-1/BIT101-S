@@ -3,6 +3,7 @@ package cn.bit101.android.features.notify
 import android.content.Context
 import androidx.core.content.edit
 import cn.bit101.android.data.school.CampusNetInfo
+import cn.bit101.android.data.school.CampusNetLogic
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -16,12 +17,6 @@ import kotlinx.coroutines.withContext
  *    见到用量比上次小即说明重置了，清掉标记，下个月才会再提醒。
  */
 object NetFlowChecker {
-
-    /** 限速阈值：本月 300 GB 后限速。套餐不变就不动，故硬编码（与官方门户同一 1024 进制口径）。 */
-    const val LIMIT_BYTES = 300L * 1024 * 1024 * 1024
-
-    /** 提前提醒线：270 GB（限速阈值的 90%）。 */
-    const val WARN_BYTES = 270L * 1024 * 1024 * 1024
 
     private const val PREF_NAME = "netflow_alert"
     private const val KEY_WARNED_NEAR = "warned_near"
@@ -37,8 +32,8 @@ object NetFlowChecker {
      * 已越过 300 GB 时**不再补发 270 GB 那条** —— 两条一起弹是打扰，且 300 那条更准确。
      */
     fun decide(usedBytes: Long, warnedNear: Boolean, warnedLimit: Boolean): Alert? = when {
-        usedBytes >= LIMIT_BYTES && !warnedLimit -> Alert.Exceeded
-        usedBytes >= WARN_BYTES && !warnedNear -> Alert.Near
+        usedBytes >= CampusNetLogic.LIMIT_BYTES && !warnedLimit -> Alert.Exceeded
+        usedBytes >= CampusNetLogic.WARN_BYTES && !warnedNear -> Alert.Near
         else -> null
     }
 

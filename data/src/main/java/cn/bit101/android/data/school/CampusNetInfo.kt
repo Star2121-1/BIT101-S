@@ -7,7 +7,7 @@ data class CampusNetInfo(
     val userName: String,
     /** 本次上线时间（epoch 秒）。 */
     val loginEpochSeconds: Long,
-    /** 服务器时间（epoch 秒）。 */
+    /** 服务器时间（epoch 秒）。界面不直接展示，用于校验数据新鲜度 / 单测。 */
     val nowEpochSeconds: Long,
     val bytesIn: Long,
     val bytesOut: Long,

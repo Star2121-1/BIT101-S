@@ -1,7 +1,6 @@
 package cn.bit101.android.features.notify
 
 import android.content.Context
-import androidx.work.WorkManager
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,14 +73,4 @@ object NotifyAppStartup {
         }
     }
 
-    /** 供测试/调试：清空已发记录并重排。 */
-    fun resetAndReschedule(context: Context) {
-        NotifySentStore.clear()
-        reschedule(context)
-    }
-
-    /** 关掉提醒时清掉已排任务（设置页调用）。 */
-    fun cancelAll(context: Context) {
-        runCatching { WorkManager.getInstance(context).cancelAllWorkByTag(NotifyScheduler.TAG) }
-    }
 }

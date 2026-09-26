@@ -93,13 +93,20 @@ fun CampusServiceScreen(
         ) {
             // 一卡通
             SectionCard(title = "一卡通") {
-                InfoRow(
-                    label = "账户余额",
-                    value = CampusCardLogic.balanceText(
-                        snapshot, loading, fetched,
-                        notLoggedIn = "未登录，点下方「登录一卡通」",
-                    ),
-                )
+                val entries = snapshot?.entries.orEmpty()
+                if (snapshot?.loggedIn == true && entries.isNotEmpty()) {
+                    // 服务端可能下发多条（余额 / 过渡余额 / 芯片余额…），全都列出来 ——
+                    // 只显示第一条会把「过渡余额」这类对得上账的信息漏掉
+                    entries.forEach { (label, value) -> InfoRow(label = label, value = value) }
+                } else {
+                    InfoRow(
+                        label = "账户余额",
+                        value = CampusCardLogic.balanceText(
+                            snapshot, loading, fetched,
+                            notLoggedIn = "未登录，点下方「登录一卡通」",
+                        ),
+                    )
+                }
                 InfoRow(
                     label = "数据来源",
                     value = "延河一卡通（dkykt.info.bit.edu.cn）",
@@ -127,7 +134,7 @@ fun CampusServiceScreen(
                     is CampusNetResult.Online -> {
                         val info = r.info
                         InfoRow(label = "账号", value = info.userName)
-                        InfoRow(label = "本月已用流量", value = CampusNetLogic.formatTraffic(info.bytesTotal))
+                        InfoRow(label = "本月已用流量", value = CampusNetLogic.trafficStatusText(info.bytesTotal))
                         InfoRow(label = "本月在线时长", value = CampusNetLogic.formatDuration(info.durationSeconds))
                         InfoRow(label = "本次上线", value = CampusNetLogic.formatTime(info.loginEpochSeconds))
                         InfoRow(

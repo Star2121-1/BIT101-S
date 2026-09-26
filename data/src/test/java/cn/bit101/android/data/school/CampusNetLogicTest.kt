@@ -99,4 +99,15 @@ class CampusNetLogicTest {
         assertNull(CampusNetResult.Failed("x").infoOrNull)
         assertNull(CampusNetLogic.parseResult("not_online").infoOrNull)
     }
+
+    /** 详情页的流量完整表述：带限速阈值，超了要说清。 */
+    @Test
+    fun `本月流量的完整表述`() {
+        // 真实样本 393385877215 B = 366.4 GiB，已超 300 GB
+        assertEquals("366.4 GB / 300.0 GB（已超限速阈值）", CampusNetLogic.trafficStatusText(393385877215L))
+        // 未超时不加后缀
+        assertEquals("100.0 GB / 300.0 GB", CampusNetLogic.trafficStatusText(100L * 1024 * 1024 * 1024))
+        // 阈值边界算「已超」
+        assertEquals("300.0 GB / 300.0 GB（已超限速阈值）", CampusNetLogic.trafficStatusText(CampusNetLogic.LIMIT_BYTES))
+    }
 }
