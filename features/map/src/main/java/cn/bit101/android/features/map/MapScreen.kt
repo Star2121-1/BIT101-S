@@ -42,10 +42,17 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.features.common.MainController
 import ovh.plrapps.mapcompose.ui.MapUI
 
+/**
+ * 「图」页：校园地图（瓦片来自 `map.bit101.flwfdd.xyz`）+ 校区切换按钮。
+ *
+ * [mainController] 只用来弹「已切换到 XX 校区」的提示 —— 地图是能拖的，
+ * 切换后不给反馈，用户分不清「跳过去了」和「按钮没反应」。
+ */
 @Composable
-fun MapScreen() {
+fun MapScreen(mainController: MainController) {
     val vm: MapViewModel = hiltViewModel()
 
     val scale by vm.mapScaleFlow.collectAsState(initial = 2f)
@@ -85,26 +92,28 @@ fun MapScreen() {
                 )
             }
             Spacer(modifier = Modifier.height(10.dp))
-            FloatingActionButton(
-                modifier = Modifier.size(fabSize),
-                onClick = {
-                    vm.scrollTo(vm.LiangXiang)
-                },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.primary,
-            ) {
-                Text("乡")
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            FloatingActionButton(
-                modifier = Modifier.size(fabSize),
-                onClick = {
-                    vm.scrollTo(vm.ZhongGuanCun)
-                },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.primary,
-            ) {
-                Text("村")
+            // 校区切换：一个校区一颗按钮（沿用原来「乡 / 村」两颗的形式）。
+            // 当前定位到的校区高亮，切换后弹一次提示 —— 地图本身能拖，
+            // 不给提示的话「点了没动」和「跳走了」在眼里是一样的。
+            MapCampus.ALL.forEach { campus ->
+                val selected = campus == vm.currentCampus
+
+                FloatingActionButton(
+                    modifier = Modifier.size(fabSize),
+                    onClick = {
+                        vm.goTo(campus)
+                        mainController.snackbar("已切换到${campus.name}")
+                    },
+                    containerColor =
+                    if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.primaryContainer,
+                    contentColor =
+                    if (selected) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.primary,
+                ) {
+                    Text(campus.short)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
             }
         }
 

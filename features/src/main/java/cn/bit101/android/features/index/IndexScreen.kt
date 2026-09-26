@@ -139,7 +139,7 @@ internal fun IndexScreen(
                 }
             }
             composable(route = PageShowOnNav.Map.toString()) {
-                MapScreen()
+                MapScreen(mainController)
             }
             composable(route = PageShowOnNav.Mine.toString()) {
                 UserScreen(mainController, id = 0)

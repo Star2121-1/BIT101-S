@@ -65,8 +65,19 @@ internal class MapViewModel @Inject constructor(
     // 预定义位置
     data class Position(val x: Double, val y: Double, val scale: Float)
 
-    val LiangXiang = Position(0.822685, 0.37956, 0.25f) //良乡校区
-    val ZhongGuanCun = Position(0.823083, 0.37873, 0.25f) //中关村校区
+    /**
+     * 当前定位到的校区（按钮据此高亮）。
+     *
+     * 读的是快照状态，所以 Compose 里直接读它就会跟着重组。
+     */
+    private val currentCampusState = mutableStateOf(MapCampus.ALL.first())
+    val currentCampus: MapCampus get() = currentCampusState.value
+
+    /** 切到某个校区：记下当前校区 + 把地图滚过去。 */
+    fun goTo(campus: MapCampus) {
+        currentCampusState.value = campus
+        scrollTo(Position(campus.x, campus.y, campus.scale))
+    }
 
     fun scrollTo(position: Position) {
         viewModelScope.launch {
@@ -83,6 +94,7 @@ internal class MapViewModel @Inject constructor(
     }
 
     init {
-        scrollTo(LiangXiang)
+        // 进页面默认落在第一个校区（改版前是良乡，见 MapCampus.ALL 的顺序约定）
+        goTo(MapCampus.ALL.first())
     }
 }
