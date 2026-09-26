@@ -67,9 +67,11 @@
 - 已做：UI 文案改为与官方一致 —— 详情页「已用流量」→「**本月已用流量**」；我页卡片「已用 366.4 GB」→「**本月 366.4 GB**」；`CampusNetInfo`/`CampusNetLogic` 注释同步。
 - ⚠️ **唯一存疑**：`[7]` 在线时长实测 **89.5 天**（跨月），故**暂不改**为「本月在线时长」，仍标「累计在线时长」——若官网也把它显示为月度值，说一声再改。
 
-### B4 详情页余量字段展示（S）
-- 一卡通：`CampusCardLogic` 能解析多条余额（含「过渡余额」），现在只显示第一条 → 遍历展示。
-- 校园网：显示「服务器时间」或去掉已解析未展示的字段，避免留悬空数据。
+### B4 ✅ 已完成（v1.9.10）
+- 一卡通：详情页**遍历展示全部条目**（余额 / 过渡余额 / 芯片余额…）✓
+- 校园网：「本月已用流量」改为 **`366.4 GB / 300 GB（已超限速阈值）`**（`CampusNetLogic.trafficStatusText`，带单测）✓
+- 限额常量（`LIMIT_BYTES`/`WARN_BYTES`）**单一来源**下沉到 `data/school/CampusNetLogic`，提醒侧反向引用 ✓
+- `nowEpochSeconds` 不展示，注释写明用于数据新鲜度校验 / 单测 ✓
 
 ---
 
@@ -118,12 +120,12 @@
 
 | # | 项 | 证据 | 动作 |
 |---|---|---|---|
-| E1 | 三个未使用权限 | `AndroidManifest.xml:5-7`（READ_PHONE_STATE / ACCESS_WIFI_STATE / ACCESS_NETWORK_STATE，代码零使用） | 删（注意别误删 INTERNET / POST_NOTIFICATIONS） |
-| E2 | `/scores/report` 死接口 + `Score.kt` 死模型 | `ScoreApiService.kt:16-17`，全仓零调用 | 删，或接入绩点页（取决于 A2 结论） |
-| E3 | `Arguments.kt` 死常量 | `Arguments.kt:8-11`（ScoreUrl/PaperUrl/CourseUrl/MessageUrl 零引用） | 删；`ScoreUrl` 可留给 A1 复用 |
-| E4 | `NotifyAppStartup.resetAndReschedule()` / `cancelAll()` 零调用 | grep 无调用者 | 删或接调试入口 |
-| E5 | `ApiUrlOption.lexueUrl` 疑似死配置 | 需复核 | 复核后删或复用 |
-| E6 | 网络层超时不一致 | CampusNet 5/5s、CampusCard 15/20s、school/bit101 用 OkHttp 默认、Seat 另配 | 统一 + 关键 client 加 `callTimeout`（低优先，除非有超时投诉） |
+| ✅ E1 | ~~三个未使用权限~~ | 代码零使用（库自带声明） | **v1.9.10 已删** |
+| ✅ E2 | ~~`/scores/report` 死接口 + 死模型~~ | 随 v1.9.9 的接口迁移一并删除 | 已完成 |
+| ✅ E3 | ~~`Arguments.kt` 死常量~~ | ScoreUrl 已被 A1 复用；其余三个删掉 | **v1.9.10 已删** |
+| ✅ E4 | ~~两个零调用函数~~ | 确认无调用者（`NotifyScheduler.cancelAll` 仍在用，保留） | **v1.9.10 已删** |
+| ❌ E5 | `ApiUrlOption.lexueUrl` | **复核为在用**（`data/school/LexueUrls.kt` 引用它做回退） | 不做 |
+| ❌ E6 | 网络层超时统一 | **决定不做**：OkHttp 默认 read 10s 已能防挂死，且无超时投诉；统一反而可能影响 webvpn 慢链路 | 不做 |
 | E7 | ⚠️ **`NotifySentStore.mark` 用 `apply`（异步写）** | v1.9.7 做流量提醒时发现：`apply` 的写会被 force-stop 丢掉，标记一丢就**重复提醒**。流量提醒已改 `commit = true` 规避 | 复核 5 类提醒的去重标记是否也该改同步写（会引入主线程小写盘，需权衡；勿盲改） |
 
 ---
