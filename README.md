@@ -28,9 +28,9 @@
 <p align="center">
   <img src="docs/images/seat-map.png" width="215">
   <img src="docs/images/seat-form.png" width="215">
-  <img src="docs/images/widget.png" width="215">
+  <img src="docs/images/mine.png" width="215">
 </p>
-<p align="center"><sub><b>座位预约</b>：真实房间底图点选（含空闲数与图例） · <b>新建预约</b>：校区/楼层/区域/日期/模式 · <b>桌面组件</b>：四页可切换、可滚动</sub></p>
+<p align="center"><sub><b>座位预约</b>：真实房间底图点选（空闲数 + 图例） · <b>新建预约</b>：校区/楼层/区域/日期/模式 · <b>「我」页</b>：校园服务两张卡常显摘要</sub></p>
 
 <p align="center">
   <img src="docs/images/schedule.png" width="215">
@@ -40,11 +40,15 @@
 <p align="center"><sub><b>课表</b>（tab 顺序 课表/DDL/动态/空教室） · <b>DDL</b>（未完成 / 已完成两栏，点条目切换） · <b>动态</b>（延河课堂）</sub></p>
 
 <p align="center">
-  <img src="docs/images/mine.png" width="215">
   <img src="docs/images/campus-service.png" width="215">
   <img src="docs/images/notify-settings.png" width="215">
 </p>
-<p align="center"><sub><b>「我」页</b>：校园服务两张卡常显摘要 · <b>校园服务详情</b>：一卡通余额 + 校园网本月流量/时长/余额 · <b>提醒设置</b>：五类提醒 + 出分「最近检查 / 立即检查一次」</sub></p>
+<p align="center"><sub><b>校园服务详情</b>：一卡通余额 + 校园网本月流量（`368.7 GB / 300.0 GB（已超限速阈值）`）/时长/余额 · <b>提醒设置</b>：五类提醒 + 出分「最近检查 / 立即检查一次」</sub></p>
+
+<p align="center">
+  <img src="docs/images/widget-4pages.png" width="620">
+</p>
+<p align="center"><sub><b>桌面小组件</b>：课程（当天完整行程）· DDL（未完成 / 已完成）· 动态 · 座位 四页一键切换，内容可上下滚动</sub></p>
 
 ---
 
