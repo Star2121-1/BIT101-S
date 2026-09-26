@@ -1,5 +1,9 @@
 # 下一批模块规划（2026-09-22）
 
+> ⚠️ **进度已迁移**：本文件是当时的规划与核对记录（保留作历史）。
+> 这里提到的「手动修改课程表」**已实现**（overlay 覆盖层，见 `docs/course-overlay.md`）；
+> 当前待办与已关闭项请看 [next-round-plan.md](next-round-plan.md)，功能总览看 [../README.md](../README.md)。
+
 > 承接 `docs/upstream-feature-plan.md`（上游创想梳理 + 分支 A–D 规划）。
 > 本篇是**用户 2026-09-22 反馈后的重新校准**：用户指出的几处「其实已经有了」经核对属实，
 > 已从待办中划掉；同时记录了新发现的模块与调研结论。
@@ -11,7 +15,7 @@
 | 用户说法 | 核对结果 | 证据 |
 |---|---|---|
 | 成绩查询**已经实现了**，在「网」里面 | ✅ **属实** | 网页面是 WebView（`WebViewModel.BASE_URL = "https://bit101.cn"`），进入 `bit101.cn/score/` 时**自动填充学号密码**（`WebScreen.kt:158-159`） |
-| 组件**不再显示成绩**（隐私考虑） | ✅ 已采纳 | 组件保持三页（课程/DDL/座位），**不加成绩页**。成绩只在 App 内按需查看 |
+| 组件**不再显示成绩**（隐私考虑） | ✅ 已采纳 | 组件保持无成绩页（当时三页，**现为四页：课程/DDL/动态/座位**）。成绩只在 App 内按需查看 |
 | 空教室查询**已经有了**，在课程表第一页 | ✅ **属实** | `ScheduleScreen.kt:24-25`：课表页第二个 tab 就是「空教室」（`FreeClassroomSearch`），后端 `SchoolClassroomService` + `DefaultFreeClassroomRepo` + 设置页 `FreeClassroomSettingPage` |
 | 课表编辑（手动修改课程表）**不知道有没有** | ❌ **没有实现** | 全仓 `grep -i "overlay\|自定义课程\|customCourse"` 零命中；上游 `main` 同样没有（见 `upstream-feature-plan.md` 3 节） |
 | 手动添加日程 | ✅ 已有（上游继承） | `custom_schedule` 表 + 课表页右下角 `+` FAB（`CustomScheduleDialog`）—— 注意这与「修改课程表」是两件事 |
