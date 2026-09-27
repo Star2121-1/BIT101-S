@@ -314,6 +314,7 @@ cd BIT101-seat
 | [docs/ddl-source-contract.md](docs/ddl-source-contract.md) | **DDL 数据源**（延河课堂）契约 |
 | [docs/course-overlay.md](docs/course-overlay.md) | **手动改课表**的覆盖层方案 |
 | [docs/codebase-survey.md](docs/codebase-survey.md) | 代码库勘察与模块划分 |
+| [docs/school-portal-map.md](docs/school-portal-map.md) | **学校官方服务地图**（i北理全功能）与本项目对照：做什么、不做什么 |
 | [docs/next-round-plan.md](docs/next-round-plan.md) | **当前待办与规划**（含已关闭项与理由） |
 | [docs/upstream-feature-plan.md](docs/upstream-feature-plan.md) | 上游设想梳理与分支规划 |
 | [CHANGES.md](CHANGES.md) | 逐版本变更记录 |
