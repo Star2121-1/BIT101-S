@@ -9,6 +9,8 @@ import cn.bit101.android.data.school.BalanceTrend
 import cn.bit101.android.data.school.CampusCardBalanceStore
 import cn.bit101.android.data.school.CampusCardSnapshot
 import cn.bit101.android.data.school.CampusNetResult
+import cn.bit101.android.data.school.CampusNetTrafficStore
+import cn.bit101.android.data.school.TrafficTrend
 import cn.bit101.android.features.notify.NetFeeChecker
 import cn.bit101.android.features.notify.NetFlowChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -60,6 +62,16 @@ internal class CampusServiceViewModel @Inject constructor(
     private val _balanceTrend = MutableStateFlow(BalanceTrend())
     val balanceTrend: StateFlow<BalanceTrend> = _balanceTrend.asStateFlow()
 
+    /**
+     * 校园网流量趋势（本地按次记录累计用量后算出的「今日 / 日均 / 月末预测」）。
+     *
+     * ⚠️ 与余额趋势同一套路，但**多一件必须处理的事**：接口 `[6]` 是**按计费周期累计**的，
+     * **换周期会归零** —— 采样必须检测重置，否则会算出「负的增量」这种荒谬结果
+     * （见 [CampusNetTrafficLogic]）。
+     */
+    private val _trafficTrend = MutableStateFlow(TrafficTrend())
+    val trafficTrend: StateFlow<TrafficTrend> = _trafficTrend.asStateFlow()
+
     init {
         refresh()
     }
@@ -96,6 +108,12 @@ internal class CampusServiceViewModel @Inject constructor(
                 // 校园网提醒（余额不足 / 流量阈值）：拿到数据 = 人正在校内，是唯一可靠的时机
                 // （每日周期任务的固定时刻多半在校外，会被永远跳过）。各自内部去重。
                 val info = result.infoOrNull
+                // 记一笔流量采样（同样在 IO 线程）。
+                // ⚠️ 只有「在线」（拿到累计用量）才记 —— NotOnline / Failed 时 info 为 null ⇒
+                //    不新增采样也不写盘，别用空值把趋势污染了。
+                _trafficTrend.value = withContext(Dispatchers.IO) {
+                    CampusNetTrafficStore.record(appContext, info?.bytesTotal)
+                }
                 runCatching {
                     NetFeeChecker.check(appContext, info)
                     NetFlowChecker.check(appContext, info)

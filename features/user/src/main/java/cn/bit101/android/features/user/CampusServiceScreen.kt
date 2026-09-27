@@ -33,6 +33,7 @@ import cn.bit101.android.data.school.CampusCardBalanceLogic
 import cn.bit101.android.data.school.CampusCardLogic
 import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.data.school.CampusNetLogic
+import cn.bit101.android.data.school.CampusNetTrafficLogic
 import cn.bit101.android.data.school.CampusCardSnapshot
 import cn.bit101.android.features.common.MainController
 
@@ -61,6 +62,7 @@ fun CampusServiceScreen(
     val loading by vm.loading.collectAsState()
     val fetched by vm.fetched.collectAsState()
     val balanceTrend by vm.balanceTrend.collectAsState()
+    val trafficTrend by vm.trafficTrend.collectAsState()
 
     // 从「登录一卡通」的 WebView 返回时会重新进入组合，但 VM 保留、init 不会重跑，
     // 所以这里补一次刷新；首次进入时 init 已发起请求，被 VM 里的 _loading 守卫挡掉。
@@ -147,7 +149,22 @@ fun CampusServiceScreen(
                     is CampusNetResult.Online -> {
                         val info = r.info
                         InfoRow(label = "账号", value = info.userName)
-                        InfoRow(label = "本月已用流量", value = CampusNetLogic.trafficStatusText(info.bytesTotal))
+                        InfoRow(
+                            label = "本月已用流量",
+                            value = CampusNetLogic.trafficStatusText(info.bytesTotal),
+                        )
+                        // 下面两行是**本地采样**算的：接口只给一个累计值，
+                        // 它回答不了「我这个月会不会超」——那才是用户真正想知道的
+                        InfoRow(
+                            label = "今日用量",
+                            value = CampusNetTrafficLogic.todayText(trafficTrend) ?: "—",
+                        )
+                        InfoRow(
+                            label = "日均与预测",
+                            value = CampusNetTrafficLogic.forecastText(trafficTrend)
+                                ?: "数据积累中（还需攒 1 天才能算日均）",
+                            small = true,
+                        )
                         InfoRow(label = "本月在线时长", value = CampusNetLogic.formatDuration(info.durationSeconds))
                         InfoRow(label = "本次上线", value = CampusNetLogic.formatTime(info.loginEpochSeconds))
                         InfoRow(
