@@ -7,6 +7,7 @@ import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideOut
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -177,6 +179,34 @@ fun MapScreen(mainController: MainController) {
                     }
                 }
             }
+        }
+
+        // ⚠️ 地图瓦片来自 **OpenStreetMap**（`map.bit101.flwfdd.xyz` 只是一层反代 ——
+        // 响应头 `x-tilerender: azure-02.openstreetmap.org` 可证）。
+        // OSM 数据是 **ODbL 授权、明确要求署名** —— 这不是可选项，是许可条件。
+        //
+        // 位置选右下角：左上角是 FAB 列、底部中间是设置栏（弹出时），只有右下是空的。
+        // 设置栏弹出期间会临时盖住它，关掉就露出来 —— 可接受。
+        val uriHandler = LocalUriHandler.current
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(horizontal = 8.dp, vertical = 8.dp)
+                .clickable {
+                    // 打不开就算了 —— 署名本身已经显示出来了，不为了跳转把体验搞脆
+                    runCatching {
+                        uriHandler.openUri("https://www.openstreetmap.org/copyright")
+                    }
+                },
+            shape = MaterialTheme.shapes.small,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ) {
+            Text(
+                text = "© OpenStreetMap contributors",
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
         }
     }
 }

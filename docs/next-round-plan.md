@@ -338,14 +338,15 @@ URL 常量集中、卡片组件提 common、网络超时统一、勾选模式/�
 **瓦片上看不到校园 = 社区数据缺口，不是数据旧**（校园 2025 才交付，2024-10 之后没人补）。
 对比：中关村 / 良乡 / 珠海在 OSM 上画得比较全，所以那三颗按钮点过去能看到校园。
 
-### ⚠️ 待办：OSM 署名（合规）
+### ✅ 已修：OSM 署名（v1.9.16）
 
-OSM 数据是 **ODbL** 授权，**要求署名**（`© OpenStreetMap contributors`）。
-但全仓库（`features/map` 及所有 `.kt/.md/.xml`）**没有任何地方提到 OpenStreetMap**，
-地图页也没有署名 —— **这是许可合规缺口，不是可选项**。
+OSM 数据是 **ODbL** 授权，**要求署名**（`© OpenStreetMap contributors`），
+而此前全仓库（`features/map` 及所有 `.kt/.md/.xml`）**没有任何地方提到 OpenStreetMap**，
+地图页也没有署名 —— 这是**许可合规缺口，不是可选项**。
 
-**怎么修**（改动很小）：在 `MapScreen` 地图右下角叠一行小字（`Text` + 半透明底），
-内容 `© OpenStreetMap contributors`，可跳 `https://www.openstreetmap.org/copyright`。
+**已于 v1.9.16 补上**：`MapScreen` 右下角一行小字（半透明底 + 可点击跳
+`https://www.openstreetmap.org/copyright`）。位置是挑过的 —— 左上角是 FAB 列、
+底部中间是设置栏，只剩右下是空的；设置栏弹出期间会临时盖住它，关掉即露出。
 
 ### 顺带：想让嘉兴校园出现在底图上
 
@@ -584,7 +585,7 @@ curl -sk -X POST "https://login.bit101.flwfdd.xyz/api/jwb/bit101/score" \
 
 | # | 项 | 为什么 |
 |---|---|---|
-| D1 | **OSM 署名** | ⚠️ **合规**要求（ODbL），不是可选项。地图页右下角一行小字即可，改动 5 行 —— 拖了三轮了 |
+| D1 ✅ | **OSM 署名** | ✅ **v1.9.16 已完成** —— 地图页右下角 `© OpenStreetMap contributors`（可点击跳版权页） |
 | D2 | 考试列表「有数据时」的真机复核 | 本学期学校还没排考，列表渲染没在真机见过（见第十七节） |
 | D3 | `NotifySentStore.mark` 改同步写 | 用 `apply` 异步落盘，被 force-stop 会丢 → 重复提醒 |
 
