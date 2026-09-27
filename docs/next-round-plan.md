@@ -428,3 +428,47 @@ OSM 数据是 **ODbL** 授权，**要求署名**（`© OpenStreetMap contributor
 注入路径。本轮就因此**误判过两次**：`schoolJxzxehall`（显示 0 次，其实在用）、
 `scoreQuery`（显示 0 次，其实在用）。**可靠判据是「方法名 + 类型名」**：
 搜 `getPapers` / `getCourseById` / `PapersApiService` 这类专有符号。
+
+---
+
+## 十六、网站全貌 + 一个方向判断（2026-09-27，用户提示看侧边栏菜单）
+
+网站 `bit101.cn` 是 **Vue 3 + Naive UI**。用
+`#app.__vue_app__.config.globalProperties.$router.getRoutes()` **直接读到全部路由**
+（比模拟点击侧边栏可靠 —— headless 里点不开那个 ≡）：
+
+| 路由 | 功能 | 需登录 | App 原生 |
+|---|---|---|---|
+| `/` `/home` | 介绍页 / 门户主页 | 否 | — |
+| `/score` | 成绩（含 GPA 计算） | 否 | ❌ 只做直链 |
+| `/paper` `/paper/:id` `/paper/edit/:id` | 文章 | 否 | ❌ **用户决定不做** |
+| `/course` `/course/:id` `/course/upload/:id` | 课程库 / 详情 / 传资料 | 是 | ❌ |
+| `/subscription` | 订阅 | 是 | ❌ |
+| `/schedule` | 课表 | — | ✅ |
+| `/map` | 地图（Leaflet，**只有「乡/村」**） | 否 | ✅ **且我们的比官网新**（MapCompose + 四校区）|
+| `/message` | 消息 | 是 | ✅ |
+| `/gallery` `/gallery/:id` `/gallery/edit/:id` | 帖子 | 是 | ✅ |
+| `/user/:id` `/report/:obj` `/login` | 用户 / 举报 / 登录 | — | ✅ |
+| `/admin/carousel` `/admin/billboard` | 管理（轮播 / 公告） | 管理员 | 不需要 |
+
+### ★ 方向判断：不要「把网站搬进 App」
+
+**「网」页是 WebView，登录后网站的全部功能都能在 App 里用 ⇒ App 在「内容」上其实不缺任何东西。**
+所以该做的是**网站做不到的事**：
+
+1. **桌面小组件** —— 网页做不到
+2. **提醒**（上课 / DDL / 座位 / 出分 / 网费）—— 网页做不到
+3. **本地数据**（课表覆盖层、DDL 完成状态、余额与流量趋势采样）—— 网页没有
+4. **座位预约** —— 第三方 seatlib，与 BIT101 网站无关
+5. **原生体验**（离线、性能、系统集成）
+
+⇒ **第十五节的 A 类（papers / courses 原生化）据此降级**（用户 2026-09-27 决定不做）。
+**推荐顺序改为：先做 B 类** —— 考试卡片 + 开考提醒 → 校园网流量趋势 → 成绩原生页 + GPA →
+「现在去哪儿自习」；工程项（C 类，OSM 署名 / 提醒去重）穿插做。
+
+### 附带发现
+
+- `/variables?obj=xxx` 是**万能键值接口**（`Response.data: String` / `Body{obj, data}`），
+  按 `obj` 存取任意字符串；`/subscription` 很可能建在它上面
+- 网站 `/map` 是 **Leaflet + 只有「乡 / 村」** —— **我们的地图（MapCompose + 乡/村/珠/嘉）比官网还新**
+- ⚠️ 想摸清 SPA 的全貌：**读框架实例（Vue Router / DevTools）比模拟点击可靠得多**
