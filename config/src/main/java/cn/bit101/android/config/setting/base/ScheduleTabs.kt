@@ -27,8 +27,16 @@ object ScheduleTabs {
     /** 空教室查询 */
     const val FREE_CLASSROOM = 3
 
+    /**
+     * 校园交通（良乡摆渡车时刻表）。
+     *
+     * ⚠️ **必须追加在最后**：组件跳转与 `WidgetPageStore` 都依赖既有下标，
+     * 插在中间会让「点 DDL 行跳 DDL」串到别的页（见本文件顶部说明）。
+     */
+    const val TRANSPORT = 4
+
     /** tab 总数（越界校验用）。 */
-    val COUNT = 4
+    val COUNT = 5
 
     /** 是合法下标吗。 */
     fun isValid(index: Int?): Boolean = index != null && index in 0 until COUNT

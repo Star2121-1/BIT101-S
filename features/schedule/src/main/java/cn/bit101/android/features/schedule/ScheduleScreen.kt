@@ -18,6 +18,7 @@ import cn.bit101.android.features.schedule.component.TabPager
 import cn.bit101.android.features.schedule.component.TabPagerItem
 import cn.bit101.android.features.schedule.course.CourseSchedule
 import cn.bit101.android.features.schedule.ddl.DDLSchedule
+import cn.bit101.android.features.schedule.transport.TransportScreen
 
 @Composable
 fun ScheduleScreen(mainController: MainController) {
@@ -36,6 +37,9 @@ fun ScheduleScreen(mainController: MainController) {
         EclassActivityScreen(mainController)
     }, TabPagerItem("空教室") {
         FreeClassroomSearch(mainController, it)
+    }, TabPagerItem("交通") {
+        // 良乡摆渡车时刻表。**只能追加在最后** —— 见 `ScheduleTabs` 里那条「下标不能动」的说明
+        TransportScreen(it)
     })
 
     Scaffold {
