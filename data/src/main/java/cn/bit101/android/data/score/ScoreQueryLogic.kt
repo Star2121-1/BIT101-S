@@ -29,8 +29,21 @@ object ScoreQueryLogic {
     fun isReady(readyServices: List<String>?): Boolean =
         readyServices?.contains(SERVICE_JWB) == true
 
+    /**
+     * 挑战**被学校拒绝**（`status = failed`）。
+     *
+     * ⚠️ 与「过期/超时」分开的意义在于**文案与动作完全不同**：
+     * 这条的典型原因是学号或密码不对（2026-09-27 实测：假凭据时 `start` 直接回
+     * `failed` 并带 `error = 用户名或密码错误 [...]`），**重试永远不会成功** ——
+     * 必须让用户去改密码，而不是「稍后重试」。
+     */
+    fun isRejected(status: String?): Boolean = status == "failed"
+
+    /** 挑战已过期（`expired`）—— 这次没赶上，下次还有机会。 */
+    fun isExpired(status: String?): Boolean = status == "expired"
+
     /** 挑战已终结（再轮询也没用）。 */
-    fun isTerminal(status: String?): Boolean = status == "failed" || status == "expired"
+    fun isTerminal(status: String?): Boolean = isRejected(status) || isExpired(status)
 
     /**
      * 学校要求短信二次验证 —— 后台任务没有交互通道，只能放弃这一次。

@@ -462,6 +462,21 @@ object NotifyLogic {
      */
     fun examLeadWindow(leadMinutes: Long): String = "lead$leadMinutes"
 
+    /**
+     * 从考试去重键里取回**考试日期**（`worker` 二次校验要用）。
+     *
+     * ⚠️ 刻意**不按位置取**（不用 `split(":")[2]`）：键里的第二段是「课程号或课名」，
+     * 课名是自由文本，万一冒出一个半角冒号，按位置取就会整段错位 → 二次校验判成
+     * 「这场考试不存在」→ **该发的提醒被静默丢掉**。
+     *
+     * 改为**按格式认**：键里唯一长得像 `2026-09-24` 的就是日期段。
+     * 取不到（格式对不上）返回 null，调用方据此放弃这次提醒（宁可漏一次，也不要发错）。
+     */
+    fun examDateOfKey(key: String): LocalDate? =
+        key.split(':')
+            .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }
+            .firstOrNull()
+
     // ------------------------------------------------------------ 去重键
 
     /**

@@ -150,9 +150,7 @@ class NotifyRepository @Inject constructor(
      * 或临时换考场，用户依然需要被提醒；比了反而漏提醒。
      */
     private suspend fun examStillValid(reminder: Reminder, now: LocalDateTime): Boolean {
-        val date = reminder.key.split(":").getOrNull(2)
-            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-            ?: return false
+        val date = NotifyLogic.examDateOfKey(reminder.key) ?: return false
 
         val exams = runCatching { coursesRepo.getExamsFromLocal().first() }
             .getOrDefault(emptyList())

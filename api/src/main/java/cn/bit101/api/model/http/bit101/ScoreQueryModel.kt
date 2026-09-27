@@ -30,6 +30,15 @@ class ScoreQueryModel private constructor() {
         val readyServices: List<String>? = null,
         val requestedServices: List<String>? = null,
         val expiresIn: Int? = null,
+        /**
+         * 失败原因（仅 `status = failed` 时有值），如
+         * `用户名或密码错误 [status=401, risk=ustc-token, flow=replaced, captcha=no]`。
+         *
+         * ⚠️ **必须暴露给用户**：这套流程最常见的失败就是「学号或密码不对」，
+         * 而归成「网络失败，稍后重试」的话，用户会一直重试而永远不会成功
+         * （2026-09-27 实测确认：`start` 就返回 `failed` + 这条 error）。
+         */
+        val error: String? = null,
     )
 
     /** `202` 的外层包装：`{"detail":{...}}`。 */
@@ -39,5 +48,7 @@ class ScoreQueryModel private constructor() {
     data class Status(
         val status: String? = null,
         val readyServices: List<String>? = null,
+        /** 失败原因；与 [Challenge.error] 同义（轮询也会带上）。 */
+        val error: String? = null,
     )
 }

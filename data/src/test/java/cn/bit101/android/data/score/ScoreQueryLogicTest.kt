@@ -36,6 +36,27 @@ class ScoreQueryLogicTest {
     }
 
     /**
+     * ⚠️ 「被拒」与「过期」必须分开 —— 两者**下一步动作完全不同**：
+     * 前者要用户去改密码（重试无效），后者下次还有机会。
+     *
+     * 这条是 2026-09-27 真机 bug 的护栏：当时 `start` 返回的 `failed` 被归成
+     * 「网络失败，稍后重试」，用户会一直等一个永远不会成功的结果。
+     */
+    @Test
+    fun `被拒与过期要分开`() {
+        assertTrue(ScoreQueryLogic.isRejected("failed"))
+        assertFalse(ScoreQueryLogic.isRejected("expired"))
+        assertFalse(ScoreQueryLogic.isRejected("running"))
+
+        assertTrue(ScoreQueryLogic.isExpired("expired"))
+        assertFalse(ScoreQueryLogic.isExpired("failed"))
+
+        // 两者都算终结态（都不能再轮询）
+        assertTrue(ScoreQueryLogic.isTerminal("failed"))
+        assertTrue(ScoreQueryLogic.isTerminal("expired"))
+    }
+
+    /**
      * ⚠️ 限频是**防封号**的：新流程每次检查都要用账密走一遍学校统一身份认证，
      * 而检查触发点是「App 启动 + 每日任务」——不限频等于每次开 App 登录一次。
      */

@@ -61,14 +61,20 @@ internal class DefaultScoreRepo @Inject constructor(
     /** 一次查询的结果 —— 比裸 `null` 多带一个失败原因，好写用户可见的状态。 */
     private sealed interface Query {
         data class Ok(val table: JsonElement) : Query
-        data class Err(val code: ScoreCheckStore.Code) : Query
+
+        /**
+         * @param detail 服务端给的失败原因原文（如果有）。存进 [ScoreCheckStore] 供设置页展示
+         *   —— 尤其 [ScoreCheckStore.Code.AUTH_FAILED] 时，「用户名或密码错误」这句话
+         *   比我们任何转述都准。
+         */
+        data class Err(val code: ScoreCheckStore.Code, val detail: String? = null) : Query
     }
 
     /**
      * 走完「起挑战 → 轮询 → 取数」。
      *
      * ⚠️ 每一步失败都归类而不是简单返回 null：设置页要能告诉用户
-     * 「是学校要短信」还是「网络失败」。
+     * 「是学校要短信」还是「密码不对」还是「网络失败」—— 这三者的**下一步动作完全不同**。
      */
     private suspend fun query(): Query {
         val sid = loginStatus.sid.get()
@@ -82,8 +88,20 @@ internal class DefaultScoreRepo @Inject constructor(
 
             val challengeId = start.challengeId ?: return@runCatching Query.Err(ScoreCheckStore.Code.FAILED)
             val token = start.accessToken ?: return@runCatching Query.Err(ScoreCheckStore.Code.FAILED)
+
+            // ⚠️ 起挑战阶段就已经终结时**立刻返回，绝不进轮询循环**。
+            // 2026-09-27 实测：凭据不对时 `start` 直接返回 `status=failed` +
+            // `error="用户名或密码错误 [...]"`；而此前这里只拦了 `waiting_sms`，
+            // 于是会白轮询 25 次 × 400ms（10 秒空转、白打 25 个请求），
+            // 最后还把「密码错」误报成「网络失败，稍后重试」。
             if (ScoreQueryLogic.needsSms(start.status)) {
-                return@runCatching Query.Err(ScoreCheckStore.Code.NEED_SMS)
+                return@runCatching Query.Err(ScoreCheckStore.Code.NEED_SMS, start.error)
+            }
+            if (ScoreQueryLogic.isRejected(start.status)) {
+                return@runCatching Query.Err(ScoreCheckStore.Code.AUTH_FAILED, start.error)
+            }
+            if (ScoreQueryLogic.isExpired(start.status)) {
+                return@runCatching Query.Err(ScoreCheckStore.Code.TIMEOUT)
             }
 
             var ready = ScoreQueryLogic.isReady(start.readyServices)
@@ -95,12 +113,16 @@ internal class DefaultScoreRepo @Inject constructor(
                     ?: return@runCatching Query.Err(ScoreCheckStore.Code.FAILED)
                 ready = ScoreQueryLogic.isReady(status.readyServices)
                 if (ready) break
-                // 要短信验证（后台没交互通道）→ 明确记下来；挑战终结 → 也是失败
+                // 要短信验证（后台没交互通道）→ 明确记下来
                 if (ScoreQueryLogic.needsSms(status.status)) {
-                    return@runCatching Query.Err(ScoreCheckStore.Code.NEED_SMS)
+                    return@runCatching Query.Err(ScoreCheckStore.Code.NEED_SMS, status.error)
                 }
-                if (ScoreQueryLogic.isTerminal(status.status)) {
-                    return@runCatching Query.Err(ScoreCheckStore.Code.FAILED)
+                // 被拒 / 过期 → 终结，同样要把服务端原因带回去
+                if (ScoreQueryLogic.isRejected(status.status)) {
+                    return@runCatching Query.Err(ScoreCheckStore.Code.AUTH_FAILED, status.error)
+                }
+                if (ScoreQueryLogic.isExpired(status.status)) {
+                    return@runCatching Query.Err(ScoreCheckStore.Code.TIMEOUT, status.error)
                 }
             }
             if (!ready) return@runCatching Query.Err(ScoreCheckStore.Code.TIMEOUT)
@@ -112,7 +134,7 @@ internal class DefaultScoreRepo @Inject constructor(
                 ?: return@runCatching Query.Err(ScoreCheckStore.Code.FAILED)
 
             Query.Ok(table)
-        }.getOrElse { Query.Err(ScoreCheckStore.Code.FAILED) }
+        }.getOrElse { Query.Err(ScoreCheckStore.Code.FAILED, it.message) }
     }
 
     override suspend fun syncAndDiff(force: Boolean): List<ScoreEntry> = withContext(Dispatchers.IO) {
@@ -122,11 +144,14 @@ internal class DefaultScoreRepo @Inject constructor(
         if (!force && !ScoreQueryLogic.shouldCheck(readLastCheck(), System.currentTimeMillis())) {
             return@withContext emptyList()
         }
+        // ⚠️ 刻意在**查询前**记时间戳：查询失败**也要计时**。
+        // 尤其「密码不对」这类失败 —— 不计时就会每次开 App 都用错密码去登录一次，
+        // 纯白费请求，还可能把账号往风控/锁定上推。
         writeLastCheck()
 
         val queryResult = query()
         if (queryResult is Query.Err) {
-            record(queryResult.code, 0)
+            record(queryResult.code, 0, queryResult.detail)
             return@withContext emptyList()
         }
         val raw = (queryResult as Query.Ok).table
@@ -153,8 +178,11 @@ internal class DefaultScoreRepo @Inject constructor(
     // ------------------------------------------------------------ 检查时间戳 / 状态
 
     /** 记录本次检查结果（设置页可见 —— 这个功能受学校风控影响，状态必须可见）。 */
-    private fun record(code: ScoreCheckStore.Code, count: Int) {
-        ScoreCheckStore.write(appContext, ScoreCheckStore.Status(System.currentTimeMillis(), code, count))
+    private fun record(code: ScoreCheckStore.Code, count: Int, detail: String? = null) {
+        ScoreCheckStore.write(
+            appContext,
+            ScoreCheckStore.Status(System.currentTimeMillis(), code, count, detail),
+        )
     }
 
     /** 上次检查时刻（毫秒）；读不到返回 -1（视为该查）。 */

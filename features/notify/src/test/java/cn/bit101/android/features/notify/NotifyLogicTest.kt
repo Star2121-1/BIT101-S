@@ -10,6 +10,7 @@ import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.database.entity.ExamScheduleEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
@@ -827,5 +828,32 @@ class NotifyLogicTest {
             LocalDateTime.of(monday.plusDays(3), LocalTime.of(8, 0)),
             NotifyLogic.examStartAt(exam(date = monday.plusDays(3))),
         )
+    }
+
+    /**
+     * 从键里取日期要**按格式认**、不依赖位置。
+     *
+     * ⚠️ 按位置（`split(":")[2]`）取的话，课名里混进一个半角冒号就会整段错位 →
+     * worker 二次校验判成「这场考试不存在」→ **该发的提醒被静默丢掉**。
+     */
+    @Test
+    fun `从考试键取日期不依赖位置`() {
+        val normal = exam(date = LocalDate.of(2026, 9, 24))
+        assertEquals(
+            LocalDate.of(2026, 9, 24),
+            NotifyLogic.examDateOfKey(NotifyLogic.examKey(normal, NotifyPolicy.EXAM_WINDOW_DAY)),
+        )
+
+        // 课名带半角冒号（课程号为空 → 键里第二段就是课名）
+        val weird = exam(name = "专题: 前沿", courseId = "", date = LocalDate.of(2026, 10, 8))
+        val key = NotifyLogic.examKey(weird, NotifyLogic.examLeadWindow(60))
+        assertEquals(LocalDate.of(2026, 10, 8), NotifyLogic.examDateOfKey(key))
+    }
+
+    /** 形状对不上就返回 null —— 调用方据此放弃这次提醒（宁可漏一次，也不要发错）。 */
+    @Test
+    fun `考试键里没有日期时返回 null`() {
+        assertNull(NotifyLogic.examDateOfKey("exam:MA10001:not-a-date:1d"))
+        assertNull(NotifyLogic.examDateOfKey(""))
     }
 }
