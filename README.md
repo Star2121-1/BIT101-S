@@ -316,6 +316,7 @@ cd BIT101-seat
 | [docs/course-overlay.md](docs/course-overlay.md) | **手动改课表**的覆盖层方案 |
 | [docs/codebase-survey.md](docs/codebase-survey.md) | 代码库勘察与模块划分 |
 | [docs/school-portal-map.md](docs/school-portal-map.md) | **学校官方服务地图**（i北理全功能）与本项目对照：做什么、不做什么 |
+| [docs/campus-bus.md](docs/campus-bus.md) | **校园交通**（摆渡车/班车）数据源与结论：时刻表、乘车点、购票规则、数据可靠性 |
 | [docs/next-round-plan.md](docs/next-round-plan.md) | **当前待办与规划**（含已关闭项与理由） |
 | [docs/upstream-feature-plan.md](docs/upstream-feature-plan.md) | 上游设想梳理与分支规划 |
 | [CHANGES.md](CHANGES.md) | 逐版本变更记录 |
