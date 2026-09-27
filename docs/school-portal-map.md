@@ -216,3 +216,86 @@ AI 问答是**上层**功能，它依赖下层已经能把事情算清楚：
 | 「问学校事务」的 AI 问答 | ❌ 不做 |
 | 「问我的数据」的 AI 问答 | ✅ **可做**，排在第十九节的第 6~7 位（下层能力就位之后） |
 | 前提 | 约束 A（AI 不算数）+ 约束 B（隐私开关默认关、脱敏） |
+
+---
+
+## 七、i北理 里的 AI 助手到底是什么（2026-09-27 逆向）
+
+> 用户提供的入口：`https://ibit.yanhekt.cn/?origin=…&inq=…`（延河课堂域名）。
+> 方法是**读它的前端 bundle**（`umi.*.js`，UmiJS/React 单页应用）里的配置与接口常量 ——
+> 只读、不下单、不消耗它的额度。
+
+### 7.1 三层结构
+
+| 层 | 地址 | 说明 |
+|---|---|---|
+| 前端 | `ibit.yanhekt.cn` | 延河课堂（`yanhekt.cn`，公司域名，非 `*.bit.edu.cn`）承载的 i北理 AI 页面 |
+| 后端 | `aia.info.bit.edu.cn` | ⚠️ **学校信息化办公室域名的 AI 中台**（bundle 里的 `API_HOST`） |
+| 另一个入口 | `aijc.bit.edu.cn/dash/chatbi/dialogIntegration` | bundle 里的 `CHAT_BIT_URL`，学校的 AI 平台 |
+
+### 7.2 模型与调用方式（配置原文）
+
+```js
+LLM_MODEL_NAME: "chatglm3-6b",       // ← 模型
+KNOWLEDGE_BASE_NAME: "cuc",          // ← 知识库
+LLM_TEMPERATURE: 0.1, LLM_TOP_P: 0.2 // ← 极保守采样
+
+PROMPT_NAME: "default", TOP_K: 3, SCORE_THRESHOLD: 0.5,
+LANGCHAIN_TEMPERATURE: 0.7,
+MAX_MESSAGE_LENTH: 10, MAX_HISTORY_LENTH: 1,   // ← 几乎没有多轮记忆
+STREAM_RESP: true, HANDLE_KB_WITH_LLM: false,
+```
+
+请求是按**编排（流程）**发出去的，不是裸对话：
+
+```js
+params: [
+  { type: "question", cmd: … },
+  { type: "knowledge", cmd: { query: …, plugins: ["uuid-zhishiku"],
+                              llm: { temperature, top_p, penalty_score } } },
+  { type: "model", cmd: { messages: … } },
+]
+```
+
+⇒ 典型 **RAG**：**先检索知识库（top3、相似度阈值 0.5），再交给模型按检索结果作答**。
+配合 `temperature 0.1 / top_p 0.2`，这套配置的意图很清楚：**"照本宣科地引用规章"**，
+而不是"聪明地推理"。
+
+### 7.3 平台自带的其它能力（接口清单）
+
+`/v1/chat/assistant`（助手）· `/v1/chat/stream/private/kb`（**私有知识库**）·
+`/v1/chat/stream/super/agent` · `/v1/chat/stream/summary`（摘要）·
+`/v1/chat/text_to_image`（文生图）· `/v1/chat/translation`（翻译）·
+`/v1/chat/mixture` · `/v1/chat/search` · `/v1/chat/file/upload` ·
+`/v1/dialogue/history/list` · `/v1/assistant/ability/list` · `/v1/ding/calendar`
+
+⇒ 看起来是一个**通用的 AI 中台**（助手管理 + 私有知识库 + 文生图 + 翻译 + 钉钉日历），
+不是只为北理写的。
+
+### 7.4 ⚠️ 疑似「平台先给别的学校做的」
+
+bundle 里的**页面路由名**是 `p__ai4cuc__index` / `p__ai4cuc__origin`（**ai4cuc**），
+且知识库名也是 **`cuc`** —— 两者一致，指向**中国传媒大学（CUC）**。
+
+最可能的解释：**这套 AI 平台是延河课堂的商业产品，先（或同时）服务 CUC，
+北理复用时前端代码沿用了这些命名**。
+（⚠️ 这是**代码命名证据 + 推测**，不是官方说法。）
+
+### 7.5 能力评价（客观）
+
+| 维度 | 判断 |
+|---|---|
+| **模型量级** | `chatglm3-6b` = 智谱 **2023 年**开源的 **6B 小模型**，量化后单张消费级显卡即可跑 —— 与 2026 年的主流旗舰（数百 B 级）**不是一个量级** |
+| **适合** | 校园规章问答、办事流程指引（**恰好是 RAG + 低温采样最能发挥的场景**：答案要准、不要发挥） |
+| **不适合** | 复杂推理、长文写作、代码、需要时效知识的提问 |
+| **多轮** | `MAX_HISTORY_LENTH: 1` —— **几乎没有对话记忆**，每轮基本独立 |
+| **时效** | 开源模型无联网；只能靠知识库补，**知识库之外的问题会答得很差或拒答** |
+
+### 7.6 ⇒ 对我们的决策意味着什么
+
+1. **不撞车**：它答不了「我明天几节课」「我还有多少流量」——**它拿不到我们的本地数据**。
+   我们的「问我的数据」与它是**两个不同的问题域**。
+2. **绝大多数场景根本不需要大模型**：查课表 / 算绩点 / 查流量，**确定性代码更准**。
+   所谓"AI 问答"在我们这边，本质是**给已有能力加一层自然语言入口**（见第六节约束 A）。
+3. **如果哪天真要用模型**（比如"帮我把这周的安排说成一段话"），也**不该用 6B**：
+   直接接主流的强模型成本并不高，效果差距却是代差级的。
