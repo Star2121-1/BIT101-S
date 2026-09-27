@@ -82,7 +82,8 @@ internal fun SettingIndexPage(
         ),
         SettingItemData.IndexCard(
             title = "提醒设置",
-            subTitle = "上课与作业截止提醒",
+            // 提醒已经有 6 类，写死具体名字会立刻过时（这里曾经只写「上课与作业截止提醒」）
+            subTitle = "上课 / 作业 / 座位 / 考试 / 出分 / 网费",
             icon = Icons.Outlined.NotificationsNone,
             onClick = { navController.navigate("notify") },
         ),

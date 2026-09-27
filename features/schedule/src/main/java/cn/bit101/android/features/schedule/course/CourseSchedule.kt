@@ -21,6 +21,7 @@ import cn.bit101.android.features.common.component.schedule.AddEditScheduleDialo
 import cn.bit101.android.features.common.component.schedule.CustomScheduleDetailDialog
 import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.common.nav.NavDest
+import java.time.LocalDateTime
 
 /**
  * @author flwfdd
@@ -82,6 +83,13 @@ internal fun CourseSchedule(
     val showCourseDetailState by vm.showCourseDetail.collectAsState()
 
     val showExamDetailState by vm.showExamDetail.collectAsState()
+
+    /**
+     * 考试安排列表用的数据（**不受「课表里显示考试」开关影响**）与展开状态。
+     */
+    val allExams by vm.allExams.collectAsState()
+    val showExamList by vm.showExamList.collectAsState()
+    val refreshExamsState by vm.refreshExamsStateLiveData.observeAsState()
 
     val showCustomScheduleState by vm.showCustomScheduleDetail.collectAsState()
 
@@ -224,12 +232,26 @@ internal fun CourseSchedule(
                         nowEditCustomSchedule = null
                         showAddScheduleDialog = true
                     },
+                    onShowExams = vm::showExamList,
                 )
                 if(showCourseDetailState != null) {
                     // 课程详情对话框
                     CourseScheduleDetailDialog(
                         course = showCourseDetailState!!,
                         onDismiss = vm::clearShowCourseDetail
+                    )
+                }
+                if(showExamList) {
+                    // 考试安排列表。⚠️ 刻意声明在详情对话框**之前**：Compose 里后声明的
+                    // Dialog 盖在上层，于是从列表点进详情时详情在最上面、关掉详情回到列表
+                    ExamListDialog(
+                        exams = allExams,
+                        // 用「打开这一刻」的时间算倒计时，重组时不跳字
+                        now = remember(showExamList) { LocalDateTime.now() },
+                        refreshState = refreshExamsState,
+                        onRefresh = vm::refreshExams,
+                        onExamClick = vm::openExamDetail,
+                        onDismiss = vm::clearExamList,
                     )
                 }
                 if(showExamDetailState != null) {

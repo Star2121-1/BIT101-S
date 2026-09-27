@@ -43,4 +43,17 @@ interface NotifySettings {
      * ⚠️ 通知里**只有课名、没有分数**（用户定的隐私边界，见 `docs/codebase-survey.md`）。
      */
     val scoreEnabled: SettingItem<Boolean>
+
+    /**
+     * 考试提醒开关。
+     *
+     * 默认开 —— 考试只有一次机会，错过无法补救，是最该提醒的一类。
+     */
+    val examEnabled: SettingItem<Boolean>
+
+    /** 考前一天提醒（固定提前 24 小时）。 */
+    val examDayEnabled: SettingItem<Boolean>
+
+    /** 考试提前量（分钟）。默认 60：够从容走到考场、找座位。 */
+    val examLeadMinutes: SettingItem<Long>
 }

@@ -82,6 +82,9 @@ internal class NotifySettingViewModel @Inject constructor(
     val seatEnabled = notifySettings.seatEnabled
     val seatSignInLeadMinutes = notifySettings.seatSignInLeadMinutes
     val scoreEnabled = notifySettings.scoreEnabled
+    val examEnabled = notifySettings.examEnabled
+    val examDayEnabled = notifySettings.examDayEnabled
+    val examLeadMinutes = notifySettings.examLeadMinutes
 
     /** 上课提前量的可选项（分钟）——不给自由输入，免得填出「提前 3 天」这种怪值。 */
     val leadOptions = listOf(5L, 10L, 15L, 20L, 30L)
@@ -93,6 +96,14 @@ internal class NotifySettingViewModel @Inject constructor(
      * 提前一刻钟走过去是常态，60 分钟（一进馆就提醒）也该允许。
      */
     val seatLeadOptions = listOf(5L, 15L, 30L, 60L)
+
+    /**
+     * 考试提前量的可选项（分钟）。
+     *
+     * ⚠️ 下限比上课提醒**大得多**：考试要提前到场找座位、放包、上厕所，
+     * 提前 5/10 分钟才动身是来不及的 —— 所以选项从 30 分钟起。
+     */
+    val examLeadOptions = listOf(30L, 60L, 90L, 120L)
 
     fun setEnabled(value: Boolean) = write { notifySettings.enabled.set(value) }
 
@@ -111,6 +122,12 @@ internal class NotifySettingViewModel @Inject constructor(
     fun setSeatLeadMinutes(minutes: Long) = write { notifySettings.seatSignInLeadMinutes.set(minutes) }
 
     fun setScoreEnabled(value: Boolean) = write { notifySettings.scoreEnabled.set(value) }
+
+    fun setExamEnabled(value: Boolean) = write { notifySettings.examEnabled.set(value) }
+
+    fun setExamDayEnabled(value: Boolean) = write { notifySettings.examDayEnabled.set(value) }
+
+    fun setExamLeadMinutes(minutes: Long) = write { notifySettings.examLeadMinutes.set(minutes) }
 
     /**
      * 写设置 + 立即重排。

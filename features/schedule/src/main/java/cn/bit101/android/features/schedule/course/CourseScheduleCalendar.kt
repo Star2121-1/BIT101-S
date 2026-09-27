@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.*
+import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.CardDefaults
@@ -73,6 +74,8 @@ internal fun CourseScheduleCalendar(
     onConfig: () -> Unit,
     onChangeWeek: (Int) -> Unit,
     onAddSchedule: () -> Unit,
+    /** 打开「考试安排」列表（本学期全部考试，按时间排序）。 */
+    onShowExams: () -> Unit,
 ) {
     /**
      * 一天的节数
@@ -389,6 +392,19 @@ internal fun CourseScheduleCalendar(
                 Icon(
                     imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
                     contentDescription = "last week",
+                )
+            }
+            FloatingActionButton(
+                modifier = Modifier
+                    .size(fabSize),
+                onClick = onShowExams,
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
+                contentColor = MaterialTheme.colorScheme.primary,
+                elevation = FloatingActionButtonDefaults.elevation(0.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.EventNote,
+                    contentDescription = "考试安排",
                 )
             }
             FloatingActionButton(

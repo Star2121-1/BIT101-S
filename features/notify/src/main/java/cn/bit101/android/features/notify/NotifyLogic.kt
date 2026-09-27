@@ -8,6 +8,8 @@ import cn.bit101.android.config.setting.base.sectionStart
 import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
+import cn.bit101.android.data.database.entity.ExamScheduleEntity
+import cn.bit101.android.data.database.entity.startAt
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -32,6 +34,14 @@ enum class ReminderKind {
      * 错过签到会**记一次违约**，累计 5 次暂停 7 天（见 `docs/seatlib-contract.md` 第 10 节）。
      */
     SEAT_SIGN_IN,
+
+    /**
+     * 考试提醒：考前一天 + 考前 N 分钟。
+     *
+     * ⚠️ 单独成类（而不是并进上课提醒）：考试只有一次机会，错过无法补救，
+     * 通知要给 HIGH 并且**带上座位号** —— 上课迟到还能进教室，考试迟到就得联系老师。
+     */
+    EXAM,
 }
 
 /**
@@ -90,6 +100,16 @@ data class NotifyPolicy(
      * 再早反而会被当成"还早着呢"而忽略。
      */
     val seatSignInLeadMinutes: Long = 15,
+    /** 考试提醒。考试只有一次机会，默认开。 */
+    val examEnabled: Boolean = true,
+    /** 考试前一天提醒（固定提前 24 小时）。 */
+    val examDayEnabled: Boolean = true,
+    /**
+     * 考试前多少分钟提醒。默认 60：够从容走到考场、找座位、上厕所。
+     *
+     * 与上课提醒不同，**不改小**：考试要提前到场，提前 10 分钟才动身就晚了。
+     */
+    val examLeadMinutes: Long = 60,
     /** 只排未来这么多天内的提醒；更远的等下次重排。 */
     val horizonDays: Long = 7,
 ) {
@@ -97,6 +117,9 @@ data class NotifyPolicy(
         /** DDL 的两个提醒窗口（键会进去重键，**改这里等于改历史记录**，谨慎）。 */
         const val DDL_WINDOW_DAY = "1d"
         const val DDL_WINDOW_HOUR = "1h"
+
+        /** 考试「前一天」窗口。 */
+        const val EXAM_WINDOW_DAY = "1d"
     }
 }
 
@@ -121,6 +144,7 @@ object NotifyLogic {
         policy: NotifyPolicy = NotifyPolicy(),
         sentKeys: Set<String> = emptySet(),
         seatSignIns: List<SeatReminderInput> = emptyList(),
+        exams: List<ExamScheduleEntity> = emptyList(),
     ): List<Reminder> {
         val until = now.plusDays(policy.horizonDays)
         val out = mutableListOf<Reminder>()
@@ -133,6 +157,9 @@ object NotifyLogic {
         }
         if (policy.seatEnabled) {
             out += seatReminders(seatSignIns, now, until, policy, sentKeys)
+        }
+        if (policy.examEnabled) {
+            out += examReminders(exams, now, until, policy, sentKeys)
         }
 
         // 按时刻排序：便于人工核对，也让「最近的一条」一目了然
@@ -328,6 +355,112 @@ object NotifyLogic {
         }
         return "$day ${hm(deadline.toLocalTime())} 截止"
     }
+
+    // ------------------------------------------------------------ 考试提醒
+
+    /**
+     * 考试提醒：**考前一天 + 考前 N 分钟**，各一条。
+     *
+     * ⚠️ 与座位签到提醒**故意相反**：这里过了时刻就**不补发**。
+     * 「1 小时后开考」迟发就是假话；考试也不像签到那样「发现得晚还能补救」
+     * —— 都开考了才弹提醒，只会让人慌张。
+     *
+     * ⚠️ 不按教学周过滤：考试日期是服务端给的**绝对日期**，与第几周无关。
+     */
+    private fun examReminders(
+        exams: List<ExamScheduleEntity>,
+        now: LocalDateTime,
+        until: LocalDateTime,
+        policy: NotifyPolicy,
+        sentKeys: Set<String>,
+    ): List<Reminder> {
+        val lead = policy.examLeadMinutes.coerceAtLeast(0)
+        val out = mutableListOf<Reminder>()
+
+        exams.asSequence()
+            // 已经开考（或更早）的跳过：正在考的那场再提醒也没用
+            .filter { examStartAt(it).isAfter(now) }
+            .forEach { exam ->
+                val start = examStartAt(exam)
+
+                // (窗口标识, 提醒时刻, 标题)
+                val windows: List<Triple<String, LocalDateTime, String>> = buildList {
+                    if (policy.examDayEnabled) {
+                        add(Triple(NotifyPolicy.EXAM_WINDOW_DAY, start.minusDays(1), "明天有考试"))
+                    }
+                    add(Triple(examLeadWindow(lead), start.minusMinutes(lead), examTitle(lead)))
+                }
+
+                windows.forEach { (window, at, title) ->
+                    // 与上课提醒同一口径：过时不补、超出窗口不排
+                    if (at.isBefore(now) || at.isAfter(until)) return@forEach
+
+                    val key = examKey(exam, window)
+                    if (key in sentKeys) return@forEach
+
+                    out += Reminder(
+                        key = key,
+                        kind = ReminderKind.EXAM,
+                        at = at,
+                        title = title,
+                        text = examText(exam),
+                        route = PageShowOnNav.Schedule.toPageData().value,
+                    )
+                }
+            }
+        return out
+    }
+
+    /**
+     * 考试开始的绝对时刻。
+     *
+     * 委托给 data 层的 `ExamScheduleEntity.startAt` —— 考试列表页（`features:schedule`）
+     * 用的是同一个，两边各写一遍迟早会在跨天/跨年这种边界上走偏。
+     */
+    fun examStartAt(exam: ExamScheduleEntity): LocalDateTime = exam.startAt
+
+    /**
+     * 考前提醒标题：「1 小时后开考」。
+     *
+     * 整小时写「N 小时」更顺口；提前量为 0 时不写「0 分钟后」。
+     */
+    fun examTitle(leadMinutes: Long): String = when {
+        leadMinutes <= 0 -> "马上开考"
+        leadMinutes % 60 == 0L -> "${leadMinutes / 60} 小时后开考"
+        else -> "$leadMinutes 分钟后开考"
+    }
+
+    /**
+     * 通知正文，如 `08:00-10:00 高等数学 · 文萃楼I404 · 座位 012`。
+     *
+     * ⚠️ **座位号必须写**：考试按座位号入座，找座位的几分钟决定了你能不能坐下来喘口气。
+     * 上课提醒没有这个概念，这是考试独有的字段。
+     */
+    fun examText(exam: ExamScheduleEntity): String {
+        val span = "${hm(exam.beginTime)}-${hm(exam.endTime)}"
+        val seat = exam.seatId.trim().let { if (it.isBlank()) "" else "座位 $it" }
+        return listOf(span, exam.name, exam.classroom, seat)
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+    }
+
+    /**
+     * 考试提醒的去重键：`exam:{课程号或课名}:{日期}:{窗口}`。
+     *
+     * ⚠️ **刻意不带具体时刻**：同一天同一门课正常只有一场考试，日期 + 窗口已足够区分；
+     * 带上时刻反而会在服务端微调考试时间后，让「已提醒过」的记录作废 → 重复提醒一次。
+     */
+    fun examKey(exam: ExamScheduleEntity, window: String): String {
+        val id = exam.courseId.trim().ifBlank { exam.name }
+        return "exam:$id:${exam.date}:$window"
+    }
+
+    /**
+     * 考前 N 分钟的窗口标识。
+     *
+     * ⚠️ 提前量进键（与上课 / 座位提醒同一口径）：用户改了提前量，应按新策略再提醒一次。
+     */
+    fun examLeadWindow(leadMinutes: Long): String = "lead$leadMinutes"
 
     // ------------------------------------------------------------ 去重键
 

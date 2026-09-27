@@ -7,6 +7,7 @@ import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
+import cn.bit101.android.data.database.entity.ExamScheduleEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -617,5 +618,214 @@ class NotifyLogicTest {
         assertTrue(list.any { it.kind == ReminderKind.SEAT_SIGN_IN })
         assertTrue(list.any { it.kind == ReminderKind.CLASS })
         assertTrue(list.any { it.kind == ReminderKind.DDL })
+    }
+
+    // ------------------------------------------------------------ 考试提醒
+
+    private fun exam(
+        name: String = "高等数学",
+        courseId: String = "MA10001",
+        date: LocalDate = monday.plusDays(3),
+        begin: LocalTime = LocalTime.of(8, 0),
+        end: LocalTime = LocalTime.of(10, 0),
+        classroom: String = "文萃楼I404",
+        seatId: String = "012",
+    ) = ExamScheduleEntity(
+        id = 0,
+        term = "2026-2027-1",
+        name = name,
+        courseId = courseId,
+        teacher = "老师",
+        classroom = classroom,
+        date = date,
+        beginTime = begin,
+        endTime = end,
+        examMode = "集中考试",
+        seatId = seatId,
+    )
+
+    private fun examPlan(
+        exams: List<ExamScheduleEntity>,
+        now: LocalDateTime,
+        policy: NotifyPolicy = NotifyPolicy(),
+        sentKeys: Set<String> = emptySet(),
+    ) = NotifyLogic.plan(
+        courses = emptyList(),
+        ddls = emptyList(),
+        now = now,
+        firstDay = firstDay,
+        table = table,
+        policy = policy,
+        sentKeys = sentKeys,
+        exams = exams,
+    )
+
+    /** 周四 08:00 考试 → 前一天 08:00「明天有考试」+ 当天 07:00「1 小时后开考」。 */
+    @Test
+    fun `考试排两条提醒：前一天与考前N分钟`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(9, 0))     // 周一 09:00
+        val examDate = monday.plusDays(3)                          // 周四
+
+        val list = examPlan(listOf(exam(date = examDate)), now)
+
+        assertEquals(2, list.size)
+        assertTrue(list.all { it.kind == ReminderKind.EXAM })
+        assertEquals(LocalDateTime.of(examDate.minusDays(1), LocalTime.of(8, 0)), list[0].at)
+        assertEquals("明天有考试", list[0].title)
+        assertEquals(LocalDateTime.of(examDate, LocalTime.of(7, 0)), list[1].at)
+        assertEquals("1 小时后开考", list[1].title)
+    }
+
+    /** 考试正文必须有座位号 —— 考试按座位号入座，这是它区别于上课提醒的地方。 */
+    @Test
+    fun `考试正文含时间课名教室与座位`() {
+        assertEquals(
+            "08:00-10:00 · 高等数学 · 文萃楼I404 · 座位 012",
+            NotifyLogic.examText(exam()),
+        )
+    }
+
+    /** 服务端没给座位号时不出现「座位 」这种残缺拼接。 */
+    @Test
+    fun `座位号为空时正文省略座位段`() {
+        assertEquals(
+            "08:00-10:00 · 高等数学 · 文萃楼I404",
+            NotifyLogic.examText(exam(seatId = "   ")),
+        )
+    }
+
+    /** 已经开考的考试再提醒也没用（正在考的那场别来添乱）。 */
+    @Test
+    fun `已开考的考试不再提醒`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(9, 0))
+        // 考试 08:00 开始，现在 09:00 —— 已经在考了
+        val list = examPlan(listOf(exam(date = monday, begin = LocalTime.of(8, 0))), now)
+
+        assertEquals(0, list.size)
+    }
+
+    /**
+     * ⚠️ 与座位签到**相反**：过了提醒时刻不补发。
+     *
+     * 「1 小时后开考」迟发就是假话；考试也不是「发现得晚还能补救」的事。
+     */
+    @Test
+    fun `过了时刻的考试窗口不补发`() {
+        val examDate = monday.plusDays(1)                          // 周二 08:00 考试
+        val now = LocalDateTime.of(monday, LocalTime.of(9, 0))     // 周一 09:00
+        // 前一天窗口 = 周一 08:00（已过）→ 不发；考前窗口 = 周二 07:00（未来）→ 发
+
+        val list = examPlan(listOf(exam(date = examDate)), now)
+
+        assertEquals(1, list.size)
+        assertEquals(LocalDateTime.of(examDate, LocalTime.of(7, 0)), list[0].at)
+        assertEquals("1 小时后开考", list[0].title)
+    }
+
+    @Test
+    fun `考前一天提醒可单独关闭`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(9, 0))
+        val list = examPlan(
+            listOf(exam(date = monday.plusDays(3))),
+            now,
+            policy = NotifyPolicy(examDayEnabled = false),
+        )
+
+        assertEquals(1, list.size)
+        assertEquals("1 小时后开考", list[0].title)
+    }
+
+    @Test
+    fun `考试提醒总开关关闭后一条都不排`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(9, 0))
+        val list = examPlan(
+            listOf(exam(date = monday.plusDays(3))),
+            now,
+            policy = NotifyPolicy(examEnabled = false),
+        )
+
+        assertEquals(0, list.size)
+    }
+
+    /** 提前量可配置，且整小时写「N 小时」。 */
+    @Test
+    fun `考试提前量可配置且整小时写小时`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(9, 0))
+        val examDate = monday.plusDays(3)
+
+        val list = examPlan(
+            listOf(exam(date = examDate)),
+            now,
+            policy = NotifyPolicy(examLeadMinutes = 120),
+        )
+
+        assertEquals(LocalDateTime.of(examDate, LocalTime.of(6, 0)), list[1].at)
+        assertEquals("2 小时后开考", list[1].title)
+
+        assertEquals("马上开考", NotifyLogic.examTitle(0))
+        assertEquals("30 分钟后开考", NotifyLogic.examTitle(30))
+        assertEquals("1 小时后开考", NotifyLogic.examTitle(60))
+    }
+
+    /** 同一门课考两次（期中 + 期末）是两条独立提醒 —— 键里带日期。 */
+    @Test
+    fun `同一门课的两场考试是两条提醒`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(9, 0))
+        val mid = exam(date = monday.plusDays(3))
+        val final = exam(date = monday.plusDays(5))
+
+        val list = examPlan(listOf(mid, final), now)
+
+        assertEquals(4, list.size)
+        assertTrue(list.any { it.at == LocalDateTime.of(monday.plusDays(3), LocalTime.of(7, 0)) })
+        assertTrue(list.any { it.at == LocalDateTime.of(monday.plusDays(5), LocalTime.of(7, 0)) })
+    }
+
+    /**
+     * ⚠️ 去重键**刻意不含具体时刻**：服务端把 08:00 微调成 08:30 后，
+     * 若键里带时刻就会判成「新提醒」而重复打扰一次。
+     */
+    @Test
+    fun `考试键不含具体时刻_改时间不重复提醒`() {
+        val a = exam(date = monday.plusDays(3), begin = LocalTime.of(8, 0))
+        val b = exam(date = monday.plusDays(3), begin = LocalTime.of(8, 30))
+
+        assertEquals(NotifyLogic.examKey(a, NotifyPolicy.EXAM_WINDOW_DAY), NotifyLogic.examKey(b, NotifyPolicy.EXAM_WINDOW_DAY))
+    }
+
+    /** 提前量进键：改了提前量应按新策略再提醒一次（与上课 / 座位提醒同口径）。 */
+    @Test
+    fun `考试提前量进键`() {
+        assertTrue(NotifyLogic.examKey(exam(), NotifyLogic.examLeadWindow(60)) !=
+            NotifyLogic.examKey(exam(), NotifyLogic.examLeadWindow(30)))
+    }
+
+    /** 已发过的键不再排。 */
+    @Test
+    fun `考试已发过的键不再排`() {
+        val now = LocalDateTime.of(monday, LocalTime.of(9, 0))
+        val e = exam(date = monday.plusDays(3))
+        val sent = setOf(
+            NotifyLogic.examKey(e, NotifyPolicy.EXAM_WINDOW_DAY),
+            NotifyLogic.examKey(e, NotifyLogic.examLeadWindow(60)),
+        )
+
+        assertEquals(0, examPlan(listOf(e), now, sentKeys = sent).size)
+    }
+
+    /** 课程号缺失时退化成课名，键仍可用。 */
+    @Test
+    fun `课程号为空时键退化成课名`() {
+        val e = exam(name = "大学物理", courseId = "  ")
+        assertTrue(NotifyLogic.examKey(e, NotifyPolicy.EXAM_WINDOW_DAY).contains("大学物理"))
+    }
+
+    /** 考试开始时刻 = 日期 + 开始时间。 */
+    @Test
+    fun `考试开始时刻拼接正确`() {
+        assertEquals(
+            LocalDateTime.of(monday.plusDays(3), LocalTime.of(8, 0)),
+            NotifyLogic.examStartAt(exam(date = monday.plusDays(3))),
+        )
     }
 }

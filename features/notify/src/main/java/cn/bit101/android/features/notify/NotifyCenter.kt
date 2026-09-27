@@ -38,6 +38,14 @@ internal object NotifyCenter {
     private const val CHANNEL_SEAT = "seat_reminder"
 
     /**
+     * 考试提醒。
+     *
+     * ⚠️ 也给 HIGH：考试只有一次机会，错过无法补救（不像上课迟到还能进教室）。
+     * 必须在锁屏就能看见 —— 而且要给出**考场与座位号**。
+     */
+    private const val CHANNEL_EXAM = "exam_reminder"
+
+    /**
      * 出分提醒。
      *
      * ⚠️ 通知里**只有课名、没有分数** —— 这是用户明确的隐私决定，
@@ -86,6 +94,7 @@ internal object NotifyCenter {
         ensureChannel(manager, CHANNEL_CLASS, "上课提醒", NotificationManager.IMPORTANCE_DEFAULT, "上课前提醒，显示节次、课程名与教室")
         ensureChannel(manager, CHANNEL_DDL, "作业截止", NotificationManager.IMPORTANCE_HIGH, "作业/DDL 截止前提醒")
         ensureChannel(manager, CHANNEL_SEAT, "座位签到", NotificationManager.IMPORTANCE_HIGH, "预约座位的签到时限提醒（错过会记违约）")
+        ensureChannel(manager, CHANNEL_EXAM, "考试提醒", NotificationManager.IMPORTANCE_HIGH, "考前一天与考前提醒，显示时间、考场与座位号")
         ensureChannel(manager, CHANNEL_SCORE, "出分提醒", NotificationManager.IMPORTANCE_DEFAULT, "有新课出分时提醒（通知里不含分数）")
         ensureChannel(manager, CHANNEL_NETFEE, "网费不足", NotificationManager.IMPORTANCE_DEFAULT, "校园网账户余额不足时提醒充值（每日至多一次）")
         ensureChannel(manager, CHANNEL_NETFLOW, "校园网流量", NotificationManager.IMPORTANCE_DEFAULT, "本月流量接近 / 超过 300 GB 限速阈值时提醒（每周期至多两条）")
@@ -103,10 +112,11 @@ internal object NotifyCenter {
             ReminderKind.CLASS -> CHANNEL_CLASS
             ReminderKind.DDL -> CHANNEL_DDL
             ReminderKind.SEAT_SIGN_IN -> CHANNEL_SEAT
+            ReminderKind.EXAM -> CHANNEL_EXAM
         }
 
-        // DDL 与座位签到都值得「弹出来」：前者交不上去要扣分，
-        // 后者错过会记违约（累计 5 次暂停 7 天）
+        // DDL / 座位签到 / 考试都值得「弹出来」：DDL 交不上去要扣分，
+        // 座位错过会记违约（累计 5 次暂停 7 天），考试只有一次机会
         val urgent = reminder.kind != ReminderKind.CLASS
 
         val notification = NotificationCompat.Builder(context, channel)

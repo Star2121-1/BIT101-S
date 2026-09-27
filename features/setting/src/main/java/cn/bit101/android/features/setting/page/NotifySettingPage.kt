@@ -48,6 +48,9 @@ private fun NotifySettingPageContent(
     ddlHourEnabled: Boolean,
     seatEnabled: Boolean,
     seatLead: Long,
+    examEnabled: Boolean,
+    examDayEnabled: Boolean,
+    examLead: Long,
     scoreEnabled: Boolean,
     scoreStatus: String?,
     checking: Boolean,
@@ -59,10 +62,13 @@ private fun NotifySettingPageContent(
     onToggleDdlDay: (Boolean) -> Unit,
     onToggleDdlHour: (Boolean) -> Unit,
     onToggleSeat: (Boolean) -> Unit,
+    onToggleExam: (Boolean) -> Unit,
+    onToggleExamDay: (Boolean) -> Unit,
     onToggleScore: (Boolean) -> Unit,
     onCheckScore: () -> Unit,
     onOpenLeadDialog: () -> Unit,
     onOpenSeatLeadDialog: () -> Unit,
+    onOpenExamLeadDialog: () -> Unit,
     onRequestPermission: () -> Unit,
 ) {
     SettingsColumn {
@@ -139,6 +145,32 @@ private fun NotifySettingPageContent(
                     subTitle = "签到截止前多久提醒",
                     text = "提前 $seatLead 分钟",
                     onClick = onOpenSeatLeadDialog,
+                ),
+            ),
+        )
+
+        SettingsGroup(
+            title = "考试提醒",
+            subTitle = "考前一天与考前各提醒一次，通知里带考场与座位号。考试只有一次机会，建议开着",
+            visible = enabled,
+            items = listOf(
+                SettingItemData.Switch(
+                    title = "考试提醒",
+                    subTitle = "考前一天 + 考前各提醒一次",
+                    checked = examEnabled,
+                    onClick = onToggleExam,
+                ),
+                SettingItemData.Switch(
+                    title = "提前一天",
+                    subTitle = "考试前一天提醒一次（同一时刻提前 24 小时）",
+                    checked = examDayEnabled,
+                    onClick = onToggleExamDay,
+                ),
+                SettingItemData.Button(
+                    title = "提前时间",
+                    subTitle = "考试前多久提醒",
+                    text = "提前 $examLead 分钟",
+                    onClick = onOpenExamLeadDialog,
                 ),
             ),
         )
@@ -245,12 +277,16 @@ internal fun NotifySettingPage() {
     val ddlHourEnabled by vm.ddlHourEnabled.flow.collectAsState(initial = true)
     val seatEnabled by vm.seatEnabled.flow.collectAsState(initial = true)
     val seatLead by vm.seatSignInLeadMinutes.flow.collectAsState(initial = 15L)
+    val examEnabled by vm.examEnabled.flow.collectAsState(initial = true)
+    val examDayEnabled by vm.examDayEnabled.flow.collectAsState(initial = true)
+    val examLead by vm.examLeadMinutes.flow.collectAsState(initial = 60L)
     val scoreEnabled by vm.scoreEnabled.flow.collectAsState(initial = true)
     val scoreStatus by vm.scoreStatus.collectAsState()
     val checking by vm.checkingScore.collectAsState()
 
     var showLeadDialog by rememberSaveable { mutableStateOf(false) }
     var showSeatLeadDialog by rememberSaveable { mutableStateOf(false) }
+    var showExamLeadDialog by rememberSaveable { mutableStateOf(false) }
 
     NotifySettingPageContent(
         enabled = enabled,
@@ -261,6 +297,9 @@ internal fun NotifySettingPage() {
         ddlHourEnabled = ddlHourEnabled,
         seatEnabled = seatEnabled,
         seatLead = seatLead,
+        examEnabled = examEnabled,
+        examDayEnabled = examDayEnabled,
+        examLead = examLead,
         scoreEnabled = scoreEnabled,
         scoreStatus = scoreStatus,
         checking = checking,
@@ -272,10 +311,13 @@ internal fun NotifySettingPage() {
         onToggleDdlDay = vm::setDdlDayEnabled,
         onToggleDdlHour = vm::setDdlHourEnabled,
         onToggleSeat = vm::setSeatEnabled,
+        onToggleExam = vm::setExamEnabled,
+        onToggleExamDay = vm::setExamDayEnabled,
         onToggleScore = { vm.setScoreEnabled(it); vm.refreshScoreStatus() },
         onCheckScore = vm::checkScoreNow,
         onOpenLeadDialog = { showLeadDialog = true },
         onOpenSeatLeadDialog = { showSeatLeadDialog = true },
+        onOpenExamLeadDialog = { showExamLeadDialog = true },
         onRequestPermission = permission::request,
     )
 
@@ -302,6 +344,19 @@ internal fun NotifySettingPage() {
                 showSeatLeadDialog = false
             },
             onDismiss = { showSeatLeadDialog = false },
+        )
+    }
+
+    if (showExamLeadDialog) {
+        LeadMinutesDialog(
+            title = "考试前多久提醒",
+            current = examLead,
+            options = vm.examLeadOptions,
+            onPick = {
+                vm.setExamLeadMinutes(it)
+                showExamLeadDialog = false
+            },
+            onDismiss = { showExamLeadDialog = false },
         )
     }
 }

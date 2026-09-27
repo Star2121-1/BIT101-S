@@ -153,6 +153,17 @@ internal class SettingDataStore @Inject constructor(
     private val NOTIFY_SCORE_ENABLED = booleanPreferencesKey("notify_score_enabled")
     val notifyScoreEnabled = PreferencesDataStoreItem(NOTIFY_SCORE_ENABLED, true, preferences.SETTING_DATASTORE)
 
+    // 考试提醒（考前一天 + 考前 N 分钟；考试只有一次机会，默认开）
+    private val NOTIFY_EXAM_ENABLED = booleanPreferencesKey("notify_exam_enabled")
+    val notifyExamEnabled = PreferencesDataStoreItem(NOTIFY_EXAM_ENABLED, true, preferences.SETTING_DATASTORE)
+
+    private val NOTIFY_EXAM_DAY_ENABLED = booleanPreferencesKey("notify_exam_day_enabled")
+    val notifyExamDayEnabled = PreferencesDataStoreItem(NOTIFY_EXAM_DAY_ENABLED, true, preferences.SETTING_DATASTORE)
+
+    // 考试提前量（分钟）：默认 60，够从容走到考场、找座位
+    private val NOTIFY_EXAM_LEAD_MINUTES = longPreferencesKey("notify_exam_lead_minutes")
+    val notifyExamLeadMinutes = PreferencesDataStoreItem(NOTIFY_EXAM_LEAD_MINUTES, 60, preferences.SETTING_DATASTORE)
+
     // 空教室检索设置
     // 当前校区名
     private val FREE_CLASSROOM_CURRENT_CAMPUS_NAME = stringPreferencesKey("free_classroom_campus_name")

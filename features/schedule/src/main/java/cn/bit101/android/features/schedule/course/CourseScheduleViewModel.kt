@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.temporal.ChronoUnit
@@ -84,6 +85,49 @@ internal class CourseScheduleViewModel @Inject constructor(
 
     private val customSchedulesFlow = coursesRepo.getCustomSchedules()
 
+    /**
+     * **全部**考试安排 ——「考试安排」列表用它。
+     *
+     * ⚠️ 与 [examsFlow] 分开是有意的：`showExamInfo` 那个开关只该控制
+     * 「课表格子里显不显示考试色块」，不该让用户「关掉色块后连考试列表都空了」。
+     */
+    private val _allExams = MutableStateFlow<List<ExamScheduleEntity>>(emptyList())
+    val allExams: StateFlow<List<ExamScheduleEntity>> = _allExams.asStateFlow()
+
+    /** 「考试安排」列表是否展开。 */
+    private val _showExamList = MutableStateFlow(false)
+    val showExamList: StateFlow<Boolean> = _showExamList.asStateFlow()
+
+    /** 「考试安排」列表里「从学校同步」的执行状态。 */
+    val refreshExamsStateLiveData = MutableLiveData<SimpleState?>(null)
+
+    fun showExamList() {
+        // 每次打开都重置同步状态：上次的「成功 / 失败」留到这次会误导
+        refreshExamsStateLiveData.value = null
+        _showExamList.value = true
+    }
+
+    fun clearExamList() {
+        _showExamList.value = false
+    }
+
+    /**
+     * 从学校拉一次考试安排并落库。
+     *
+     * ⚠️ **已有的入口**：设置 → 课表 → 「考试安排数据」本来就能重新获取当前学期的考试
+     * （`CalendarViewModel.getExams`）。但它在三级菜单里，而考试列表是个"打开就想知道
+     * 有没有新考试"的地方 —— 所以这里补一个**手边**的入口，不是新增能力。
+     *
+     * ⚠️ 用本地已存的学期（而不是每次先问服务端要当前学期）：少一次校内请求，
+     * 也就少一次触发风控的机会；本地确实没有学期时才去问。
+     */
+    fun refreshExams() = withSimpleStateLiveData(refreshExamsStateLiveData) {
+        val term = courseScheduleSettings.term.flow.first()?.takeIf { it.isNotBlank() }
+            ?: coursesRepo.getCurrentTermFromNet()
+        val exams = coursesRepo.getExamsFromNet(term)
+        coursesRepo.saveExams(exams)
+    }
+
 
     val refreshCoursesStateLiveData = MutableLiveData<SimpleState?>(null)
     val forceRefreshCoursesStateLiveData = MutableLiveData<SimpleState?>(null)
@@ -109,6 +153,11 @@ internal class CourseScheduleViewModel @Inject constructor(
         _showExamDetail.value = null
     }
 
+    /** 打开某场考试的详情（课表格子点色块、或「考试安排」列表点条目都走这里）。 */
+    fun openExamDetail(exam: ExamScheduleEntity) {
+        _showExamDetail.value = exam
+    }
+
     // 自定义日程数据, 如果为 null 就不显示该对话框
     val _showCustomScheduleDetail = MutableStateFlow<CustomScheduleEntity?>(null)
     val showCustomScheduleDetail = _showCustomScheduleDetail.asStateFlow()
@@ -132,6 +181,11 @@ internal class CourseScheduleViewModel @Inject constructor(
     }
 
     init {
+        // 考试列表用的全量数据（与课表色块那个开关无关）
+        withScope {
+            coursesRepo.getExamsFromLocal().collect { _allExams.value = it }
+        }
+
         // 学期开始日期改变
         withScope {
             firstDayFlow.collect { firstDay ->

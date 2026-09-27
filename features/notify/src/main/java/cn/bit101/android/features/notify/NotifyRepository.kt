@@ -56,6 +56,13 @@ class NotifyRepository @Inject constructor(
         } else {
             emptyList()
         }
+        // 考试安排跟着课表一起同步到本地，不需要额外网络请求。
+        // 取的是**全部学期**：往期的考试都已开考，会被 NotifyLogic 的时间过滤挡掉
+        val exams = if (policy.examEnabled) {
+            runCatching { coursesRepo.getExamsFromLocal().first() }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
 
         return NotifyLogic.plan(
             courses = courses,
@@ -66,6 +73,7 @@ class NotifyRepository @Inject constructor(
             policy = policy,
             sentKeys = NotifySentStore.read(),
             seatSignIns = seatSignIns,
+            exams = exams,
         )
     }
 
@@ -84,6 +92,7 @@ class NotifyRepository @Inject constructor(
             ReminderKind.CLASS -> classStillValid(reminder, now)
             ReminderKind.DDL -> ddlStillValid(reminder, now)
             ReminderKind.SEAT_SIGN_IN -> seatStillValid(reminder, now)
+            ReminderKind.EXAM -> examStillValid(reminder, now)
         }
     }
 
@@ -133,6 +142,25 @@ class NotifyRepository @Inject constructor(
         return ddls.any { !it.done && it.time.isAfter(now) }
     }
 
+    /**
+     * 考试是否仍然成立：**那天仍有考试**且**尚未开考**。
+     *
+     * ⚠️ 依据是去重键里的考试日期（`exam:{课程号或课名}:{日期}:{窗口}`）。
+     * 刻意**不比具体时刻、也不比教室** —— 服务端把 08:00 微调成 08:30、
+     * 或临时换考场，用户依然需要被提醒；比了反而漏提醒。
+     */
+    private suspend fun examStillValid(reminder: Reminder, now: LocalDateTime): Boolean {
+        val date = reminder.key.split(":").getOrNull(2)
+            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            ?: return false
+
+        val exams = runCatching { coursesRepo.getExamsFromLocal().first() }
+            .getOrDefault(emptyList())
+        return exams.any { exam ->
+            exam.date == date && NotifyLogic.examStartAt(exam).isAfter(now)
+        }
+    }
+
     /** 读设置组装策略；设置读取失败时**返回 null**（宁可这次不排，也不要按错误策略发）。 */
     private suspend fun policyOrNull(): NotifyPolicy? = runCatching {
         if (!notifySettings.enabled.get()) null
@@ -144,6 +172,9 @@ class NotifyRepository @Inject constructor(
             ddlHourEnabled = notifySettings.ddlHourEnabled.get(),
             seatEnabled = notifySettings.seatEnabled.get(),
             seatSignInLeadMinutes = notifySettings.seatSignInLeadMinutes.get(),
+            examEnabled = notifySettings.examEnabled.get(),
+            examDayEnabled = notifySettings.examDayEnabled.get(),
+            examLeadMinutes = notifySettings.examLeadMinutes.get(),
         )
     }.getOrNull()
 

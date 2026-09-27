@@ -1,7 +1,7 @@
 # 通知与提醒中心（features/notify）
 
-> 设计日期：2026-09-22　｜　状态：**五类提醒全部落地**（上课 / DDL / 座位签到 / 出分 / 网费+流量），
-> 最新 v1.9.10 真机验证通过。渠道与文案的唯一出口是 `NotifyCenter`。
+> 设计日期：2026-09-22　｜　状态：**六类提醒全部落地**（上课 / DDL / 座位签到 / **考试** / 出分 / 网费+流量），
+> 最新 v1.9.14（考试提醒）真机验证通过。渠道与文案的唯一出口是 `NotifyCenter`。
 
 ---
 
@@ -27,7 +27,7 @@ App 里的数据早就齐了（课表、DDL、座位预约），但**没有任�
 
 ```
 features/notify
-├── NotifyLogic.kt          纯逻辑：给定「课程/DDL/座位签到/现在」，算出该排哪些提醒（全部可单测）
+├── NotifyLogic.kt          纯逻辑：给定「课程/DDL/座位签到/考试/现在」，算出该排哪些提醒（全部可单测）
 ├── NotifyRepository.kt     取数：Room（课程/DDL）+ 课表设置里的时间表 + 座位签到（经接口）
 ├── SeatReminderSource.kt   **座位侧实现的接口**（数据方向；seat 提供实现，notify 只认识模型）
 ├── NotifyCenter.kt         渠道创建 + 发通知 + 点击跳转
@@ -88,6 +88,11 @@ ddl:{uid}:{窗口}                            例 ddl:lexue-123:1d / ddl:lexue-1
 |---|---|---|
 | `class_reminder` | DEFAULT | 上课提醒 |
 | `ddl_reminder` | HIGH | 作业截止（更紧急，允许提醒到人） |
+| `seat_reminder` | HIGH | 座位签到（错过会记违约，累计 5 次暂停 7 天） |
+| `exam_reminder` | HIGH | 考试（只有一次机会，正文必须给考场与座位号） |
+| `score_reminder` | DEFAULT | 出分（**不含分数**，用户定的隐私边界） |
+| `netfee_reminder` | DEFAULT | 网费不足（每日至多一条） |
+| `netflow_reminder` | DEFAULT | 校园网流量 270 / 300 GB（每周期至多两条） |
 | （沿用座位侧）`预约结果` | DEFAULT | 抢座结果 —— **不新建渠道**，避免同一个 App 出现两套座位通知 |
 
 ### 3.5 权限
@@ -96,6 +101,23 @@ ddl:{uid}:{窗口}                            例 ddl:lexue-123:1d / ddl:lexue-1
   notify 模块**再显式声明一次**（模块自包含，合并时去重）
 - UI 侧复用现有的 `hasNotificationPermission(context)` / `rememberNotificationPermissionState()`；
   **本轮不新增权限弹窗**：设置里显示开关状态 + 一键去申请即可
+
+### 3.6 考试提醒：与座位签到**方向相反**
+
+考试数据随课表一起同步（`exam_schedule` 表），但它是**一次性机会**，所以策略特意做得不一样：
+
+| | 座位签到 | 考试 |
+|---|---|---|
+| 「时刻已过」（`at < now`） | **立刻补发** —— 截止前刷卡还来得及补救 | **不补发** —— 「1 小时后开考」迟发就是假话，都开考了只会添乱 |
+| 提醒窗口 | 单一（截止前 N 分钟） | **两个**：考前一天 + 考前 N 分钟 |
+| 正文内容 | 座位号 + 绝对截止时刻 | 时间 · 课名 · 考场 · **座位号** |
+| 渠道重要性 | HIGH | HIGH（考试迟到无法补救，必须锁屏可见） |
+
+去重键 `exam:{课程号或课名}:{日期}:{窗口}` —— ⚠️ **刻意不带具体时刻**：
+服务端把 08:00 微调成 08:30 时，若键里带时刻就会判成「新提醒」而重复打扰一次。
+`stillValid` 也只比**日期**、不比时刻与考场（临时换考场照样得去）。
+
+考试**不按教学周过滤**：日期是服务端给的绝对日期，与第几周无关。
 
 ---
 
@@ -109,6 +131,12 @@ ddl:{uid}:{窗口}                            例 ddl:lexue-123:1d / ddl:lexue-1
 | `notify_ddl_enabled` | Boolean | true | DDL 提醒 |
 | `notify_ddl_day_enabled` | Boolean | true | 提前 1 天 |
 | `notify_ddl_hour_enabled` | Boolean | true | 提前 1 小时 |
+| `notify_seat_enabled` | Boolean | true | 座位签到提醒 |
+| `notify_seat_lead_minutes` | Long | 15 | 签到提前量（分钟） |
+| `notify_exam_enabled` | Boolean | true | 考试提醒 |
+| `notify_exam_day_enabled` | Boolean | true | 考前一天（固定提前 24 小时） |
+| `notify_exam_lead_minutes` | Long | 60 | 考试提前量（分钟）；选项从 30 起（考试要提前到场） |
+| `notify_score_enabled` | Boolean | true | 出分提醒 |
 
 （放在 `config` 模块，沿用 `SettingDataStore` + `SettingItem` 的既有模式，
 便于设置页统一渲染。）
@@ -117,8 +145,10 @@ ddl:{uid}:{窗口}                            例 ddl:lexue-123:1d / ddl:lexue-1
 
 ## 五、验证方式
 
-1. `NotifyLogicTest`：**23 条全过** —— 提醒时刻计算、窗口边界、跨天、周次过滤、
-   去重键、过期/已完成过滤、时间表越界、自定义时间表、文案格式
+1. `NotifyLogicTest`：**50 条全过**（v1.9.14 起）+ `NetFlowLogicTest` 4 条 ——
+   提醒时刻计算、窗口边界、跨天、周次过滤、去重键、过期/已完成过滤、时间表越界、
+   自定义时间表、文案格式；考试部分单独覆盖**双窗口**、**过时不补发**、
+   **键不含时刻**（服务端微调时间不重复提醒）
 2. 编译 + `assembleDebug` / `assembleRelease` 通过
 3. **真机实测（2026-09-22，v1.6.8）**：
    - 装到真机启动后，`dumpsys notification` 里出现我们创建的两个渠道
@@ -139,6 +169,8 @@ ddl:{uid}:{窗口}                            例 ddl:lexue-123:1d / ddl:lexue-1
 - ~~设置页 UI~~ ✅ **已在 v1.6.9 完成**：`我 → 设置 → 提醒设置`，
   含权限状态与一键申请；每次改动都会立即重排（`NotifyAppStartup.reschedule`）
 - ~~座位签到时限提醒~~ ✅ **已在 v1.7.1 完成**（`SeatReminderSource` + `seat_reminder` 渠道）
+- ~~考试提醒~~ ✅ **已在 v1.9.14 完成**（`exam_reminder` 渠道 + 考前一天/考前 N 分钟双窗口；
+  配套的「考试安排」列表入口在课表页右下角的日历图标）
 - 暂离将到期提醒（`seat → notify`）：暂离保留 60/120 分钟，超时自动释放 —— 未做
 - DDL 换源完成后（见 `docs/ddl-migration-plan.md`），提醒自动跟着新源走
 
