@@ -68,6 +68,14 @@ internal object NotifyCenter {
      */
     private const val CHANNEL_SEAT_VIOLATION = "seat_violation_reminder"
 
+    /**
+     * 图书馆借阅到期提醒。
+     *
+     * ⚠️ 正文**不含书名** —— 通知会显示在锁屏上，书目比分数更私人
+     * （与「出分通知只有课名」同一条边界，单测已锁）。
+     */
+    private const val CHANNEL_LIB_DUE = "lib_due_reminder"
+
     /** 点击通知打开 App 的入口（与组件共用同一套 `bit101_goto` 约定）。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"
     private const val EXTRA_GOTO = "bit101_goto"
@@ -83,6 +91,9 @@ internal object NotifyCenter {
 
     /** 违约提醒固定 id：后发的覆盖前一条，不刷屏。 */
     private const val NOTIFY_ID_SEAT_VIOLATION = 43001
+
+    /** 图书馆借阅提醒固定 id：后发的覆盖前一条。 */
+    private const val NOTIFY_ID_LIB_DUE = 44001
 
     /** 建一个渠道（幂等：已存在就跳过）。 */
     private fun ensureChannel(
@@ -111,6 +122,7 @@ internal object NotifyCenter {
         ensureChannel(manager, CHANNEL_NETFEE, "网费不足", NotificationManager.IMPORTANCE_DEFAULT, "校园网账户余额不足时提醒充值（每日至多一次）")
         ensureChannel(manager, CHANNEL_NETFLOW, "校园网流量", NotificationManager.IMPORTANCE_DEFAULT, "本月流量接近 / 超过 300 GB 限速阈值时提醒（每周期至多两条）")
         ensureChannel(manager, CHANNEL_SEAT_VIOLATION, "座位违约", NotificationManager.IMPORTANCE_HIGH, "预约未签到被记违约时提醒，并显示累计次数（累计 5 次暂停预约 7 天）")
+        ensureChannel(manager, CHANNEL_LIB_DUE, "图书馆借阅", NotificationManager.IMPORTANCE_DEFAULT, "借阅图书临近应还日或已逾期时提醒（通知里不含书名）")
     }
 
     /**
@@ -138,6 +150,35 @@ internal object NotifyCenter {
             .build()
         runCatching {
             NotificationManagerCompat.from(context).notify(NOTIFY_ID_SEAT_VIOLATION, notification)
+        }
+    }
+
+    /**
+     * 图书馆借阅到期提醒（固定 id：后发覆盖前一条）。
+     *
+     * 跳到「我」页 —— 借阅卡片与「校园服务」入口都在那儿
+     * （⚠️ 跳转只认底栏页 route，见 MEMORY 的跳转纪律）。
+     */
+    internal fun notifyLibDue(context: Context, title: String, text: String) {
+        ensureChannels(context)
+        val notification = NotificationCompat.Builder(context, CHANNEL_LIB_DUE)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(
+                gotoPendingIntent(
+                    context,
+                    NOTIFY_ID_LIB_DUE,
+                    PageShowOnNav.Mine.toPageData().value,
+                    "libdue",
+                )
+            )
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify(NOTIFY_ID_LIB_DUE, notification)
         }
     }
 

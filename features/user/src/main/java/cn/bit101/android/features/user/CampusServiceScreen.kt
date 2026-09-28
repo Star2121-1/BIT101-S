@@ -34,8 +34,11 @@ import cn.bit101.android.data.school.CampusCardLogic
 import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.data.school.CampusNetTrafficLogic
+import cn.bit101.android.data.school.LibBorrowLogic
+import cn.bit101.android.data.school.LibBorrowResult
 import cn.bit101.android.data.school.CampusCardSnapshot
 import cn.bit101.android.features.common.MainController
+import java.time.LocalDateTime
 
 /** 一卡通首页（CAS service 指回这里；登录在 App 内 WebView 完成）。 */
 private const val CAMPUS_CARD_LOGIN_URL = "https://dkykt.info.bit.edu.cn/home/openHomePageByCas"
@@ -63,6 +66,8 @@ fun CampusServiceScreen(
     val fetched by vm.fetched.collectAsState()
     val balanceTrend by vm.balanceTrend.collectAsState()
     val trafficTrend by vm.trafficTrend.collectAsState()
+    val libCurrent by vm.libCurrent.collectAsState()
+    val libHistory by vm.libHistory.collectAsState()
 
     // 从「登录一卡通」的 WebView 返回时会重新进入组合，但 VM 保留、init 不会重跑，
     // 所以这里补一次刷新；首次进入时 init 已发起请求，被 VM 里的 _loading 守卫挡掉。
@@ -197,6 +202,67 @@ fun CampusServiceScreen(
                 InfoRow(
                     label = "数据来源",
                     value = "深澜自助（10.0.0.55，仅校园网环境）",
+                    small = true,
+                )
+            }
+
+            // 图书馆借阅（超星智慧门户「我的借阅」）
+            //
+            // ⚠️ 这里**显示书名**是对的：卡片只在 App 内、用户自己的屏幕上出现。
+            //    「通知里不写书名」那条边界针对的是**锁屏可见的通知**，两回事。
+            SectionCard(title = "图书馆借阅") {
+                val now = LocalDateTime.now()
+                when (val r = libCurrent) {
+                    null -> InfoRow(label = "状态", value = "获取中…")
+
+                    is LibBorrowResult.Ok -> {
+                        if (r.records.isEmpty()) {
+                            InfoRow(label = "当前在借", value = "0 本")
+                        } else {
+                            InfoRow(label = "当前在借", value = "${r.records.size} 本")
+                            InfoRow(label = "提醒", value = LibBorrowLogic.cardSummary(r.records, now))
+                            r.records.sortedBy { it.dueAt }.take(3).forEach { rec ->
+                                InfoRow(
+                                    label = LibBorrowLogic.dueText(rec) + " 应还",
+                                    value = LibBorrowLogic.statusText(rec, now) +
+                                        " · " + rec.title.ifEmpty { "（未提供书名）" },
+                                    small = true,
+                                )
+                            }
+                            if (r.records.size > 3) {
+                                InfoRow(
+                                    label = "其余",
+                                    value = "另有 ${r.records.size - 3} 本，刷新查看",
+                                    small = true,
+                                )
+                            }
+                        }
+                        (libHistory as? LibBorrowResult.Ok)?.let {
+                            InfoRow(label = "历史借阅", value = "${it.records.size} 本（含已归还）", small = true)
+                        }
+                    }
+
+                    // 未登录是**能直接处置**的状态：CAS 只能在 App 内 WebView 完成
+                    LibBorrowResult.LoggedOut -> {
+                        InfoRow(label = "状态", value = "未登录图书馆")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { mainController.openWebPage(LibBorrowLogic.LOGIN_URL) },
+                        ) {
+                            Text(text = "登录图书馆")
+                        }
+                    }
+
+                    // ⚠️ 取不到 ≠ 没有：说「暂时取不到」，绝不说「0 本」
+                    is LibBorrowResult.Failed -> {
+                        InfoRow(label = "状态", value = "暂时取不到图书馆借阅记录")
+                        InfoRow(label = "诊断", value = r.reason, small = true)
+                    }
+                }
+                InfoRow(
+                    label = "数据来源",
+                    value = "图书馆「我的借阅」（mylib.bit.edu.cn）",
                     small = true,
                 )
             }

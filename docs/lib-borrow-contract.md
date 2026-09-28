@@ -100,7 +100,31 @@ GET {mylib}/application/{appId}/data
 - 另有整页接口 `/page/330841/all-request?head=3&w=162085&sversion=...&mobile=1&wfwfid=2398`
   与 `/webjson/334668/content-cache?w=162085&sversion=...`
 
-### 4.3 字段（实测列头，按此顺序）
+### 4.3 响应体结构（★ 2026-09-28 已抓全，解析器据此实现）
+
+`/application/<appId>/data` 返回的**不是**干净 JSON，而是 **JSON 套 HTML、HTML 里的
+`<script>` 再内嵌一段 JS 数组**：
+
+```
+{"code":1,"data":{"div":"<html>…<script>…this.checkHasData([{…},{…}]);…</script>…</html>"}}
+```
+
+**判据（实测，别改）**：
+
+- 有数据 → `checkHasData([{...},{...}])`
+- 没有数据 → `checkHasData([])`
+- 两种情况下锚点 `checkHasData(` **都存在** ⇒ **锚点找不到 = 门户改版 = 必须报失败**，
+  绝不能当成「0 本」（否则真正该提醒时反而告诉用户「你没借书」）
+- 数组本身是**合法 JSON**，可直接解析
+- 每行形如
+  `{"0":{"value":"书名","key":"题名"},"1":{"value":"…","key":"作者"},…,"id":null}`
+  —— **每个单元格自带字段名**，所以按 key 取值、**不依赖列顺序**
+- `code != 1`、`data` 为 null、`div` 为空 ⇒ 一律按「失败」处理
+
+⚠️ gson 的 `getAsJsonObject("data")` 在成员为 JSON `null` 时会抛 `ClassCastException`，
+必须自己判 `isJsonObject`（**单测已锁**，实现里踩过）。
+
+### 4.4 字段（实测列头，按此顺序）
 
 | 列 | 示例值 |
 |---|---|
@@ -114,10 +138,10 @@ GET {mylib}/application/{appId}/data
 引擎配置里 `"key"` 依次为：`题名` / `作者` / `ISBN` / `馆藏地` / `借阅日` / `应还日`。
 **日期是 `yyyy-MM-dd HH:mm:ss` 字符串。**
 
-⚠️ **未决**：`/application/<appId>/data` 返回的 JSON **精确结构尚未抓到**
-（浏览器录制时只取了渲染后的 DOM，直取 JSON 的那一步取值层级写错了一层）。
-实现解析器时**必须按容错写**，并在首次真机运行后按真实响应校准；
-**取不到数据要显示「暂时取不到」，绝不能显示 0 条**（与违约卡同一条纪律）。
+✅ **已解决（2026-09-28）**：结构见 4.3；解析器 `LibBorrowLogic` 已按真实响应实现，
+并锁进 **23 条单测**（含「空数组 = 0 条」「锚点缺失 = 失败」「字段顺序打乱」
+「日期解析失败不丢记录」「通知不含书名」）。
+**纪律不变：取不到就显示「暂时取不到」，绝不显示 0 条。**
 
 ## 5. 借阅规则（官方读者指南口径，用于文案与提醒阈值）
 
@@ -134,6 +158,8 @@ GET {mylib}/application/{appId}/data
 | `lib_probe.py` | 登录 + 会话验证 + 抓门户外壳 HTML | ✅ 一次 |
 | `lib_browser_probe.py` | 登录 + 注入无头 Chrome + **录制全部网络请求** | ✅ 一次 |
 | `lib_borrow_probe.py` | 登录 + 打开「我的借阅」+ 存 DOM | ✅ 一次 |
+| `lib_borrow_capture.py` | 登录 + **全量抓包 + 抓响应体**（定位数据到底由谁返回） | ✅ 一次 |
+| `lib_borrow_json.py` | 登录 + 直打数据接口打印原始 JSON（**结构就是靠它定下来的**） | ✅ 一次 |
 
 运行环境：`C:\Users\asus\.workbuddy\binaries\python\envs\default\Scripts\python.exe`
 （该 venv 内装了 `requests` / `pycryptodome` / `websocket-client`）。

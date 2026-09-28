@@ -5,12 +5,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.bit101.android.data.repo.base.CampusCardRepo
 import cn.bit101.android.data.repo.base.CampusNetRepo
+import cn.bit101.android.data.repo.base.LibBorrowRepo
 import cn.bit101.android.data.school.BalanceTrend
 import cn.bit101.android.data.school.CampusCardBalanceStore
 import cn.bit101.android.data.school.CampusCardSnapshot
 import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.data.school.CampusNetTrafficStore
+import cn.bit101.android.data.school.LibBorrowResult
 import cn.bit101.android.data.school.TrafficTrend
+import cn.bit101.android.features.notify.LibBorrowChecker
 import cn.bit101.android.features.notify.NetFeeChecker
 import cn.bit101.android.features.notify.NetFlowChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -33,6 +36,7 @@ import javax.inject.Inject
 internal class CampusServiceViewModel @Inject constructor(
     private val campusCardRepo: CampusCardRepo,
     private val campusNetRepo: CampusNetRepo,
+    private val libBorrowRepo: LibBorrowRepo,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -72,6 +76,20 @@ internal class CampusServiceViewModel @Inject constructor(
     private val _trafficTrend = MutableStateFlow(TrafficTrend())
     val trafficTrend: StateFlow<TrafficTrend> = _trafficTrend.asStateFlow()
 
+    /**
+     * 图书馆借阅（当前在借）。`null` = 还没取过。
+     *
+     * ⚠️ 用 [LibBorrowResult] 而不是「可空列表」：UI 必须能区分
+     * 「未登录（可处置）」「取不到（重试）」与「确实没有在借的书」——
+     * 三件事塌成一个 null，就会在真正该提醒的时候告诉用户「你没借书」。
+     */
+    private val _libCurrent = MutableStateFlow<LibBorrowResult?>(null)
+    val libCurrent: StateFlow<LibBorrowResult?> = _libCurrent.asStateFlow()
+
+    /** 历史借阅（纯展示，失败不影响当前借阅）。 */
+    private val _libHistory = MutableStateFlow<LibBorrowResult?>(null)
+    val libHistory: StateFlow<LibBorrowResult?> = _libHistory.asStateFlow()
+
     init {
         refresh()
     }
@@ -85,6 +103,14 @@ internal class CampusServiceViewModel @Inject constructor(
                 val net = async {
                     runCatching { campusNetRepo.fetchOnlineInfo() }
                         .getOrElse { CampusNetResult.Failed(it.message ?: "未知异常") }
+                }
+                val lib = async {
+                    runCatching { libBorrowRepo.fetchCurrent() }
+                        .getOrElse { LibBorrowResult.Failed(it.message ?: "未知异常") }
+                }
+                val libHis = async {
+                    runCatching { libBorrowRepo.fetchHistory() }
+                        .getOrElse { LibBorrowResult.Failed(it.message ?: "未知异常") }
                 }
                 val snapshot = card.await()
                 _snapshot.value = snapshot
@@ -104,6 +130,11 @@ internal class CampusServiceViewModel @Inject constructor(
 
                 val result = net.await()
                 _netResult.value = result
+
+                val borrow = lib.await()
+                _libCurrent.value = borrow
+                _libHistory.value = libHis.await()
+
                 _fetched.value = true
                 // 校园网提醒（余额不足 / 流量阈值）：拿到数据 = 人正在校内，是唯一可靠的时机
                 // （每日周期任务的固定时刻多半在校外，会被永远跳过）。各自内部去重。
@@ -118,6 +149,10 @@ internal class CampusServiceViewModel @Inject constructor(
                     NetFeeChecker.check(appContext, info)
                     NetFlowChecker.check(appContext, info)
                 }
+                // 图书馆借阅到期提醒：与校园网提醒同一条思路 ——
+                // 「刚成功取到数据」是唯一可靠的时机（后台周期任务多半在校外/未登录而落空）。
+                // ⚠️ 传的是**结果对象**而不是条数：未登录/失败要能区分出来，见 LibBorrowChecker。
+                runCatching { LibBorrowChecker.check(appContext, borrow) }
             } finally {
                 _loading.value = false
             }

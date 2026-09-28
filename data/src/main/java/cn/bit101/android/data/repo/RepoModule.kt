@@ -35,6 +35,13 @@ internal abstract class RepoModule {
         campusNetRepo: DefaultCampusNetRepo
     ): CampusNetRepo
 
+    /** 图书馆借阅（超星智慧门户「我的借阅」）—— 到期提醒的数据源。 */
+    @Binds
+    @Singleton
+    abstract fun bindLibBorrowRepo(
+        libBorrowRepo: DefaultLibBorrowRepo
+    ): LibBorrowRepo
+
     @Binds
     @Singleton
     abstract fun bindVersionRepo(
