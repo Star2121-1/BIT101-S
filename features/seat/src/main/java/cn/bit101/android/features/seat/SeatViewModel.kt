@@ -19,6 +19,7 @@ import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatDate
 import cn.bit101.android.features.seat.model.SeatMapImages
 import cn.bit101.android.features.seat.model.SeatTreeNode
+import cn.bit101.android.features.seat.model.SeminarRecord
 import cn.bit101.android.features.seat.model.TaskMode
 import cn.bit101.android.features.seat.model.TaskStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -297,10 +298,37 @@ class SeatViewModel @Inject constructor(
      */
     val reneges: StateFlow<List<RenegeRecord>?> = reservationRepository.reneges
 
-    /** 拉一次违约列表（进入「列表」页时调；失败时 UI 会说「取不到」而不是显示 0）。 */
+    /** 「我的违约」里的**研讨室**那一类（与座位违约各记各的，不合并）。 */
+    val seminarReneges: StateFlow<List<RenegeRecord>?> = reservationRepository.seminarReneges
+
+    /**
+     * 「我的研讨间预约」（`/api/Member/seminar`）。
+     *
+     * 研讨间与座位是**同一套后端**（`/api/Seat/…` ↔ `/api/Seminar/…`，取消共用
+     * `/api/Space/cancel`），所以直接挂在同一个仓库 / 同一个页签里，不另起一套。
+     */
+    val seminars: StateFlow<List<SeminarRecord>?> = reservationRepository.seminars
+
+    /** 拉一次违约（**两类都拉**；进入「列表」页时调）。失败时 UI 说「取不到」而不是显示 0。 */
     fun refreshReneges() {
-        viewModelScope.launch { reservationRepository.refreshReneges() }
+        viewModelScope.launch {
+            reservationRepository.refreshReneges()
+            reservationRepository.refreshSeminarReneges()
+        }
     }
+
+    /** 拉一次「我的研讨间预约」。 */
+    fun refreshSeminars() {
+        viewModelScope.launch { reservationRepository.refreshSeminars() }
+    }
+
+    /**
+     * 取消研讨间预约。
+     *
+     * ⚠️ 复用 [cancelReservationById]：`/api/Space/cancel` 是座位与研讨间**共用**的取消接口
+     * （`{id: <预约记录id>}`），h5 的研讨间列表页调的也是它。
+     */
+    suspend fun cancelSeminar(recordId: String): String? = cancelReservationById(recordId)
 
     fun refreshMyReservations() {
         viewModelScope.launch {

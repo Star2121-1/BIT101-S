@@ -4,6 +4,7 @@ import cn.bit101.android.features.seat.SeatLog
 import cn.bit101.android.features.seat.SeatViolationLogic
 import cn.bit101.android.features.seat.model.RenegeRecord
 import cn.bit101.android.features.seat.model.ReservationRecord
+import cn.bit101.android.features.seat.model.SeminarRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,8 +50,29 @@ class SeatReservationRepository @Inject constructor(
     private val _reneges = MutableStateFlow<List<RenegeRecord>?>(null)
     val reneges: StateFlow<List<RenegeRecord>?> = _reneges.asStateFlow()
 
+    /**
+     * 「我的违约」里的**研讨室**那一类（`reneges` 的 `type=2`）。
+     *
+     * 与座位违约**分开保存**：两类各自计数（h5 也是两个页签），
+     * 合并计数会凭空引入一个我们并不知道的规则口径。
+     */
+    private val _seminarReneges = MutableStateFlow<List<RenegeRecord>?>(null)
+    val seminarReneges: StateFlow<List<RenegeRecord>?> = _seminarReneges.asStateFlow()
+
+    /**
+     * 「我的研讨间预约」（`/api/Member/seminar`）。
+     *
+     * `null` = 还没拉到（≠ 空列表）。
+     */
+    private val _seminars = MutableStateFlow<List<SeminarRecord>?>(null)
+    val seminars: StateFlow<List<SeminarRecord>?> = _seminars.asStateFlow()
+
     @Volatile
     private var lastRefreshAt = 0L
+
+    /** 上次查违约的时刻（见 [refresh] 里的节流说明）。 */
+    @Volatile
+    private var lastRenegeCheckAt = 0L
 
     /**
      * 拉取「我的预约」。
@@ -63,11 +85,21 @@ class SeatReservationRepository @Inject constructor(
         result.onSuccess {
             _records.value = it
             lastRefreshAt = System.currentTimeMillis()
-            // 顺便拉一次违约列表：这是**新增违约通知的唯一驱动点**，
-            // App 内刷新与组件后台刷新都会经过这里，所以不开 App 也能收到提醒。
-            // 失败无所谓（违约是「知道就好」的信息，不该拖累预约刷新）。
-            runCatching { refreshReneges() }
-                .onFailure { SeatLog.w(TAG, "refresh reneges failed: ${it.message}") }
+            // 顺便查违约：这是**新增违约通知的唯一驱动点**，App 内刷新与组件后台刷新
+            // 都会经过这里，所以不开 App 也能收到提醒。
+            //
+            // ⚠️ 必须**自己再套一层节流**：`refresh()` 在后台最快每 5 分钟就被调一次
+            // （提醒源），再叠两个请求等于每小时多打 24 次。违约是「几十分钟内知道就行」
+            // 的信息，缓 30 分钟完全够。
+            // ⚠️ 研讨间预约列表**不在这里拉**：那是纯界面数据，由「列表」页按需拉。
+            if (System.currentTimeMillis() - lastRenegeCheckAt >= RENEGE_CHECK_INTERVAL_MS) {
+                lastRenegeCheckAt = System.currentTimeMillis()
+                // 失败无所谓（违约是「知道就好」的信息，不该拖累预约刷新）
+                runCatching { refreshReneges() }
+                    .onFailure { SeatLog.w(TAG, "refresh reneges failed: ${it.message}") }
+                runCatching { refreshSeminarReneges() }
+                    .onFailure { SeatLog.w(TAG, "refresh seminar reneges failed: ${it.message}") }
+            }
         }.onFailure {
             SeatLog.w(TAG, "refresh my reservations failed: ${it.message}")
             if (it.message == SeatApi.TOKEN_EXPIRED || it.cause?.message == SeatApi.TOKEN_EXPIRED) {
@@ -95,6 +127,36 @@ class SeatReservationRepository @Inject constructor(
     }
 
     /**
+     * 拉「研讨室违约」（`reneges` 的 `type=2`）。
+     *
+     * ⚠️ 与座位违约**各记各的**，不做合并 —— 合并出来的「总数」并不可靠
+     * （规则原文只说「各类违约累计 5 次」，没说两类是否同一池子，别替服务端下结论）。
+     */
+    suspend fun refreshSeminarReneges(): Result<List<RenegeRecord>> {
+        val result = seatApi.getRenegeRecords(SeatViolationLogic.TYPE_SEMINAR)
+        result.onSuccess { list ->
+            _seminarReneges.value = list
+            withContext(Dispatchers.IO) { violationTracker.observe(list) }
+        }.onFailure {
+            SeatLog.w(TAG, "refresh seminar reneges failed: ${it.message}")
+        }
+        return result
+    }
+
+    /**
+     * 拉「我的研讨间预约」。
+     *
+     * 研讨间与座位是同一套后端（见 `model/Seminar.kt`），所以放在同一个仓库里 ——
+     * 页面刷新一次要拿两份数据，分开两个仓库只会让「先刷哪个」变成问题。
+     */
+    suspend fun refreshSeminars(): Result<List<SeminarRecord>> {
+        val result = seatApi.getMySeminarReservations()
+        result.onSuccess { _seminars.value = it }
+            .onFailure { SeatLog.w(TAG, "refresh seminars failed: ${it.message}") }
+        return result
+    }
+
+    /**
      * 距上次成功刷新超过 [maxAgeMs] 才真正请求。
      *
      * 组件后台刷新用它做节流：座位页的状态变化不频繁（签到、暂离、超时释放），
@@ -112,9 +174,18 @@ class SeatReservationRepository @Inject constructor(
     fun clear() {
         _records.value = emptyList()
         lastRefreshAt = 0L
+        lastRenegeCheckAt = 0L
+        // 这三份都是「服务端才能回答」的数据 → 登出后回到**未知**（null），
+        // 不能留在界面上冒充仍然有效。
+        _reneges.value = null
+        _seminarReneges.value = null
+        _seminars.value = null
     }
 
     private companion object {
         const val TAG = "SeatReservationRepo"
+
+        /** 后台顺带查违约的节流（见 [refresh]）。 */
+        const val RENEGE_CHECK_INTERVAL_MS = 30 * 60_000L
     }
 }

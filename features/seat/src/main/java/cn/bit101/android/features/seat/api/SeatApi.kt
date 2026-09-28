@@ -8,8 +8,10 @@ import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatDate
 import cn.bit101.android.features.seat.model.SeatMapImages
 import cn.bit101.android.features.seat.model.SeatTreeNode
+import cn.bit101.android.features.seat.model.SeminarRecord
 import cn.bit101.android.features.seat.model.parseRenegeRecords
 import cn.bit101.android.features.seat.model.parseReservations
+import cn.bit101.android.features.seat.model.parseSeminarRecords
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -223,6 +225,18 @@ class SeatApi @Inject constructor(
         val body = jsonBody(JSONObject().put("type", type))
         val json = JSONObject(post("/api/Member/reneges", body))
         parseRenegeRecords(json.optJSONArray("data") ?: JSONArray())
+    }
+
+    /**
+     * 「我的研讨间预约」。
+     *
+     * `POST /api/Member/seminar`（无参数）—— 与 [getMyReservations] 是**同一套后端**的
+     * 另一类资源（`/api/Seat/…` ↔ `/api/Seminar/…`），取消也共用 `/api/Space/cancel`。
+     * 见 `model/Seminar.kt` 的注释。
+     */
+    suspend fun getMySeminarReservations(): Result<List<SeminarRecord>> = authed {
+        val json = JSONObject(post("/api/Member/seminar", jsonBody(JSONObject())))
+        parseSeminarRecords(json.optJSONArray("data") ?: JSONArray())
     }
 
     /** 「我的预约」（有效记录）。数据源与取消预约一致。 */

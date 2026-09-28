@@ -63,6 +63,7 @@ import cn.bit101.android.features.seat.SeatViolationLogic
 import cn.bit101.android.features.seat.model.RenegeRecord
 import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.ReservationTask
+import cn.bit101.android.features.seat.model.SeminarRecord
 import cn.bit101.android.features.seat.model.TaskStatus
 import cn.bit101.android.features.common.helper.rememberNotificationPermissionState
 import kotlinx.coroutines.delay
@@ -90,8 +91,14 @@ fun TaskListScreen(
 ) {
     val tasks by viewModel.tasks.collectAsState()
     val reservations by viewModel.myReservations.collectAsState()
-    /** 「我的违约」——图书馆服务端数据；`null` = 还没拉到（≠ 0 条）。 */
+    /** 「我的违约」（座位）——图书馆服务端数据；`null` = 还没拉到（≠ 0 条）。 */
     val reneges by viewModel.reneges.collectAsState()
+
+    /** 「我的违约」里的研讨室那一类（与座位各记各的）。 */
+    val seminarReneges by viewModel.seminarReneges.collectAsState()
+
+    /** 「我的研讨间预约」（与座位同一后端）。 */
+    val seminars by viewModel.seminars.collectAsState()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
     val bit101LoggedIn by viewModel.bit101LoggedIn.collectAsState(initial = false)
     val authNotice by viewModel.authNotice.collectAsState()
@@ -99,6 +106,7 @@ fun TaskListScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
     var pendingCancel by remember { mutableStateOf<ReservationRecord?>(null) }
+    var pendingSeminarCancel by remember { mutableStateOf<SeminarRecord?>(null) }
     var remainingCancels by remember { mutableStateOf(viewModel.remainingCancelsToday()) }
     var busy by remember { mutableStateOf(false) }
 
@@ -123,6 +131,8 @@ fun TaskListScreen(
 
     suspend fun refreshAll() {
         viewModel.refreshMyReservations()
+        viewModel.refreshSeminars()
+        viewModel.refreshReneges()
         // 给服务端一点时间，也让下拉动画有反馈；同时把「更新时间」推到刷新完成之后
         delay(600)
         remainingCancels = viewModel.remainingCancelsToday()
@@ -133,6 +143,7 @@ fun TaskListScreen(
         if (isLoggedIn) {
             viewModel.refreshReneges()
             viewModel.refreshMyReservations()
+            viewModel.refreshSeminars()
             remainingCancels = viewModel.remainingCancelsToday()
             lastUpdatedAt = System.currentTimeMillis()
         }
@@ -198,7 +209,11 @@ fun TaskListScreen(
         // 违约计数（还能不能预约的前提）、签到时限规则、每天可取消次数、「去预约」入口。
         // 而「没有预约」恰恰是**最需要这些信息**的时候（刚入学期、或刚被暂停预约权）。
         // 现在空态降级成列表里的**一个卡片**，其余内容照常显示。
-        val nothingAtAll = activeTasks.isEmpty() && finishedTasks.isEmpty() && reservations.isEmpty()
+        // ⚠️ 研讨间预约也算「有东西」：只约了研讨间、没约座位的用户，
+        // 不该看到「还没有座位预约」这种像是空页面的话。
+        val hasSeminar = seminars?.isNotEmpty() == true
+        val nothingAtAll = activeTasks.isEmpty() && finishedTasks.isEmpty() &&
+            reservations.isEmpty() && !hasSeminar
 
         // 下拉刷新。本项目 material3 为 1.2.0-rc01，只有旧的 `PullToRefreshContainer`
         // （`PullToRefreshBox` 要 1.3.0+），因此这里用「Box + nestedScroll + Container」的旧式组合。
@@ -239,6 +254,7 @@ fun TaskListScreen(
                 item {
                     ViolationCard(
                         records = reneges,
+                        seminarRecords = seminarReneges,
                         onRefresh = { scope.launch { viewModel.refreshReneges() } },
                     )
                 }
@@ -259,6 +275,28 @@ fun TaskListScreen(
                             busy = busy,
                             now = nowTick,
                             onCancel = { pendingCancel = record }
+                        )
+                    }
+                }
+
+                // ── 我的研讨间预约 ────────────────────────────────────────
+                //
+                // ⚠️ 研讨间与座位是**同一个后端的两类资源**（`/api/Seat/…` ↔ `/api/Seminar/…`，
+                // 取消共用 `/api/Space/cancel`），所以才放在同一页、同一套卡片里；
+                // 但**发起预约的流程完全不同**（研讨间要按「整间 + 时段 + 参与成员」申请），
+                // 那一半还没有接 —— 这里明确只做「看 + 取消」，不给假的「去预约」按钮。
+                seminars?.takeIf { it.isNotEmpty() }?.let { list ->
+                    item(key = "seminar-header") {
+                        SectionHeader(
+                            title = "我的研讨间预约",
+                            subtitle = "研讨间与座位共用每天 ${SeatViewModel.CANCELS_PER_DAY} 次取消额度（规则同 h5）",
+                        )
+                    }
+                    items(list, key = { "sem-${it.id}" }) { record ->
+                        SeminarCard(
+                            record = record,
+                            busy = busy,
+                            onCancel = { pendingSeminarCancel = record },
                         )
                     }
                 }
@@ -371,6 +409,39 @@ fun TaskListScreen(
                 }) { Text("确认取消") }
             },
             dismissButton = { TextButton(onClick = { pendingCancel = null }) { Text("再想想") } }
+        )
+    }
+
+    pendingSeminarCancel?.let { record ->
+        AlertDialog(
+            onDismissRequest = { pendingSeminarCancel = null },
+            title = { Text("取消这个研讨间预约？") },
+            text = {
+                Text(
+                    "${record.nameMerge}\n${record.timeText()}\n\n" +
+                        "将被取消。规则：每天最多取消 ${SeatViewModel.CANCELS_PER_DAY} 次" +
+                        "（与座位共用额度），今天还剩 $remainingCancels 次。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val rec = record
+                    pendingSeminarCancel = null
+                    busy = true
+                    scope.launch {
+                        // ⚠️ 走的是与座位**同一个**取消接口（/api/Space/cancel），见 ViewModel 注释
+                        val err = viewModel.cancelSeminar(rec.id)
+                        busy = false
+                        remainingCancels = viewModel.remainingCancelsToday()
+                        lastUpdatedAt = System.currentTimeMillis()
+                        viewModel.refreshSeminars()
+                        snackbarHostState.showSnackbar(
+                            if (err == null) "已取消 ${rec.nameMerge}" else "取消失败: $err"
+                        )
+                    }
+                }) { Text("确认取消") }
+            },
+            dismissButton = { TextButton(onClick = { pendingSeminarCancel = null }) { Text("再想想") } }
         )
     }
 }
@@ -588,6 +659,61 @@ private fun NoReservationCard(
 }
 
 /**
+ * 一条研讨间预约。
+ *
+ * ⚠️ `record.cancellable`（服务端 `status == "2"`）为假时**不显示取消按钮**，
+ * 改显示服务端下发的 `statusname` —— 与座位同一套口径：**能不能取消由服务端说了算**，
+ * 不给一个点了会失败/报错的按钮。
+ */
+@Composable
+private fun SeminarCard(
+    record: SeminarRecord,
+    busy: Boolean,
+    onCancel: (SeminarRecord) -> Unit,
+) {
+    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    record.nameMerge.ifBlank { "研讨间预约" },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Schedule, null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.outline,
+                    )
+                    Spacer(Modifier.size(4.dp))
+                    Text(
+                        record.timeText(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (!record.cancellable && record.statusName.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        record.statusName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+            if (record.cancellable) {
+                TextButton(onClick = { onCancel(record) }, enabled = !busy) { Text("取消预约") }
+            }
+        }
+    }
+}
+
+/**
  * 违约计数卡。
  *
  * ## 数据是图书馆给的，不是我们算的
@@ -604,10 +730,15 @@ private fun NoReservationCard(
 @Composable
 private fun ViolationCard(
     records: List<RenegeRecord>?,
+    /** 「我的违约」里的研讨室那一类（`type=2`）。⚠️ **不并入上面的计数**：
+     *  h5 就是两个页签各算各的，规则原文也只说「各类违约累计 5 次」，
+     *  合并出来的「总数」没有依据 —— 照实分开显示。 */
+    seminarRecords: List<RenegeRecord>?,
     onRefresh: () -> Unit,
 ) {
     val known = records != null
     val count = records?.size ?: 0
+    val seminarCount = seminarRecords?.size ?: 0
     val left = SeatViolationLogic.remaining(count)
     // 只剩 1 次就到上限时用警示色 —— 这是「下一次违约就会停用 7 天」的信号
     val urgent = known && count > 0 && left <= 1
@@ -642,7 +773,7 @@ private fun ViolationCard(
                     color = onContainer,
                 )
                 Spacer(Modifier.weight(1f))
-                if (count > 0) {
+                if (count > 0 || seminarCount > 0) {
                     TextButton(onClick = { showDetail = true }) { Text("明细", color = onContainer) }
                 }
                 TextButton(onClick = onRefresh) { Text("刷新", color = onContainer) }
@@ -654,6 +785,14 @@ private fun ViolationCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = onContainer,
             )
+            // 研讨室违约单独一行 —— 有就照实说，没有就不占位置、也不改变上面那句的口径
+            if (known && seminarCount > 0) {
+                Text(
+                    "另有研讨室违约 $seminarCount 次",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = onContainer,
+                )
+            }
             Text(
                 if (known) "数据来自图书馆座位系统"
                 else "登录座位系统后点「刷新」，或下拉本页重试",
@@ -663,33 +802,47 @@ private fun ViolationCard(
         }
     }
 
-    if (showDetail && records != null) {
+    val seatList = records.orEmpty()
+    val seminarList = seminarRecords.orEmpty()
+    if (showDetail && (seatList.isNotEmpty() || seminarList.isNotEmpty())) {
         AlertDialog(
             onDismissRequest = { showDetail = false },
-            title = { Text("违约明细（${records.size} 条）") },
+            title = { Text("违约明细（共 ${seatList.size + seminarList.size} 条）") },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    records.forEach { r ->
-                        Text(
-                            r.label(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        val sub = listOf(r.time, r.statusName).filter { it.isNotBlank() }
-                        if (sub.isNotEmpty()) {
-                            Text(
-                                sub.joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.height(10.dp))
-                    }
+                    RenegeSection("座位违约", seatList)
+                    RenegeSection("研讨室违约", seminarList)
                 }
             },
             confirmButton = { TextButton(onClick = { showDetail = false }) { Text("关闭") } },
         )
     }
+}
+
+/** 违约明细里的一节（两类分开列，与 h5 的两个页签一致）。 */
+@Composable
+private fun RenegeSection(title: String, list: List<RenegeRecord>) {
+    if (list.isEmpty()) return
+    Text(
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Spacer(Modifier.height(6.dp))
+    list.forEach { r ->
+        Text(r.label(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        val sub = listOf(r.time, r.statusName).filter { it.isNotBlank() }
+        if (sub.isNotEmpty()) {
+            Text(
+                sub.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+    Spacer(Modifier.height(4.dp))
 }
 
 @Composable

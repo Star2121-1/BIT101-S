@@ -195,6 +195,62 @@ Angular 应用在跑、页脚渲染，但登录区空白，页面自身脚本抛
 
 探针脚本：`.workbuddy/archive/tools/renege_probe.py`（会顶掉 App 会话，别反复跑）。
 
+### 8.2 ★ 研讨间（seminar）—— 与座位同一后端，接口一一对应
+
+2026-09-28 从 h5 分包挖出。**结论：研讨间不是另一套系统**，`/api/Seminar/*` 与
+`/api/Seat/*` 是同一套形状（都 `POST` + `data: {}`）：
+
+| 座位 | 研讨间 | body |
+|---|---|---|
+| `/api/Seat/tree` | `/api/Seminar/tree` | — |
+| `/api/Seat/date` | `/api/Seminar/date` | `{build_id: <房间id>}` → `data` = 日期字符串数组 |
+| `/api/Seat/seat` | `/api/Seminar/seminar` | `{room, area, day}` → `data` = 时段信息 |
+| `/api/Seat/confirm` | `/api/Seminar/confirm` | 见下（**表单申请**，不是点一下就完） |
+| `/api/Member/seat` | `/api/Member/seminar` | `{}` → 我的研讨间预约 |
+| 取消 `/api/Space/cancel` | **同一个** `/api/Space/cancel` | `{id: <预约记录id>}` |
+
+另有研讨间专属：`/api/Seminar/detail`（`{id: <区域id>}` → 区域详情：`image_url`、
+`membercount`、`contacts`、`phone`、`office`、`projector`、`upload`、`children`）、
+`/api/Seminar/group`（`{card: <学工号>}` → `{id, name}`，**查参与成员**）、
+`/api/Room/list`（无参 → 区域列表 `[{area_id, name}]`）、
+`/api/Room/detail`（`{area_id, month: <时间戳>}` → 日历形状
+`{startTime, endTime, list:[{month, children:[{day, status}]}]}`，用于标注「全天/半天已有预约」）。
+
+#### `/api/Member/seminar` 字段（已接入 App）
+
+`data` = `[{id, nameMerge, day, start, end, status, statusname}]`
+
+⚠️ **`status == "2"` 才能取消**（h5 只对 `"2"` 渲染「取消预约」按钮），
+其余值一律直接显示服务端下发的 `statusname` —— 与座位同一口径。
+
+#### `/api/Seminar/confirm` 申请表单（**尚未接入**）
+
+```json
+{
+  "day": "2026-09-28", "start_time": "14:00", "end_time": "16:00",
+  "title": "申请主题", "content": "申请内容", "mobile": "手机号",
+  "room": <房间id>, "open": "1",
+  "file_name": "", "file_url": "",
+  "teamusers": "1,2,3"
+}
+```
+
+- `title` / `content` / `mobile` **必填**（h5 逐项校验并 toast）
+- `teamusers` = 参与成员 id 逗号拼接；`minPerson/maxPerson` 由
+  `/api/Seminar/seminar` 的 `data` 给出，h5 的判据是
+  `userList.length < minPerson - 1` 时提示「请添加参与人员~」（**减 1 因为申请人自己算一个**）
+- `file_name` / `file_url` 在 h5 里是**硬编码空串** ⇒ 附件功能官方自己都没做
+- 成功判据：返回的 `confirmInfo.code == 1`
+
+#### App 侧接入进度
+
+- ✅ **v1.9.24**：「我的研讨间预约」列表 + 取消（复用 `/api/Space/cancel`）+ 研讨室违约
+  （`reneges` 的 `type=2`，与座位违约**分开计数**）
+- ⏳ **未接入**：发起新预约（`/api/Room/list` → 日历 → `/api/Seminar/seminar` 选时段 →
+  表单 + 成员 → `/api/Seminar/confirm`）。⚠️ 这一半**必须先用真账号探一次真实返回**再动手 ——
+  `region` 与 `room` 的层级（`/api/Seminar/detail` 收 `id` 是**区域**还是**房间**）
+  从压缩过的 JS 里读不出确定结论，猜错会真的下单成功。
+
 ## 9. 座位底图与状态配色（官方前端的真实做法，2026-09-19 实测）
 
 `POST /api/seat/map` body `{"id": "<区域id>"}` → 返回**每个区域一整套底图**，按座位状态分色：
