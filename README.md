@@ -303,7 +303,7 @@ cd BIT101-seat
 ## 发布与分支
 
 - `master` = 可发布状态；**版本号只在发布时改**（根 `build.gradle` 的 versions 块），
-  每次发布打 tag（当前 `v1.9.10`），发布包放仓库上层目录 `BIT101-S-v<x.y.z>-release.apk`。
+  每次发布打 tag（当前 `v1.9.26`），发布包放仓库上层目录 `BIT101-S-v<x.y.z>-release.apk`。
 - 较大功能按分支开发（`feature/widget`、`feature/schedule-edit` 等），完成后合回 `master`；
   座位模块的既有约定沿用：纯逻辑抽 `*Logic`、`testDebugUnitTest` 必须全绿。
 - 各分支的可行性评估与执行顺序见 **[docs/upstream-feature-plan.md](docs/upstream-feature-plan.md)**。
@@ -319,11 +319,13 @@ cd BIT101-seat
 | [docs/notify.md](docs/notify.md) | **提醒中心**设计与验证记录 |
 | [docs/ddl-source-contract.md](docs/ddl-source-contract.md) | **DDL 数据源**（延河课堂）契约 |
 | [docs/course-overlay.md](docs/course-overlay.md) | **手动改课表**的覆盖层方案 |
-| [docs/codebase-survey.md](docs/codebase-survey.md) | 代码库勘察与模块划分 |
+| [docs/codebase-survey.md](docs/codebase-survey.md) | 代码库勘察与模块划分（2026-09-22 快照） |
 | [docs/school-portal-map.md](docs/school-portal-map.md) | **学校官方服务地图**（i北理全功能）与本项目对照：做什么、不做什么 |
 | [docs/campus-bus.md](docs/campus-bus.md) | **校园交通**（摆渡车/班车）数据源与结论：时刻表、乘车点、购票规则、数据可靠性 |
 | [docs/next-round-plan.md](docs/next-round-plan.md) | **当前待办与规划**（含已关闭项与理由） |
-| [docs/upstream-feature-plan.md](docs/upstream-feature-plan.md) | 上游设想梳理与分支规划 |
+| [docs/upstream-feature-plan.md](docs/upstream-feature-plan.md) | 上游设想梳理与分支规划（2026-09-20 快照） |
+| [docs/ddl-migration-plan.md](docs/ddl-migration-plan.md) | DDL 换源的调研记录（实施结论已并进 `ddl-source-contract.md`） |
+| [docs/next-modules.md](docs/next-modules.md)、[docs/next-round-plan-2026-09-23.md](docs/next-round-plan-2026-09-23.md) | **历史快照**：当时的分批计划与核对记录，进度已迁到 `next-round-plan.md` |
 | [CHANGES.md](CHANGES.md) | 逐版本变更记录 |
 | [ROADMAP.md](ROADMAP.md) | 路线图与真机验证清单 |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 开发环境与构建细节 |

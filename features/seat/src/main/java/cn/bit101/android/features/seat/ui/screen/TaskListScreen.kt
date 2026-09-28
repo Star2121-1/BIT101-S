@@ -1,5 +1,7 @@
 package cn.bit101.android.features.seat.ui.screen
 
+// 预约 / 任务列表**页本身**（内容见 `TaskListCards` 系列文件）。
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,22 +16,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EventSeat
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.HistoryToggleOff
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,7 +34,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -52,24 +46,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.helper.rememberNotificationPermissionState
 import cn.bit101.android.features.common.nav.NavDest
 import cn.bit101.android.features.seat.SeatViewModel
-import cn.bit101.android.features.seat.SeatViolationLogic
 import cn.bit101.android.features.seat.api.SeatHttp
-import cn.bit101.android.features.seat.model.RenegeRecord
 import cn.bit101.android.features.seat.model.ReservationRecord
-import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.SeminarRecord
-import cn.bit101.android.features.seat.model.TaskStatus
-import cn.bit101.android.features.common.helper.rememberNotificationPermissionState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.time.ZoneId
 
 /**
  * 预约 / 任务列表页。
@@ -465,7 +454,7 @@ fun TaskListScreen(
 }
 
 @Composable
-private fun SectionHeader(
+internal fun SectionHeader(
     title: String,
     subtitle: String,
     trailing: String? = null,
@@ -494,7 +483,7 @@ private fun SectionHeader(
 
 /** 「已结束」折叠头：整行可点开合，右侧一键清除。 */
 @Composable
-private fun FinishedHeader(count: Int, expanded: Boolean, onToggle: () -> Unit, onClear: () -> Unit) {
+internal fun FinishedHeader(count: Int, expanded: Boolean, onToggle: () -> Unit, onClear: () -> Unit) {
     val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -528,389 +517,8 @@ private fun FinishedHeader(count: Int, expanded: Boolean, onToggle: () -> Unit, 
     }
 }
 
-/**
- * 「我的预约」卡片。
- *
- * 签到提示按规则算：当日预约要在开始后 60 分钟内刷卡，次日预约要在次日 9:00 前刷卡；
- * 未签到会记违约（累计 5 次停用 7 天），所以这里给出**倒计时**并用醒目色显示 ——
- * 只写「请在 10:55 前刷卡」用户还得自己换算还剩多久，紧迫感差很多。
- */
 @Composable
-private fun ReservationCard(
-    record: ReservationRecord,
-    busy: Boolean,
-    now: Long,
-    onCancel: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("座位 ${record.seatNo}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    if (record.areaName.isNotBlank()) {
-                        Text(record.areaName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                    }
-                }
-                Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFF2E7D32).copy(alpha = 0.15f)) {
-                    Text(
-                        "有效",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF2E7D32),
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Schedule, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
-                Spacer(Modifier.size(4.dp))
-                Text(
-                    "${record.beginTime.datePart()} ${record.beginTime.timePart()} - ${record.endTime.timePart()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            signInRow(record, now)?.let { (text, overdue) ->
-                Spacer(Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (overdue) MaterialTheme.colorScheme.errorContainer
-                    else MaterialTheme.colorScheme.tertiaryContainer
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Timelapse, null,
-                            modifier = Modifier.size(15.dp),
-                            tint = if (overdue) MaterialTheme.colorScheme.onErrorContainer
-                            else MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(Modifier.size(6.dp))
-                        Text(
-                            text,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium,
-                            color = if (overdue) MaterialTheme.colorScheme.onErrorContainer
-                            else MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            TextButton(onClick = onCancel, enabled = !busy, modifier = Modifier.align(Alignment.End)) {
-                Text("取消预约", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
-            }
-        }
-    }
-}
-
-/**
- * 签到提示行的文案。返回 null 表示不需要提示（无截止时间 / 非近期预约）。
- *
- * 复用 `ReservationRecord.signInHint` 的规则判断，但把「还剩多久」换成倒计时 ——
- * 超时的情况下必须明确说「已超时」。
- */
-private fun signInRow(record: ReservationRecord, now: Long): Pair<String, Boolean>? {
-    val deadline = record.signInDeadline(java.time.LocalDateTime.now()) ?: return null
-    val deadlineMs = deadline.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val (countdown, overdue) = TaskListLogic.signInCountdown(deadlineMs, now)
-    val tail = if (overdue) "$countdown · 请尽快刷卡" else "$countdown（截止 ${deadline.toLocalTime().withSecond(0).withNano(0)}）"
-    val prefix = if (record.reserveDate == java.time.LocalDate.now()) "今日预约" else "次日预约"
-    return "$prefix · $tail" to overdue
-}
-
-/**
- * 「还没有座位预约」时的引导卡。
- *
- * ⚠️ 不要把这一页做成「没有数据就只剩一句暂无预约」：那样用户进来什么也学不到。
- * 这条卡片同时给出**唯一缺的那一步**（去预约）、**最容易踩的三个规则**，
- * 以及今天还剩几次取消机会 —— 都是没有预约时最该知道的东西。
- */
-@Composable
-private fun NoReservationCard(
-    cancelsLeft: Int,
-    onGoReserve: () -> Unit,
-    onShowRules: () -> Unit,
-) {
-    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Icon(
-                Icons.Default.EventSeat, null,
-                modifier = Modifier.size(40.dp),
-                tint = MaterialTheme.colorScheme.outline
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "还没有座位预约",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "每天 6:00 起可预约当日或次日座位，馆内开放 08:00-22:30。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = onGoReserve) { Text("去预约座位") }
-            TextButton(onClick = onShowRules) { Text("查看完整预约规则") }
-            Text(
-                "今天还可取消 $cancelsLeft 次（规则：每天 ${SeatViewModel.CANCELS_PER_DAY} 次）",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-        }
-    }
-}
-
-/**
- * 没有研讨间预约时的说明卡。
- *
- * ⚠️ 这张卡存在的理由：**App 内还不能发起研讨间预约**（要填申请主题/内容/手机号、
- * 指定参与成员，与座位「点一下座位就订」完全不是一回事），但用户需要知道两件事：
- * 这里能看能取消；想约的话去哪儿约。
- *
- * ⇒ 与其给一个点了没反应的「去预约」，不如给一条**真的能用**的路（官方页面），
- * 并说清「约完回来下拉刷新就能在这里看到」。这也是把「看不到研讨间」
- * 这个反馈真正解决掉的地方。
- */
-@Composable
-private fun NoSeminarCard(
-    unknown: Boolean,
-    onOpenWeb: () -> Unit,
-    onRefresh: () -> Unit,
-) {
-    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-            Text(
-                if (unknown) "暂时取不到研讨间预约" else "还没有研讨间预约",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                if (unknown) {
-                    "登录座位系统后点「刷新」，或下拉本页重试。"
-                } else {
-                    "研讨间要按「整间 + 时段 + 参与成员」提交申请，App 内还没做这一步；" +
-                        "先用图书馆网页预约，约好后回到本页下拉刷新，就能在这里查看和取消。"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = onOpenWeb) { Text("去图书馆网页预约") }
-                Spacer(Modifier.size(8.dp))
-                TextButton(onClick = onRefresh) { Text("刷新") }
-            }
-        }
-    }
-}
-
-/**
- * 一条研讨间预约。
- *
- * ⚠️ `record.cancellable`（服务端 `status == "2"`）为假时**不显示取消按钮**，
- * 改显示服务端下发的 `statusname` —— 与座位同一套口径：**能不能取消由服务端说了算**，
- * 不给一个点了会失败/报错的按钮。
- */
-@Composable
-private fun SeminarCard(
-    record: SeminarRecord,
-    busy: Boolean,
-    onCancel: (SeminarRecord) -> Unit,
-) {
-    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    record.nameMerge.ifBlank { "研讨间预约" },
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Schedule, null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.outline,
-                    )
-                    Spacer(Modifier.size(4.dp))
-                    Text(
-                        record.timeText(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (!record.cancellable && record.statusName.isNotBlank()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        record.statusName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                }
-            }
-            if (record.cancellable) {
-                TextButton(onClick = { onCancel(record) }, enabled = !busy) { Text("取消预约") }
-            }
-        }
-    }
-}
-
-/**
- * 违约计数卡。
- *
- * ## 数据是图书馆给的，不是我们算的
- *
- * `POST /api/Member/reneges`（body `{"type":1}`）—— 就是 h5「我的中心 → 我的违约」
- * (`#/my/contract`) 用的接口。v1.9.19 因为没有找到它，曾用「本地推算签到情况」顶上，
- * 那个做法已被**推翻并删除**（原因与教训见 [SeatViolationLogic] 顶部注释）。
- *
- * ⚠️ `records == null` 表示**还没拉到**（没登录 / 网络失败）—— 必须与「拉到 0 条」分开：
- * 把「不知道」显示成「没有违约」，会让人以为自己处于安全状态。
- *
- * 因此这里也**不再有补记 / 撤销 / 清空**：数字以图书馆为准，本地改它没有意义。
- */
-@Composable
-private fun ViolationCard(
-    records: List<RenegeRecord>?,
-    /** 「我的违约」里的研讨室那一类（`type=2`）。⚠️ **不并入上面的计数**：
-     *  h5 就是两个页签各算各的，规则原文也只说「各类违约累计 5 次」，
-     *  合并出来的「总数」没有依据 —— 照实分开显示。 */
-    seminarRecords: List<RenegeRecord>?,
-    onRefresh: () -> Unit,
-) {
-    val known = records != null
-    val count = records?.size ?: 0
-    val seminarCount = seminarRecords?.size ?: 0
-    val left = SeatViolationLogic.remaining(count)
-    // 只剩 1 次就到上限时用警示色 —— 这是「下一次违约就会停用 7 天」的信号
-    val urgent = known && count > 0 && left <= 1
-    val warn = known && count > 0
-
-    val container = when {
-        urgent -> MaterialTheme.colorScheme.errorContainer
-        warn -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val onContainer = when {
-        urgent -> MaterialTheme.colorScheme.onErrorContainer
-        warn -> MaterialTheme.colorScheme.onTertiaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    var showDetail by remember { mutableStateOf(false) }
-
-    Surface(shape = RoundedCornerShape(12.dp), color = container) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (urgent) Icons.Default.Timelapse else Icons.Default.HistoryToggleOff, null,
-                    modifier = Modifier.size(20.dp),
-                    tint = onContainer
-                )
-                Spacer(Modifier.size(8.dp))
-                Text(
-                    if (known) "违约 $count/${SeatViolationLogic.LIMIT}" else "违约次数未知",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = onContainer,
-                )
-                Spacer(Modifier.weight(1f))
-                if (count > 0 || seminarCount > 0) {
-                    TextButton(onClick = { showDetail = true }) { Text("明细", color = onContainer) }
-                }
-                TextButton(onClick = onRefresh) { Text("刷新", color = onContainer) }
-            }
-            Spacer(Modifier.height(2.dp))
-            Text(
-                if (known) SeatViolationLogic.summaryText(count)
-                else "暂时取不到图书馆的违约记录",
-                style = MaterialTheme.typography.bodyMedium,
-                color = onContainer,
-            )
-            // 研讨室违约单独一行 —— 有就照实说，没有就不占位置、也不改变上面那句的口径
-            if (known && seminarCount > 0) {
-                Text(
-                    "另有研讨室违约 $seminarCount 次",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = onContainer,
-                )
-            }
-            Text(
-                if (known) "数据来自图书馆座位系统"
-                else "登录座位系统后点「刷新」，或下拉本页重试",
-                style = MaterialTheme.typography.bodySmall,
-                color = onContainer.copy(alpha = 0.7f),
-            )
-        }
-    }
-
-    val seatList = records.orEmpty()
-    val seminarList = seminarRecords.orEmpty()
-    if (showDetail && (seatList.isNotEmpty() || seminarList.isNotEmpty())) {
-        AlertDialog(
-            onDismissRequest = { showDetail = false },
-            title = { Text("违约明细（共 ${seatList.size + seminarList.size} 条）") },
-            text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    RenegeSection("座位违约", seatList)
-                    RenegeSection("研讨室违约", seminarList)
-                }
-            },
-            confirmButton = { TextButton(onClick = { showDetail = false }) { Text("关闭") } },
-        )
-    }
-}
-
-/** 违约明细里的一节（两类分开列，与 h5 的两个页签一致）。 */
-@Composable
-private fun RenegeSection(title: String, list: List<RenegeRecord>) {
-    if (list.isEmpty()) return
-    Text(
-        title,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-    Spacer(Modifier.height(6.dp))
-    list.forEach { r ->
-        Text(r.label(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-        val sub = listOf(r.time, r.statusName).filter { it.isNotBlank() }
-        if (sub.isNotEmpty()) {
-            Text(
-                sub.joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-    }
-    Spacer(Modifier.height(4.dp))
-}
-
-@Composable
-private fun NotificationPermissionBanner(onRequest: () -> Unit) {
+internal fun NotificationPermissionBanner(onRequest: () -> Unit) {
     Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
@@ -927,184 +535,3 @@ private fun NotificationPermissionBanner(onRequest: () -> Unit) {
     }
 }
 
-/**
- * 预约任务卡片。
- *
- * 与「我的预约」卡的区别：
- * - 显示**时间段**（此前只有日期，与预约卡不一致）
- * - 进行中的任务显示**存活信息**：已等待多久、尝试次数、最近尝试时间 ——
- *   这是用户判断「后台到底还在不在抢」的唯一依据
- * - 终态任务不可取消，但可删除（长按 / 删除按钮）
- */
-@Composable
-private fun TaskCard(
-    task: ReservationTask,
-    now: Long,
-    onCancel: (() -> Unit)?,
-    onDelete: (() -> Unit)? = null,
-) {
-    var showCancelDialog by remember { mutableStateOf(false) }
-    val active = task.status == TaskStatus.IDLE || task.status == TaskStatus.RUNNING
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        task.areaName.ifBlank { task.areaId },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    val sub = buildString {
-                        if (task.campusName.isNotBlank()) append(task.campusName)
-                        if (task.floorName.isNotBlank()) {
-                            if (isNotEmpty()) append(" · ")
-                            append(task.floorName)
-                        }
-                    }
-                    if (sub.isNotEmpty()) {
-                        Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                    }
-                }
-                TaskStatusBadge(task.status)
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.DateRange, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
-                    Spacer(Modifier.size(4.dp))
-                    Text(
-                        "${task.reserveDate.ifBlank { "-" }} ${TaskListLogic.timeRangeLabel(task)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                TaskListLogic.seatLabel(task)?.let { seat ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.EventSeat, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
-                        Spacer(Modifier.size(4.dp))
-                        Text(seat, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Schedule, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
-                    Spacer(Modifier.size(4.dp))
-                    Text(TaskListLogic.modeLabel(task), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            // 存活信息：只在进行中显示
-            if (active) {
-                TaskListLogic.livenessText(task.createdAt, task.attempts, task.lastAttemptAt, now)?.let { text ->
-                    Spacer(Modifier.height(8.dp))
-                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Timelapse, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                            Spacer(Modifier.size(6.dp))
-                            Text(
-                                text,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (task.message.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)) {
-                    Text(
-                        task.message,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            when {
-                active && onCancel != null -> {
-                    Spacer(Modifier.height(10.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { showCancelDialog = true }) {
-                            Text("取消任务", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
-                onDelete != null -> {
-                    Spacer(Modifier.height(10.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDelete) {
-                            Text("删除记录", color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
-            }
-        }
-        if (showCancelDialog) {
-            AlertDialog(
-                onDismissRequest = { showCancelDialog = false },
-                title = { Text("取消这个任务？") },
-                text = {
-                    Text(
-                        if (task.message.contains("预约成功")) {
-                            "任务已抢到座位，取消不会撤销已成功的预约。\n如需退座，请在「我的预约」中操作。"
-                        } else {
-                            "取消后后台将停止为该任务轮询抢座。\n已经抢到的座位不会受影响。"
-                        }
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = { showCancelDialog = false; onCancel?.invoke() }) { Text("确认取消") }
-                },
-                dismissButton = { TextButton(onClick = { showCancelDialog = false }) { Text("再想想") } }
-            )
-        }
-    }
-}
-
-@Composable
-private fun TaskStatusBadge(status: TaskStatus) {
-    val (text, key) = TaskListLogic.statusBadge(status)
-    val base = when (key) {
-        "idle" -> Color(0xFF9E9E9E)
-        "running" -> Color(0xFF1565C0)
-        "success" -> Color(0xFF2E7D32)
-        "failed" -> Color(0xFFC62828)
-        else -> Color(0xFF757575)
-    }
-    Surface(shape = RoundedCornerShape(8.dp), color = base.copy(alpha = 0.15f)) {
-        Text(
-            text,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = base,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-/**
- * 服务端时间形如 `2026-09-19 10:55:00`（也可能是 ISO 的 `T` 分隔、或只有日期）。
- * 按分隔符取而不是按固定下标切 —— 固定切片遇到格式变化会静默切错。
- */
-private fun String.normalizeTime(): String = replace('T', ' ').trim()
-
-/** `2026-09-19 10:55:00` → `2026-09-19`。 */
-private fun String.datePart(): String = normalizeTime().split(' ').firstOrNull().orEmpty()
-
-/** `2026-09-19 10:55:00` → `10:55`；取不到时分时回落为空串。 */
-private fun String.timePart(): String =
-    normalizeTime().split(' ').getOrNull(1)?.take(5).orEmpty()
