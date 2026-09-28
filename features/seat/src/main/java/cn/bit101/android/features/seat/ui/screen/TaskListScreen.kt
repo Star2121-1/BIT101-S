@@ -60,6 +60,7 @@ import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.nav.NavDest
 import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.SeatViolationLogic
+import cn.bit101.android.features.seat.api.SeatHttp
 import cn.bit101.android.features.seat.model.RenegeRecord
 import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.ReservationTask
@@ -284,17 +285,32 @@ fun TaskListScreen(
                 // ⚠️ 研讨间与座位是**同一个后端的两类资源**（`/api/Seat/…` ↔ `/api/Seminar/…`，
                 // 取消共用 `/api/Space/cancel`），所以才放在同一页、同一套卡片里；
                 // 但**发起预约的流程完全不同**（研讨间要按「整间 + 时段 + 参与成员」申请），
-                // 那一半还没有接 —— 这里明确只做「看 + 取消」，不给假的「去预约」按钮。
-                seminars?.takeIf { it.isNotEmpty() }?.let { list ->
-                    item(key = "seminar-header") {
-                        SectionHeader(
-                            title = "我的研讨间预约",
-                            // ⚠️ 只说确定的事：「同属图书馆空间预约」。
-                            // 「两类是否共用每天的取消额度」服务端没有明说，别写进 UI 当结论
-                            subtitle = "与座位同属图书馆空间预约（同一后端）",
+                // 那一半还没有接 —— 这里明确只做「看 + 取消」，并把人送到官方页面去约。
+                //
+                // ⚠️ **这一块必须常显**：v1.9.24 只在「已有研讨间预约」时才渲染，
+                // 于是没约过的人根本不知道 App 里有研讨间这回事
+                //（用户 2026-09-28 反馈「我没看到研讨室」）。空的时候要给解释和入口，
+                // 而不是整块消失 —— 与「列表」页空态是同一个教训。
+                item(key = "seminar-header") {
+                    SectionHeader(
+                        title = "我的研讨间预约",
+                        // ⚠️ 只说确定的事：同属图书馆空间预约。
+                        // 「两类是否共用每天的取消额度」服务端没有明说，别写进 UI 当结论
+                        subtitle = "与座位同属图书馆空间预约（同一后端）",
+                        onRefresh = { scope.launch { viewModel.refreshSeminars() } },
+                    )
+                }
+                val seminarList = seminars.orEmpty()
+                if (seminarList.isEmpty()) {
+                    item(key = "seminar-empty") {
+                        NoSeminarCard(
+                            unknown = seminars == null,
+                            onOpenWeb = { mainController.openWebPage(SeatHttp.H5_SEMINAR_BOOKING) },
+                            onRefresh = { scope.launch { viewModel.refreshSeminars() } },
                         )
                     }
-                    items(list, key = { "sem-${it.id}" }) { record ->
+                } else {
+                    items(seminarList, key = { "sem-${it.id}" }) { record ->
                         SeminarCard(
                             record = record,
                             busy = busy,
@@ -656,6 +672,52 @@ private fun NoReservationCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline,
             )
+        }
+    }
+}
+
+/**
+ * 没有研讨间预约时的说明卡。
+ *
+ * ⚠️ 这张卡存在的理由：**App 内还不能发起研讨间预约**（要填申请主题/内容/手机号、
+ * 指定参与成员，与座位「点一下座位就订」完全不是一回事），但用户需要知道两件事：
+ * 这里能看能取消；想约的话去哪儿约。
+ *
+ * ⇒ 与其给一个点了没反应的「去预约」，不如给一条**真的能用**的路（官方页面），
+ * 并说清「约完回来下拉刷新就能在这里看到」。这也是把「看不到研讨间」
+ * 这个反馈真正解决掉的地方。
+ */
+@Composable
+private fun NoSeminarCard(
+    unknown: Boolean,
+    onOpenWeb: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(
+                if (unknown) "暂时取不到研讨间预约" else "还没有研讨间预约",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (unknown) {
+                    "登录座位系统后点「刷新」，或下拉本页重试。"
+                } else {
+                    "研讨间要按「整间 + 时段 + 参与成员」提交申请，App 内还没做这一步；" +
+                        "先用图书馆网页预约，约好后回到本页下拉刷新，就能在这里查看和取消。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = onOpenWeb) { Text("去图书馆网页预约") }
+                Spacer(Modifier.size(8.dp))
+                TextButton(onClick = onRefresh) { Text("刷新") }
+            }
         }
     }
 }

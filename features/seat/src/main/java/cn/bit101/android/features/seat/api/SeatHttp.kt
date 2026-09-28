@@ -28,6 +28,18 @@ class SeatHttp @Inject constructor(
         const val BASE = "https://seatlib.bit.edu.cn"
         const val SSO_BASE = "https://sso.bit.edu.cn"
 
+        /**
+         * h5 的**研讨间预约页**（区域 → 房间/日历 → 选时段 → 申请表单）。
+         *
+         * ⚠️ 为什么 App 里要留这个链接：研讨间**发起预约**的流程（整间 + 时段 +
+         * 参与成员 + 申请理由）还没原生化，而 `/api/Member/seminar` 只能看和取消。
+         * 与其给一个点了没反应的「去预约」，不如直接把人送到官方页面，
+         * 约完回「列表」页下拉刷新即可在 App 内看到并取消。
+         *
+         * 路由名来自 h5 主包的路由表（`assets/index.*.js` 里的 `path:"/bigSeminarRoom"`）。
+         */
+        const val H5_SEMINAR_BOOKING = "$BASE/h5/index.html#/bigSeminarRoom"
+
         private const val TAG = "SeatHttp"
         private const val CONNECT_TIMEOUT_SECONDS = 15L
         private const val READ_TIMEOUT_SECONDS = 30L
