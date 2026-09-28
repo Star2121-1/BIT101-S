@@ -78,7 +78,13 @@ import java.time.ZoneId
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, modifier: Modifier = Modifier) {
+fun TaskListScreen(
+    mainController: MainController,
+    viewModel: SeatViewModel,
+    modifier: Modifier = Modifier,
+    /** 空态里「去预约座位」按钮：切到同一页的「预约」页签（由 `SeatScreen` 提供）。 */
+    onNavigateToReserve: () -> Unit = {},
+) {
     val tasks by viewModel.tasks.collectAsState()
     val reservations by viewModel.myReservations.collectAsState()
     val violations by viewModel.violations.collectAsState()
@@ -182,41 +188,13 @@ fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, mod
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
         modifier = modifier
     ) { padding ->
-        // ⚠️ 有违约记录时**不能**走空态：那条「已违约 N 次」恰恰是没预约的人
-        // 最需要看到的东西（刚被暂停预约权、或被记了违约却还没再约），
-        // 用「暂无预约」把它盖掉等于把最关键的信息藏起来。
-        if (activeTasks.isEmpty() && finishedTasks.isEmpty() &&
-            reservations.isEmpty() && violations.isEmpty()
-        ) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier.padding(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.EventSeat, null,
-                        modifier = Modifier.size(72.dp),
-                        tint = MaterialTheme.colorScheme.outlineVariant
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "暂无预约",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "选择区域和座位，开始预约吧",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.outline,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-            return@Scaffold
-        }
+        // ⚠️ 这里**刻意没有「空态提前 return」**。
+        //
+        // 原先没有预约时整页只剩一句「暂无预约」，把下面这些全都挡住了：
+        // 违约计数（还能不能预约的前提）、签到时限规则、每天可取消次数、「去预约」入口。
+        // 而「没有预约」恰恰是**最需要这些信息**的时候（刚入学期、或刚被暂停预约权）。
+        // 现在空态降级成列表里的**一个卡片**，其余内容照常显示。
+        val nothingAtAll = activeTasks.isEmpty() && finishedTasks.isEmpty() && reservations.isEmpty()
 
         // 下拉刷新。本项目 material3 为 1.2.0-rc01，只有旧的 `PullToRefreshContainer`
         // （`PullToRefreshBox` 要 1.3.0+），因此这里用「Box + nestedScroll + Container」的旧式组合。
@@ -239,6 +217,17 @@ fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, mod
             ) {
                 if (!notificationPermission.granted && activeTasks.isNotEmpty()) {
                     item { NotificationPermissionBanner(onRequest = { notificationPermission.request() }) }
+                }
+
+                // ── 一条预约都没有时：给「怎么约」的入口与规则，而不是一堵墙 ────
+                if (nothingAtAll) {
+                    item {
+                        NoReservationCard(
+                            cancelsLeft = remainingCancels,
+                            onGoReserve = onNavigateToReserve,
+                            onShowRules = { showRules = true },
+                        )
+                    }
                 }
 
                 // ── 违约计数 ──────────────────────────────────────────────
@@ -331,12 +320,16 @@ fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, mod
                 }
 
                 // ── 规则入口（放列表末尾：想看的人才点，不占预约信息的视线）──────
-                item {
-                    TextButton(
-                        onClick = { showRules = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("查看座位预约规则", style = MaterialTheme.typography.bodyMedium)
+                // ⚠️ 空态时**不再重复放一个** —— 引导卡里已经有一个同样的入口，
+                // 同一屏两个按钮开同一个弹窗只会让人以为是两件事。
+                if (!nothingAtAll) {
+                    item {
+                        TextButton(
+                            onClick = { showRules = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("查看座位预约规则", style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
                 }
             }
@@ -540,6 +533,55 @@ private fun signInRow(record: ReservationRecord, now: Long): Pair<String, Boolea
     val tail = if (overdue) "$countdown · 请尽快刷卡" else "$countdown（截止 ${deadline.toLocalTime().withSecond(0).withNano(0)}）"
     val prefix = if (record.reserveDate == java.time.LocalDate.now()) "今日预约" else "次日预约"
     return "$prefix · $tail" to overdue
+}
+
+/**
+ * 「还没有座位预约」时的引导卡。
+ *
+ * ⚠️ 不要把这一页做成「没有数据就只剩一句暂无预约」：那样用户进来什么也学不到。
+ * 这条卡片同时给出**唯一缺的那一步**（去预约）、**最容易踩的三个规则**，
+ * 以及今天还剩几次取消机会 —— 都是没有预约时最该知道的东西。
+ */
+@Composable
+private fun NoReservationCard(
+    cancelsLeft: Int,
+    onGoReserve: () -> Unit,
+    onShowRules: () -> Unit,
+) {
+    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                Icons.Default.EventSeat, null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.outline
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "还没有座位预约",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "每天 6:00 起可预约当日或次日座位，馆内开放 08:00-22:30。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = onGoReserve) { Text("去预约座位") }
+            TextButton(onClick = onShowRules) { Text("查看完整预约规则") }
+            Text(
+                "今天还可取消 $cancelsLeft 次（规则：每天 ${SeatViewModel.CANCELS_PER_DAY} 次）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
 }
 
 /**

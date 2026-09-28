@@ -104,7 +104,20 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
                         onTaskCreated = { navController.navigate("tasks") { launchSingleTop = true } }
                     )
                 }
-                composable("tasks") { TaskListScreen(mainController = mainController, viewModel = viewModel) }
+                composable("tasks") {
+                    TaskListScreen(
+                        mainController = mainController,
+                        viewModel = viewModel,
+                        // 空态里的「去预约座位」：回到「预约」页签。
+                        // ⚠️ 要 popUpTo 清掉本页再进 —— 否则反复点会在回退栈里越堆越深。
+                        onNavigateToReserve = {
+                            navController.navigate("new_task") {
+                                popUpTo("new_task") { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        },
+                    )
+                }
                 composable("seat_map/{areaId}/{day}") { backStackEntry ->
                     val areaId = backStackEntry.arguments?.getString("areaId") ?: ""
                     val day = backStackEntry.arguments?.getString("day") ?: ""

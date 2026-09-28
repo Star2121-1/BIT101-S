@@ -56,6 +56,23 @@ class CampusPlacesTest {
         assertEquals("7#教学楼", CampusPlaces.match("七号教学楼101")?.name)
     }
 
+    /**
+     * **真机课表里实际出现过的教室串**（2026-09-28 在 NP05J 上 `uiautomator dump` 抓的）。
+     *
+     * 这条是回归测试：别名表最怕「自己编的写法都对、教务真实写法全漏」，
+     * 所以直接拿真实数据锁住 —— 以后动别名表，这几条不能挂。
+     */
+    @Test
+    fun `真机课表里的写法一条都不能漏`() {
+        assertEquals("文萃楼I", CampusPlaces.match("文萃楼I404")?.name)
+        assertEquals("文萃楼I", CampusPlaces.match("文萃楼I603")?.name)
+        assertEquals("综合教学大楼", CampusPlaces.match("综教B301")?.name)
+        assertEquals("综合教学大楼", CampusPlaces.match("综教A305")?.name)
+        assertEquals("综合教学大楼", CampusPlaces.match("综教A204")?.name)
+        // ⚠️「理教楼」= 理科教学楼（南校区日常教学主楼），**不是**理学楼
+        assertEquals("理科教学楼", CampusPlaces.match("理教楼406")?.name)
+    }
+
     @Test
     fun `匹配不到就返回 null —— 不给假按钮`() {
         assertNull(CampusPlaces.match(""))
