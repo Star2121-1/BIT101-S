@@ -182,7 +182,12 @@ fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, mod
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
         modifier = modifier
     ) { padding ->
-        if (activeTasks.isEmpty() && finishedTasks.isEmpty() && reservations.isEmpty()) {
+        // ⚠️ 有违约记录时**不能**走空态：那条「已违约 N 次」恰恰是没预约的人
+        // 最需要看到的东西（刚被暂停预约权、或被记了违约却还没再约），
+        // 用「暂无预约」把它盖掉等于把最关键的信息藏起来。
+        if (activeTasks.isEmpty() && finishedTasks.isEmpty() &&
+            reservations.isEmpty() && violations.isEmpty()
+        ) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
