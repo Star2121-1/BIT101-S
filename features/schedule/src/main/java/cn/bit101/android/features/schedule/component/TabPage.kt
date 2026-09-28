@@ -1,13 +1,12 @@
 package cn.bit101.android.features.schedule.component
 
-import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.OverscrollConfiguration
 import androidx.compose.foundation.background
-import androidx.compose.foundation.interaction.Interaction
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -17,12 +16,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -66,51 +65,15 @@ internal fun TabPager(
     }
 
     val scope = rememberCoroutineScope() //供动画调用协程
-    val indicator = @Composable { tabPositions: List<TabPosition> ->
-        FancyAnimatedIndicator(
-            tabPositions = tabPositions,
-            selectedTabIndex = pagerSate.currentPage
-        )
-    }
 
     Column {
-        TabRow(
-            selectedTabIndex = pagerSate.currentPage,
-            indicator = indicator,
-        ) {
-            items.forEachIndexed { index, item ->
-                Tab(
-                    selected = pagerSate.currentPage == index,
-                    onClick = {
-                        scope.launch {
-                            pagerSate.animateScrollToPage(
-                                index
-                            )
-                        }
-                    },
-                    text = {
-                        Text(
-
-                            text = item.title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    },
-                    modifier = Modifier
-                        .padding(5.dp)
-                        .clip(MaterialTheme.shapes.medium),
-                    //禁用水波纹特效
-                    interactionSource = remember {
-                        object : MutableInteractionSource {
-                            override val interactions: Flow<Interaction> = emptyFlow()
-                            override suspend fun emit(interaction: Interaction) {}
-                            override fun tryEmit(interaction: Interaction) = true
-                        }
-                    },
-                )
-            }
-        }
+        ScheduleTabRow(
+            titles = items.map { it.title },
+            selectedIndex = pagerSate.currentPage,
+            onSelect = { index ->
+                scope.launch { pagerSate.animateScrollToPage(index) }
+            },
+        )
 
         //禁用overscroll阴影效果
         CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
@@ -126,49 +89,113 @@ internal fun TabPager(
 }
 
 
+/**
+ * 课表页自己的页签栏。
+ *
+ * ## 为什么不用 Material3 的 `TabRow` + `Tab`
+ *
+ * `Tab` 会在标签左右各留约 **16dp** 内边距（社区多次反馈无法去掉），再叠加我们自己的
+ * 5dp，五个页签分下来每个只剩不到 50dp；**系统字体放大一点就整个挤成省略号** ——
+ * 实测用户机器（fontScale ≈ 1.3）上「课表」「空教室」等**五个标签全部显示成 `…`**。
+ *
+ * 自己排一行等宽格子：宽度完全可控；再加一层「放不下就降一档字号」的兜底，
+ * 字体放得再大也不会退化成 `…`。
+ *
+ * ⚠️ 若要改回 `TabRow`，先想清楚上面这条 —— 这不是审美问题，是**字根本显示不出来**。
+ */
 @Composable
-internal fun FancyAnimatedIndicator(tabPositions: List<TabPosition>, selectedTabIndex: Int) {
-    val transition = updateTransition(selectedTabIndex, label = "tab index")
-    val indicatorStart by transition.animateDp(
-        transitionSpec = {
-            // 使得指示器在切换tab时前后移动速度不同 有一个弹性效果
-            if (initialState < targetState) {
-                spring(dampingRatio = 0.5f, stiffness = 200f)
-            } else {
-                spring(dampingRatio = 0.5f, stiffness = 1000f)
-            }
-        }, label = "indicator start"
-    ) {
-        tabPositions[it].left
-    }
+private fun ScheduleTabRow(
+    titles: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val density = LocalDensity.current
+    var rowWidthPx by remember { mutableStateOf(0) }
+    val tabWidthPx = if (titles.isEmpty()) 0f else rowWidthPx.toFloat() / titles.size
 
-    val indicatorEnd by transition.animateDp(
-        transitionSpec = {
-            // 使得指示器在切换tab时前后移动速度不同 有一个弹性效果
-            if (initialState < targetState) {
-                spring(dampingRatio = 0.5f, stiffness = 1000f)
-            } else {
-                spring(dampingRatio = 0.5f, stiffness = 200f)
-            }
-        }, label = "indicator end"
-    ) {
-        tabPositions[it].right
-    }
+    // 指示器自己算位置：等宽格子 × 下标（不再依赖 TabRow 的 tabPositions）
+    val indicatorOffset by animateDpAsState(
+        targetValue = with(density) { (tabWidthPx * selectedIndex).toDp() },
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 350f),
+        label = "scheduleTabIndicator",
+    )
 
     Box(
-        Modifier
-            // Fill up the entire TabRow, and place the indicator at the start
-            .wrapContentSize(Alignment.CenterStart)
-            // Apply an offset from the start to correctly position the indicator around the tab
-            .offset(x = indicatorStart)
-            // Make the width of the indicator follow the animated width as we move between tabs
-            .width(indicatorEnd - indicatorStart)
-            .padding(5.dp)
-            .fillMaxHeight((tabPositions[selectedTabIndex].right - tabPositions[selectedTabIndex].left) / (indicatorEnd - indicatorStart))
-            .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.primaryContainer)
-            .zIndex(-1f) //默认情况会盖住文字
-    )
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .onSizeChanged { rowWidthPx = it.width },
+    ) {
+        if (tabWidthPx > 0f) {
+            Box(
+                modifier = Modifier
+                    .offset(x = indicatorOffset)
+                    .padding(horizontal = 3.dp, vertical = 5.dp)
+                    .width(with(density) { tabWidthPx.toDp() } - 6.dp)
+                    .fillMaxHeight()
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            titles.forEachIndexed { index, title ->
+                ScheduleTab(
+                    title = title,
+                    selected = index == selectedIndex,
+                    onClick = { onSelect(index) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 单个页签。两处细节都是为了「字显示全」：
+ *
+ * 1. 只留 2dp 横向内边距（Material3 的 `Tab` 留的是 16dp × 2）；
+ * 2. 一旦放不下就**自动降一档字号**（Compose 1.6 没有 autoSize，用 `onTextLayout`
+ *    的 `hasVisualOverflow` 自己兜）。降档是**单向**的，不会来回抖。
+ */
+@Composable
+private fun ScheduleTab(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var shrunk by remember(title) { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier.clickable(
+            // 沿用原来的意图：不要水波纹
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onClick,
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = title,
+            style = if (shrunk) MaterialTheme.typography.labelLarge
+            else MaterialTheme.typography.titleMedium,
+            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            // ⚠️ 只单向降档：若写成 `shrunk = it.hasVisualOverflow`，小字号放得下时
+            //    会把它置回 false → 又变大 → 又溢出，**无限重组**。
+            onTextLayout = { result -> if (result.hasVisualOverflow) shrunk = true },
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+    }
 }
 
 @Preview(showBackground = true)
