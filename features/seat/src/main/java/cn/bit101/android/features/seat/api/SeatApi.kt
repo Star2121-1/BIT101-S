@@ -2,11 +2,13 @@ package cn.bit101.android.features.seat.api
 
 import cn.bit101.android.config.user.base.SeatLoginStatus
 import cn.bit101.android.features.seat.SeatLog
+import cn.bit101.android.features.seat.model.RenegeRecord
 import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatDate
 import cn.bit101.android.features.seat.model.SeatMapImages
 import cn.bit101.android.features.seat.model.SeatTreeNode
+import cn.bit101.android.features.seat.model.parseRenegeRecords
 import cn.bit101.android.features.seat.model.parseReservations
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -205,6 +207,22 @@ class SeatApi @Inject constructor(
                 use = data.optString("use").takeIf { it.isNotBlank() },
             )
         }
+    }
+
+    /**
+     * 「我的违约」—— 图书馆侧的**权威**记录。
+     *
+     * `POST /api/Member/reneges` body `{"type": 1|2}`，`type` 1 = 座位、2 = 研讨室；
+     * 就是 h5「我的中心 → 我的违约」(`#/my/contract`) 用的那个接口
+     * （从一个**静态分包**里读出来的，不用登录就能确认它存在）。
+     *
+     * ⚠️ **列表直接在 `data` 上**（`{"code":1,"data":[…]}`），没有分页也没有嵌套；
+     * 未登录时按 seatlib 的惯例是 **HTTP 200 + `code 10001`**。
+     */
+    suspend fun getRenegeRecords(type: Int = 1): Result<List<RenegeRecord>> = authed {
+        val body = jsonBody(JSONObject().put("type", type))
+        val json = JSONObject(post("/api/Member/reneges", body))
+        parseRenegeRecords(json.optJSONArray("data") ?: JSONArray())
     }
 
     /** 「我的预约」（有效记录）。数据源与取消预约一致。 */

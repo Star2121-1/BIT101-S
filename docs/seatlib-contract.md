@@ -170,6 +170,30 @@ Angular 应用在跑、页脚渲染，但登录区空白，页面自身脚本抛
   `/api/Seat/touch_qr_books`、`/api/Seminar/*`（研讨间）、`/api/Enter/*`
 - `booking_rules`：每天 6:00 起可预约当日/次日；当日预约需 60 分钟内刷卡签到；
   未签到记违约 1 次；累计 5 次违约暂停 7 日；每天可取消 2 次
+- **「我的中心」分包**（2026-09-28 补）：h5 的 `#/my/*` 各页函数都在
+  `assets/my.1662019816941.js`，一共这些：
+  `/api/Member/seat`、`/api/Member/seminar`、`/api/Member/room`、**`/api/Member/reneges`**、
+  `/api/Member/activities`、`/api/Member/lang`、`/api/Member/removeOpenid`、`/api/Room/list`
+
+### 8.1 ★ 违约（renege）接口 —— v1.9.19 的重大更正
+
+**`POST /api/Member/reneges`**，body `{"type": 1|2}`（1 = 座位违约、2 = 研讨室违约）
+→ `{"code":1,"data":[…]}`，**列表直接在 `data` 上**（无分页、无嵌套）。
+
+- 就是 `#/my/contract`（我的中心 → 我的违约）那一页用的接口，
+  页面在 `assets/contract.1662019816941.js`
+- 条目字段**只有五个**：`nameMerge`（场馆合并名）、`name`（座位 tab 下是座位号）、
+  `time`（违约时间字符串）、`status`（`"1"`/`"2"`）、`statusname`（状态文案）
+- ⚠️ **不给 id**：App 侧做增量判断只能用 `nameMerge|name|time` 合成身份键
+
+⚠️⚠️ **教训（值得记住）**：v1.9.19 时我在本地「推算」违约次数，理由是
+「服务端没有违约次数接口」。**这个判断是错的** —— 接口一直都在。
+错因是**未登录时它和其他 seatlib 接口一样返回 `HTTP 200 + code 10001`**，
+盲探（假凭据 / 未带 token）时很容易把它当成「不存在」。
+⇒ **判断「某功能服务端有没有」时，先去 h5 的分包里找函数名**（静态资源不需要登录），
+别靠未认证的探测结果下结论。
+
+探针脚本：`.workbuddy/archive/tools/renege_probe.py`（会顶掉 App 会话，别反复跑）。
 
 ## 9. 座位底图与状态配色（官方前端的真实做法，2026-09-19 实测）
 

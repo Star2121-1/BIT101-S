@@ -2,32 +2,30 @@ package cn.bit101.android.features.seat.api
 
 import android.content.Context
 import cn.bit101.android.features.seat.SeatLog
-import cn.bit101.android.features.seat.SeatStatusLogic
 import cn.bit101.android.features.seat.SeatViolationLogic
-import cn.bit101.android.features.seat.SeatViolationLogic.Entry
-import cn.bit101.android.features.seat.SeatViolationLogic.Watch
-import cn.bit101.android.features.seat.model.ReservationRecord
+import cn.bit101.android.features.seat.model.RenegeRecord
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 违约台账的执行者：跟踪「我的预约」→ 判定违约 → 落账 → 通知。
+ * 违约记录的「新增检测」：把服务端列表与本地见过的 key 比一比，有新的就发通知。
+ *
+ * ## 为什么还要有它（既然数据已经来自服务端）
+ *
+ * 服务端只给**当前列表**，不告诉你「哪一条是刚加上去的」。而违约有实际后果
+ * （累计 5 次 → 暂停预约权 7 天，见 `docs/seatlib-contract.md` 第 10 节），
+ * 用户需要**在被记的当下**知道，而不是自己想起来去翻「我的违约」。
+ *
+ * ## 它**不是**数据源
+ *
+ * 界面上的次数一律用服务端返回的列表长度，本地这份 key 集合只服务于通知；
+ * 所以文件丢了/坏了，最坏结果是**重发一次通知**，不会显示错数字。
  *
  * ## 谁在调它
  *
- * - `SeatReservationRepository.refresh()`：App 内与**组件后台刷新**都会走这里，
- *   所以即使几天不开 App，下次刷新也会把这段时间的违约补记进来。
- * - `SeatViewModel`：手动补记 / 撤销 / 清空。
- *
- * ## ⚠️ 为什么不能只在「列表里还没消失」时判
- *
- * 违约的预约会被服务端**释放**并从有效列表消失 —— 只按「这次还在不在」判断的话，
- * 最常见的一路恰恰会被**系统性漏记**。所以这里是**先登记、后判定**：
- * 见到一次预约就记进跟踪表，等过了「签到截止 + 宽限」仍未见签到才落账。
+ * `SeatReservationRepository.refresh()` —— App 内刷新与**组件后台刷新**都会经过那里，
+ * 所以不开 App 也能收到通知。
  */
 @Singleton
 class SeatViolationTracker @Inject constructor(
@@ -35,162 +33,53 @@ class SeatViolationTracker @Inject constructor(
 ) {
 
     @Volatile
-    private var entries: List<Entry> = emptyList()
+    private var keys: Set<String>? = null
 
-    @Volatile
-    private var watches: List<Watch> = emptyList()
-
-    @Volatile
-    private var loaded = false
-
-    private fun ensureLoaded() {
-        if (loaded) return
-        val (e, w) = SeatViolationStore.read(context)
-        entries = e
-        watches = w
-        loaded = true
-        if (e.isNotEmpty()) SeatLog.d(TAG) { "loaded ${e.size} violation(s), ${w.size} watch(es)" }
-    }
-
-    /** 当前台账（只读快照）。 */
-    fun snapshot(): List<Entry> {
-        ensureLoaded()
-        return entries
-    }
-
-    /** 已记的违约次数。 */
-    fun count(): Int = snapshot().size
-
-    /**
-     * 用最新一次「我的预约」更新跟踪表，并给新确认的违约落账 + 发通知。
-     *
-     * @return 本次**新记**的违约（为空表示没有变化）
-     */
-    @Synchronized
-    fun observe(
-        records: List<ReservationRecord>,
-        nowMillis: Long = System.currentTimeMillis(),
-        zone: ZoneId = ZoneId.systemDefault(),
-    ): List<Entry> {
-        ensureLoaded()
-        val now = LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), zone)
-
-        val incoming = records.mapNotNull { record ->
-            val deadline = record.signInDeadline(now) ?: return@mapNotNull null
-            Watch(
-                reservationId = record.id,
-                seatLabel = SeatViolationLogic.seatLabelOf(record),
-                deadlineMillis = deadline.atZone(zone).toInstant().toEpochMilli(),
-                // 只有真正在用 / 暂离才算签到 —— 服务端 statusName 是权威口径
-                signedIn = SeatStatusLogic.phaseOf(record).let {
-                    it == SeatStatusLogic.Phase.IN_USE || it == SeatStatusLogic.Phase.LEAVE
-                },
-            )
-        }
-
-        val before = watches
-        val merged = SeatViolationLogic.prune(
-            SeatViolationLogic.upsert(watches, incoming),
-            nowMillis,
-        )
-        val fresh = SeatViolationLogic.detect(merged, entries.map { it.reservationId }.toSet(), nowMillis)
-        watches = merged
-
-        if (fresh.isEmpty()) {
-            // 跟踪表变了（新预约登记进来了）也要落盘，否则下次冷启动就丢了
-            if (merged != before) SeatViolationStore.write(context, entries, merged)
-            return emptyList()
-        }
-
-        entries = SeatViolationLogic.normalize(entries + fresh)
-        SeatViolationStore.write(context, entries, merged)
-        SeatLog.w(TAG, "recorded ${fresh.size} violation(s), total=${entries.size}")
-
-        fresh.forEach { entry ->
-            // 累计次数按「加了这条之后」算 —— 用户要看的是「我现在离 5 次还有多远」
-            val total = entries.indexOfFirst { it.reservationId == entry.reservationId } + 1
-            notify(entry, total)
-        }
-        return fresh
+    private fun known(): Set<String> {
+        keys?.let { return it }
+        val loaded = SeatViolationStore.read(context)
+        keys = loaded
+        if (loaded.isNotEmpty()) SeatLog.d(TAG) { "loaded ${loaded.size} known renege key(s)" }
+        return loaded
     }
 
     /**
-     * 我们在 App 内主动取消了某次预约 → 它不再是违约候选。
+     * 用刚拉到的服务端列表更新「见过的集合」，并返回**这次才出现**的条目。
      *
-     * ⚠️ 必须显式标记：取消后记录会从列表消失，若不当作「已取消」，
-     * 过了截止时刻就会被判成违约 —— 那是对用户正确行为的误罚。
+     * @return 新增的违约（为空表示没有变化）
      */
     @Synchronized
-    fun markCancelled(reservationId: String) {
-        ensureLoaded()
-        val hit = watches.firstOrNull { it.reservationId == reservationId } ?: return
-        watches = watches.map { if (it.reservationId == reservationId) it.copy(cancelled = true) else it }
-        SeatViolationStore.write(context, entries, watches)
-        SeatLog.d(TAG, "watch $reservationId marked cancelled (was signedIn=${hit.signedIn})")
-    }
+    fun observe(records: List<RenegeRecord>): List<RenegeRecord> {
+        val before = known()
+        val fresh = SeatViolationLogic.newRecords(before, records)
+        if (fresh.isEmpty()) return emptyList()
 
-    /** 按座位 id 取消（座位图上的取消入口走到这里时只知道座位 id）。 */
-    @Synchronized
-    fun markCancelledBySeat(seatId: String, seatNo: String = "") {
-        ensureLoaded()
-        var changed = false
-        watches = watches.map { w ->
-            // 跟踪表里没存座位 id，用展示标签兜底匹配（"座位 018"）
-            val match = (seatNo.isNotBlank() && w.seatLabel.contains(seatNo)) ||
-                (seatId.isNotBlank() && w.reservationId == seatId)
-            if (match) { changed = true; w.copy(cancelled = true) } else w
-        }
-        if (changed) SeatViolationStore.write(context, entries, watches)
-    }
+        val updated = before + records.map { it.key }
+        keys = updated
+        SeatViolationStore.write(context, updated)
+        SeatLog.w(TAG, "new renege(s)=${fresh.size}, total=${records.size}")
 
-    /** 手动补记一次（我们漏了、或他处已经吃了一次）。 */
-    @Synchronized
-    fun addManual(nowMillis: Long = System.currentTimeMillis()): Entry {
-        ensureLoaded()
-        val entry = Entry(
-            reservationId = "manual:$nowMillis",
-            atMillis = nowMillis,
-            seatLabel = "",
-            reason = SeatViolationLogic.Reason.MANUAL,
-        )
-        entries = SeatViolationLogic.normalize(entries + entry)
-        SeatViolationStore.write(context, entries, watches)
-        return entry
-    }
-
-    /** 撤销一条（记错了 / 实际没违约）。 */
-    @Synchronized
-    fun undo(reservationId: String) {
-        ensureLoaded()
-        if (entries.none { it.reservationId == reservationId }) return
-        entries = SeatViolationLogic.normalize(entries.filter { it.reservationId != reservationId })
-        // ⚠️ 撤销后**不要**把它重新放回候选：否则下个刷新周期会立刻再记一次，
-        // 用户会看到「删掉了又自己长回来」。
-        watches = watches.map {
-            if (it.reservationId == reservationId) it.copy(signedIn = true) else it
-        }
-        SeatViolationStore.write(context, entries, watches)
-    }
-
-    /** 清空台账（新学期 / 已确认权限恢复）。 */
-    @Synchronized
-    fun clear() {
-        entries = emptyList()
-        watches = emptyList()
-        SeatViolationStore.write(context, entries, watches)
-    }
-
-    private fun notify(entry: Entry, total: Int) {
+        // 一次刷新可能同时冒出多条 —— 只发**一条**通知（固定 id，后发覆盖前发），
+        // 否则会把通知栏刷屏。正文用「累计 N 次」，这才是用户要的信息。
+        val head = fresh.first()
         runCatching {
             cn.bit101.android.features.notify.SeatViolationNotifier.notify(
                 context = context,
-                title = SeatViolationLogic.noticeTitle(total),
-                text = SeatViolationLogic.noticeText(entry.seatLabel, total),
+                title = SeatViolationLogic.noticeTitle(records.size),
+                text = SeatViolationLogic.noticeText(head.label(), records.size),
             )
-        }.onFailure { SeatLog.w(TAG, "notify violation failed: ${it.message}") }
+        }.onFailure { SeatLog.w(TAG, "notify renege failed: ${it.message}") }
+        return fresh
+    }
+
+    /** 丢掉「见过的集合」（调试/排查用；正常情况下不需要）。 */
+    @Synchronized
+    fun reset() {
+        keys = emptySet()
+        SeatViolationStore.write(context, emptySet())
     }
 
     private companion object {
-        const val TAG = "SeatViolation"
+        const val TAG = "SeatRenege"
     }
 }

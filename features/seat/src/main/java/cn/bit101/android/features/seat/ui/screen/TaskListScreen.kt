@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
@@ -58,6 +60,7 @@ import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.nav.NavDest
 import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.SeatViolationLogic
+import cn.bit101.android.features.seat.model.RenegeRecord
 import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.TaskStatus
@@ -87,7 +90,8 @@ fun TaskListScreen(
 ) {
     val tasks by viewModel.tasks.collectAsState()
     val reservations by viewModel.myReservations.collectAsState()
-    val violations by viewModel.violations.collectAsState()
+    /** 「我的违约」——图书馆服务端数据；`null` = 还没拉到（≠ 0 条）。 */
+    val reneges by viewModel.reneges.collectAsState()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
     val bit101LoggedIn by viewModel.bit101LoggedIn.collectAsState(initial = false)
     val authNotice by viewModel.authNotice.collectAsState()
@@ -127,7 +131,7 @@ fun TaskListScreen(
 
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) {
-            viewModel.loadViolations()
+            viewModel.refreshReneges()
             viewModel.refreshMyReservations()
             remainingCancels = viewModel.remainingCancelsToday()
             lastUpdatedAt = System.currentTimeMillis()
@@ -234,19 +238,8 @@ fun TaskListScreen(
                 // 放最前面：它是「还能不能预约」的前提，比下面任何一条都先看。
                 item {
                     ViolationCard(
-                        entries = violations,
-                        onUndoLast = {
-                            val last = SeatViolationLogic.normalize(violations).lastOrNull()
-                            if (last != null) {
-                                viewModel.undoViolation(last.reservationId)
-                                scope.launch { snackbarHostState.showSnackbar("已撤销最近一次违约记录") }
-                            }
-                        },
-                        onAdd = {
-                            viewModel.addViolation()
-                            scope.launch { snackbarHostState.showSnackbar("已手动补记 1 次违约") }
-                        },
-                        onClear = { viewModel.clearViolations() },
+                        records = reneges,
+                        onRefresh = { scope.launch { viewModel.refreshReneges() } },
                     )
                 }
 
@@ -334,7 +327,17 @@ fun TaskListScreen(
                 }
             }
 
-            PullToRefreshContainer(state = pullState, modifier = Modifier.align(Alignment.TopCenter))
+            // ⚠️ **只在有得看的时候才组合它**。
+            //
+            // material3 1.2.0-rc01 的 `PullToRefreshContainer` 在**不刷新时不会把自己完全
+            // 藏起来** —— 它只把指示器上移约半个高度，而父 Box 默认不裁剪，于是页签下面
+            // 会露出**半个灰圆**（用户 2026-09-28 反馈，卷的动态页 / 座的列表页都有）。
+            //
+            // 判据用 `progress > 0`：手指一按下去开始拉，progress 立刻 > 0 → 指示器出现；
+            // 松手后回弹到 0 → 自动移出组合，既不漏半圆也不影响下拉手感。
+            if (pullState.progress > 0f || pullState.isRefreshing) {
+                PullToRefreshContainer(state = pullState, modifier = Modifier.align(Alignment.TopCenter))
+            }
         }
 
         if (showRules) {
@@ -587,34 +590,41 @@ private fun NoReservationCard(
 /**
  * 违约计数卡。
  *
- * ⚠️ 这是**本地推算**，不是图书馆下发的数字 —— 服务端根本没有违约次数接口。
- * 所以卡片底部必须写明这一点，并给出手动修正入口：
- * 让人能纠正我们的误判，比「App 说了算」重要。
+ * ## 数据是图书馆给的，不是我们算的
+ *
+ * `POST /api/Member/reneges`（body `{"type":1}`）—— 就是 h5「我的中心 → 我的违约」
+ * (`#/my/contract`) 用的接口。v1.9.19 因为没有找到它，曾用「本地推算签到情况」顶上，
+ * 那个做法已被**推翻并删除**（原因与教训见 [SeatViolationLogic] 顶部注释）。
+ *
+ * ⚠️ `records == null` 表示**还没拉到**（没登录 / 网络失败）—— 必须与「拉到 0 条」分开：
+ * 把「不知道」显示成「没有违约」，会让人以为自己处于安全状态。
+ *
+ * 因此这里也**不再有补记 / 撤销 / 清空**：数字以图书馆为准，本地改它没有意义。
  */
 @Composable
 private fun ViolationCard(
-    entries: List<SeatViolationLogic.Entry>,
-    onUndoLast: () -> Unit,
-    onAdd: () -> Unit,
-    onClear: () -> Unit,
+    records: List<RenegeRecord>?,
+    onRefresh: () -> Unit,
 ) {
-    val count = entries.size
+    val known = records != null
+    val count = records?.size ?: 0
     val left = SeatViolationLogic.remaining(count)
     // 只剩 1 次就到上限时用警示色 —— 这是「下一次违约就会停用 7 天」的信号
-    val urgent = count > 0 && left <= 1
+    val urgent = known && count > 0 && left <= 1
+    val warn = known && count > 0
 
     val container = when {
         urgent -> MaterialTheme.colorScheme.errorContainer
-        count > 0 -> MaterialTheme.colorScheme.tertiaryContainer
+        warn -> MaterialTheme.colorScheme.tertiaryContainer
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
     val onContainer = when {
         urgent -> MaterialTheme.colorScheme.onErrorContainer
-        count > 0 -> MaterialTheme.colorScheme.onTertiaryContainer
+        warn -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    var confirmClear by remember { mutableStateOf(false) }
+    var showDetail by remember { mutableStateOf(false) }
 
     Surface(shape = RoundedCornerShape(12.dp), color = container) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
@@ -626,44 +636,58 @@ private fun ViolationCard(
                 )
                 Spacer(Modifier.size(8.dp))
                 Text(
-                    "违约 $count/${SeatViolationLogic.LIMIT}",
+                    if (known) "违约 $count/${SeatViolationLogic.LIMIT}" else "违约次数未知",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = onContainer,
                 )
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onAdd) { Text("补记", color = onContainer) }
                 if (count > 0) {
-                    TextButton(onClick = onUndoLast) { Text("撤销", color = onContainer) }
-                    TextButton(onClick = { confirmClear = true }) { Text("清空", color = onContainer) }
+                    TextButton(onClick = { showDetail = true }) { Text("明细", color = onContainer) }
                 }
+                TextButton(onClick = onRefresh) { Text("刷新", color = onContainer) }
             }
             Spacer(Modifier.height(2.dp))
             Text(
-                SeatViolationLogic.summaryText(count),
+                if (known) SeatViolationLogic.summaryText(count)
+                else "暂时取不到图书馆的违约记录",
                 style = MaterialTheme.typography.bodyMedium,
                 color = onContainer,
             )
-            SeatViolationLogic.lastText(entries)?.let {
-                Text("最近一次 $it", style = MaterialTheme.typography.bodySmall, color = onContainer.copy(alpha = 0.8f))
-            }
             Text(
-                "按本地记录推算（座位系统不提供违约次数），不一致可手动修正",
+                if (known) "数据来自图书馆座位系统"
+                else "登录座位系统后点「刷新」，或下拉本页重试",
                 style = MaterialTheme.typography.bodySmall,
                 color = onContainer.copy(alpha = 0.7f),
             )
         }
     }
 
-    if (confirmClear) {
+    if (showDetail && records != null) {
         AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("清空违约记录？") },
-            text = { Text("会把已记的 $count 次违约全部删掉。若你的预约权刚恢复、或新学期开始，可以这么做。") },
-            confirmButton = {
-                TextButton(onClick = { confirmClear = false; onClear() }) { Text("清空") }
+            onDismissRequest = { showDetail = false },
+            title = { Text("违约明细（${records.size} 条）") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    records.forEach { r ->
+                        Text(
+                            r.label(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        val sub = listOf(r.time, r.statusName).filter { it.isNotBlank() }
+                        if (sub.isNotEmpty()) {
+                            Text(
+                                sub.joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                    }
+                }
             },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } },
+            confirmButton = { TextButton(onClick = { showDetail = false }) { Text("关闭") } },
         )
     }
 }

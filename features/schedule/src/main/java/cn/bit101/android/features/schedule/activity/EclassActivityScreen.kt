@@ -149,11 +149,17 @@ internal fun EclassActivityScreen(mainController: MainController) {
             item { Spacer(modifier = Modifier.height(88.dp)) }
             }
 
-            // 下拉指示器（material3 1.2 的旧 API，覆盖在列表上方）
-            PullToRefreshContainer(
-                state = pullState,
-                modifier = Modifier.align(Alignment.TopCenter),
-            )
+            // 下拉指示器（material3 1.2 的旧 API，覆盖在列表上方）。
+            // ⚠️ **只在有得看的时候才组合它**：1.2.0-rc01 的 `PullToRefreshContainer`
+            // 不刷新时**不会把自己完全藏起来**（只上移约半个高度，而父 Box 默认不裁剪），
+            // 于是页签下面会露出**半个灰圆**（用户 2026-09-28 反馈）。
+            // `progress > 0` 就够：手指一拉就出现，回弹到 0 自动移出组合。
+            if (pullState.progress > 0f || pullState.isRefreshing) {
+                PullToRefreshContainer(
+                    state = pullState,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+            }
         }
 
         // 设置按钮 —— 与 DDL 页 FAB 同规格（42dp、右下角）
