@@ -1,10 +1,13 @@
 package cn.bit101.android.features.seat.api
 
 import cn.bit101.android.features.seat.SeatLog
+import cn.bit101.android.features.seat.SeatViolationLogic
 import cn.bit101.android.features.seat.model.ReservationRecord
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,13 +33,44 @@ import javax.inject.Singleton
 @Singleton
 class SeatReservationRepository @Inject constructor(
     private val seatApi: SeatApi,
+    private val violationTracker: SeatViolationTracker,
 ) {
 
     private val _records = MutableStateFlow<List<ReservationRecord>>(emptyList())
     val records: StateFlow<List<ReservationRecord>> = _records.asStateFlow()
 
+    /**
+     * 违约台账（登出也**不清空** —— 它是服务端状态的本地影子，
+     * 清掉了等于让人重新开始攒 5 次）。
+     */
+    private val _violations = MutableStateFlow<List<SeatViolationLogic.Entry>>(emptyList())
+    val violations: StateFlow<List<SeatViolationLogic.Entry>> = _violations.asStateFlow()
+
     @Volatile
     private var lastRefreshAt = 0L
+
+    /** 从磁盘重新读一次台账（进入座位页时用）。 */
+    suspend fun reloadViolations() {
+        _violations.value = withContext(Dispatchers.IO) { violationTracker.snapshot() }
+    }
+
+    /** 手动补记一次违约（我们漏记 / 他处已吃了一次）。 */
+    suspend fun addViolationManually() {
+        withContext(Dispatchers.IO) { violationTracker.addManual() }
+        _violations.value = violationTracker.snapshot()
+    }
+
+    /** 撤销一条违约记录。 */
+    suspend fun undoViolation(reservationId: String) {
+        withContext(Dispatchers.IO) { violationTracker.undo(reservationId) }
+        _violations.value = violationTracker.snapshot()
+    }
+
+    /** 清空台账（新学期 / 已确认权限恢复）。 */
+    suspend fun clearViolations() {
+        withContext(Dispatchers.IO) { violationTracker.clear() }
+        _violations.value = emptyList()
+    }
 
     /**
      * 拉取「我的预约」。
@@ -49,6 +83,12 @@ class SeatReservationRepository @Inject constructor(
         result.onSuccess {
             _records.value = it
             lastRefreshAt = System.currentTimeMillis()
+            // 违约判定的**唯一**驱动点：App 内刷新与组件后台刷新都经过这里，
+            // 所以几天不开 App 也不会漏记。文件读写放 IO 线程。
+            val fresh = runCatching { withContext(Dispatchers.IO) { violationTracker.observe(it) } }
+                .onFailure { SeatLog.w(TAG, "violation observe failed: ${it.message}") }
+                .getOrDefault(emptyList())
+            if (fresh.isNotEmpty()) _violations.value = violationTracker.snapshot()
         }.onFailure {
             SeatLog.w(TAG, "refresh my reservations failed: ${it.message}")
             if (it.message == SeatApi.TOKEN_EXPIRED || it.cause?.message == SeatApi.TOKEN_EXPIRED) {

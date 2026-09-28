@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.nav.NavDest
 import cn.bit101.android.features.seat.SeatViewModel
+import cn.bit101.android.features.seat.SeatViolationLogic
 import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.ReservationTask
 import cn.bit101.android.features.seat.model.TaskStatus
@@ -80,6 +81,7 @@ import java.time.ZoneId
 fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, modifier: Modifier = Modifier) {
     val tasks by viewModel.tasks.collectAsState()
     val reservations by viewModel.myReservations.collectAsState()
+    val violations by viewModel.violations.collectAsState()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
     val bit101LoggedIn by viewModel.bit101LoggedIn.collectAsState(initial = false)
     val authNotice by viewModel.authNotice.collectAsState()
@@ -119,6 +121,7 @@ fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, mod
 
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) {
+            viewModel.loadViolations()
             viewModel.refreshMyReservations()
             remainingCancels = viewModel.remainingCancelsToday()
             lastUpdatedAt = System.currentTimeMillis()
@@ -231,6 +234,26 @@ fun TaskListScreen(mainController: MainController, viewModel: SeatViewModel, mod
             ) {
                 if (!notificationPermission.granted && activeTasks.isNotEmpty()) {
                     item { NotificationPermissionBanner(onRequest = { notificationPermission.request() }) }
+                }
+
+                // ── 违约计数 ──────────────────────────────────────────────
+                // 放最前面：它是「还能不能预约」的前提，比下面任何一条都先看。
+                item {
+                    ViolationCard(
+                        entries = violations,
+                        onUndoLast = {
+                            val last = SeatViolationLogic.normalize(violations).lastOrNull()
+                            if (last != null) {
+                                viewModel.undoViolation(last.reservationId)
+                                scope.launch { snackbarHostState.showSnackbar("已撤销最近一次违约记录") }
+                            }
+                        },
+                        onAdd = {
+                            viewModel.addViolation()
+                            scope.launch { snackbarHostState.showSnackbar("已手动补记 1 次违约") }
+                        },
+                        onClear = { viewModel.clearViolations() },
+                    )
                 }
 
                 // ── 我的预约 ──────────────────────────────────────────────
@@ -512,6 +535,90 @@ private fun signInRow(record: ReservationRecord, now: Long): Pair<String, Boolea
     val tail = if (overdue) "$countdown · 请尽快刷卡" else "$countdown（截止 ${deadline.toLocalTime().withSecond(0).withNano(0)}）"
     val prefix = if (record.reserveDate == java.time.LocalDate.now()) "今日预约" else "次日预约"
     return "$prefix · $tail" to overdue
+}
+
+/**
+ * 违约计数卡。
+ *
+ * ⚠️ 这是**本地推算**，不是图书馆下发的数字 —— 服务端根本没有违约次数接口。
+ * 所以卡片底部必须写明这一点，并给出手动修正入口：
+ * 让人能纠正我们的误判，比「App 说了算」重要。
+ */
+@Composable
+private fun ViolationCard(
+    entries: List<SeatViolationLogic.Entry>,
+    onUndoLast: () -> Unit,
+    onAdd: () -> Unit,
+    onClear: () -> Unit,
+) {
+    val count = entries.size
+    val left = SeatViolationLogic.remaining(count)
+    // 只剩 1 次就到上限时用警示色 —— 这是「下一次违约就会停用 7 天」的信号
+    val urgent = count > 0 && left <= 1
+
+    val container = when {
+        urgent -> MaterialTheme.colorScheme.errorContainer
+        count > 0 -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val onContainer = when {
+        urgent -> MaterialTheme.colorScheme.onErrorContainer
+        count > 0 -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    var confirmClear by remember { mutableStateOf(false) }
+
+    Surface(shape = RoundedCornerShape(12.dp), color = container) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (urgent) Icons.Default.Timelapse else Icons.Default.HistoryToggleOff, null,
+                    modifier = Modifier.size(20.dp),
+                    tint = onContainer
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "违约 $count/${SeatViolationLogic.LIMIT}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = onContainer,
+                )
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onAdd) { Text("补记", color = onContainer) }
+                if (count > 0) {
+                    TextButton(onClick = onUndoLast) { Text("撤销", color = onContainer) }
+                    TextButton(onClick = { confirmClear = true }) { Text("清空", color = onContainer) }
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                SeatViolationLogic.summaryText(count),
+                style = MaterialTheme.typography.bodyMedium,
+                color = onContainer,
+            )
+            SeatViolationLogic.lastText(entries)?.let {
+                Text("最近一次 $it", style = MaterialTheme.typography.bodySmall, color = onContainer.copy(alpha = 0.8f))
+            }
+            Text(
+                "按本地记录推算（座位系统不提供违约次数），不一致可手动修正",
+                style = MaterialTheme.typography.bodySmall,
+                color = onContainer.copy(alpha = 0.7f),
+            )
+        }
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("清空违约记录？") },
+            text = { Text("会把已记的 $count 次违约全部删掉。若你的预约权刚恢复、或新学期开始，可以这么做。") },
+            confirmButton = {
+                TextButton(onClick = { confirmClear = false; onClear() }) { Text("清空") }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } },
+        )
+    }
 }
 
 @Composable

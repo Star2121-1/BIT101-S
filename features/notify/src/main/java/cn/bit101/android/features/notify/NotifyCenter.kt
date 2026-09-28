@@ -59,6 +59,15 @@ internal object NotifyCenter {
     /** 校园网流量提醒（270 GB 临近 / 300 GB 超限，各一次）。 */
     private const val CHANNEL_NETFLOW = "netflow_reminder"
 
+    /**
+     * 座位违约提醒。
+     *
+     * ⚠️ 与「签到提醒」是两件事：签到提醒是**事前**（还能补救），这条是**事后**
+     * （已经记上了）。它仍然给 HIGH —— 用户需要知道自己离「暂停 7 天」还有多远，
+     * 否则可能一路攒到 5 次才察觉。
+     */
+    private const val CHANNEL_SEAT_VIOLATION = "seat_violation_reminder"
+
     /** 点击通知打开 App 的入口（与组件共用同一套 `bit101_goto` 约定）。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"
     private const val EXTRA_GOTO = "bit101_goto"
@@ -71,6 +80,9 @@ internal object NotifyCenter {
 
     /** 流量提醒固定 id：一个周期内至多两条（270 / 300 GB），后发覆盖前一条。 */
     private const val NOTIFY_ID_NETFLOW = 42002
+
+    /** 违约提醒固定 id：后发的覆盖前一条，不刷屏。 */
+    private const val NOTIFY_ID_SEAT_VIOLATION = 43001
 
     /** 建一个渠道（幂等：已存在就跳过）。 */
     private fun ensureChannel(
@@ -98,6 +110,35 @@ internal object NotifyCenter {
         ensureChannel(manager, CHANNEL_SCORE, "出分提醒", NotificationManager.IMPORTANCE_DEFAULT, "有新课出分时提醒（通知里不含分数）")
         ensureChannel(manager, CHANNEL_NETFEE, "网费不足", NotificationManager.IMPORTANCE_DEFAULT, "校园网账户余额不足时提醒充值（每日至多一次）")
         ensureChannel(manager, CHANNEL_NETFLOW, "校园网流量", NotificationManager.IMPORTANCE_DEFAULT, "本月流量接近 / 超过 300 GB 限速阈值时提醒（每周期至多两条）")
+        ensureChannel(manager, CHANNEL_SEAT_VIOLATION, "座位违约", NotificationManager.IMPORTANCE_HIGH, "预约未签到被记违约时提醒，并显示累计次数（累计 5 次暂停预约 7 天）")
+    }
+
+    /**
+     * 座位违约提醒（固定 id：后发覆盖前一条）。
+     *
+     * 跳座位页 —— 违约台账就在「我的预约」那块，用户要核对/撤销都得去那儿。
+     */
+    internal fun notifySeatViolation(context: Context, title: String, text: String) {
+        ensureChannels(context)
+        val notification = NotificationCompat.Builder(context, CHANNEL_SEAT_VIOLATION)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(
+                gotoPendingIntent(
+                    context,
+                    NOTIFY_ID_SEAT_VIOLATION,
+                    PageShowOnNav.Seat.toPageData().value,
+                    "seatviolation",
+                )
+            )
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify(NOTIFY_ID_SEAT_VIOLATION, notification)
+        }
     }
 
     /**

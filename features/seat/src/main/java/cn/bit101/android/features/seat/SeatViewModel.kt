@@ -11,6 +11,7 @@ import cn.bit101.android.features.seat.api.SeatReservationRepository
 import cn.bit101.android.features.seat.api.SeatSession
 import cn.bit101.android.features.seat.api.SeatSmsChallenge
 import cn.bit101.android.features.seat.api.SeatTaskRepository
+import cn.bit101.android.features.seat.api.SeatViolationTracker
 import cn.bit101.android.features.seat.api.seatErrorText
 import cn.bit101.android.features.seat.model.ReservationRecord
 import cn.bit101.android.features.seat.model.ReservationTask
@@ -22,6 +23,7 @@ import cn.bit101.android.features.seat.model.TaskMode
 import cn.bit101.android.features.seat.model.TaskStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,6 +32,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import javax.inject.Inject
 
@@ -70,6 +73,7 @@ class SeatViewModel @Inject constructor(
     private val seatApi: SeatApi,
     private val seatSession: SeatSession,
     private val reservationRepository: SeatReservationRepository,
+    private val violationTracker: SeatViolationTracker,
     private val autoLogin: SeatAutoLogin,
 ) : ViewModel() {
 
@@ -286,6 +290,29 @@ class SeatViewModel @Inject constructor(
     // 看到的是**同一份**，不会出现「App 里显示已预约、组件上却是监控中」的分裂。
 
     val myReservations: StateFlow<List<ReservationRecord>> = reservationRepository.records
+
+    /** 违约台账（本地推算，见 [SeatViolationLogic]）。 */
+    val violations: StateFlow<List<SeatViolationLogic.Entry>> = reservationRepository.violations
+
+    /** 进入座位页时把台账从磁盘读出来（冷启动后首次刷新前也要能显示）。 */
+    fun loadViolations() {
+        viewModelScope.launch { reservationRepository.reloadViolations() }
+    }
+
+    /** 手动补记一次违约。 */
+    fun addViolation() {
+        viewModelScope.launch { reservationRepository.addViolationManually() }
+    }
+
+    /** 撤销一条违约记录。 */
+    fun undoViolation(reservationId: String) {
+        viewModelScope.launch { reservationRepository.undoViolation(reservationId) }
+    }
+
+    /** 清空台账。 */
+    fun clearViolations() {
+        viewModelScope.launch { reservationRepository.clearViolations() }
+    }
 
     fun refreshMyReservations() {
         viewModelScope.launch {
@@ -616,17 +643,18 @@ class SeatViewModel @Inject constructor(
 
     /** 取消预约。返回 null 表示成功，否则返回错误信息。成功后按当前查看的日期与时段重新加载座位图。 */
     suspend fun cancelReservation(seatId: String): String? {
+        val recordId = myReservations.value.firstOrNull { it.seatId == seatId }?.id
         val result = seatApi.cancelSeat(seatId)
-        return finishCancel(result)
+        return finishCancel(result, recordId)
     }
 
     /** 按**预约记录 id** 取消（「我的预约」列表用）。 */
     suspend fun cancelReservationById(recordId: String): String? {
         val result = seatApi.cancelReservation(recordId)
-        return finishCancel(result)
+        return finishCancel(result, recordId)
     }
 
-    private suspend fun finishCancel(result: Result<Boolean>): String? {
+    private suspend fun finishCancel(result: Result<Boolean>, cancelledRecordId: String? = null): String? {
         if (result.isFailure || result.getOrNull() != true) {
             val e = result.exceptionOrNull()
             // ⚠️ 与预约路径一致：会话失效要清 token，UI 才能回到登录门禁。
@@ -636,6 +664,12 @@ class SeatViewModel @Inject constructor(
         }
         // 规则规定每天限取消 2 次，服务端无计数接口 → 本地按天累计，仅用于提示
         markCancelUsed()
+        // ⚠️ 主动取消**不是违约**：必须把它从候选里划掉，否则过了签到截止
+        //    就会被判一次违约 —— 那是对正确行为的误罚。
+        cancelledRecordId?.let { id ->
+            withContext(Dispatchers.IO) { violationTracker.markCancelled(id) }
+            reservationRepository.reloadViolations()
+        }
         refreshMyReservations()
         val q = _seatMapState.value.query ?: return null
         loadSeatsForMap(
