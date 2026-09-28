@@ -119,7 +119,9 @@ class SeatReservationRepository @Inject constructor(
         val result = seatApi.getRenegeRecords(SeatViolationLogic.TYPE_SEAT)
         result.onSuccess { list ->
             _reneges.value = list
-            withContext(Dispatchers.IO) { violationTracker.observe(list) }
+            withContext(Dispatchers.IO) {
+                violationTracker.observe(list, SeatViolationLogic.TYPE_SEAT)
+            }
         }.onFailure {
             SeatLog.w(TAG, "refresh reneges failed: ${it.message}")
         }
@@ -136,7 +138,9 @@ class SeatReservationRepository @Inject constructor(
         val result = seatApi.getRenegeRecords(SeatViolationLogic.TYPE_SEMINAR)
         result.onSuccess { list ->
             _seminarReneges.value = list
-            withContext(Dispatchers.IO) { violationTracker.observe(list) }
+            withContext(Dispatchers.IO) {
+                violationTracker.observe(list, SeatViolationLogic.TYPE_SEMINAR)
+            }
         }.onFailure {
             SeatLog.w(TAG, "refresh seminar reneges failed: ${it.message}")
         }

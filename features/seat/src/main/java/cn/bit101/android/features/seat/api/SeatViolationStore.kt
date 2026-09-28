@@ -5,7 +5,7 @@ import cn.bit101.android.features.seat.SeatViolationLogic
 import java.io.File
 
 /**
- * 「已经见过的违约条目」的小文件存储（`filesDir/seat_renege_keys`）。
+ * 「已经见过的违约条目」的小文件存储（`filesDir/seat_renege_keys_<type>`）。
  *
  * ## 只存 key，不存次数
  *
@@ -13,25 +13,35 @@ import java.io.File
  * 缓存它反而会在「服务端已经消掉一条」时显示旧数字，属于误导。
  * 这里只留「这条我已经见过」，用来判断**有没有新增**（新增才发通知）。
  *
+ * ## ⚠️ 为什么要按 `type` 分文件
+ *
+ * 座位违约（`type=1`）与研讨室违约（`type=2`）是**两份互不相干的列表**，
+ * 合用一个文件会串味：座位那批 key 写进去之后，研讨室第一次拉回来的条目
+ * 会被当成「没见过」→ 历史违约被整批当成新增通知。分成两个文件后，
+ * 每一类各自有「首次见面只建基线、不通知」的机会（见 [SeatViolationTracker.observe]）。
+ *
  * 编码在纯逻辑 [SeatViolationLogic.encode] / [SeatViolationLogic.decode]（有单测），
  * 这里只做读写这点副作用。坏了删掉即可，最坏结果是重发一次通知。
  */
 object SeatViolationStore {
 
-    private const val FILE_NAME = "seat_renege_keys"
+    private fun file(context: Context, type: Int) =
+        File(context.filesDir, "seat_renege_keys_$type")
 
-    fun read(context: Context): Set<String> =
+    fun read(context: Context, type: Int): Set<String> =
         SeatViolationLogic.decode(
-            runCatching { File(context.filesDir, FILE_NAME).readText() }.getOrNull().orEmpty()
+            runCatching { file(context, type).readText() }.getOrNull().orEmpty()
         )
 
-    fun write(context: Context, keys: Set<String>) {
-        runCatching {
-            File(context.filesDir, FILE_NAME).writeText(SeatViolationLogic.encode(keys))
-        }
+    fun write(context: Context, type: Int, keys: Set<String>) {
+        runCatching { file(context, type).writeText(SeatViolationLogic.encode(keys)) }
     }
 
-    /** 读原始文本（调试用）。 */
-    fun readRaw(context: Context): String? =
-        runCatching { File(context.filesDir, FILE_NAME).readText() }.getOrNull()
+    /**
+     * 这一类是否**建立过基线**。
+     *
+     * 判据是「文件存在」而不是「内容非空」—— 空集合也是一份有效基线
+     * （确实一条违约都没有），不能因为空就每轮都当首次。
+     */
+    fun initialized(context: Context, type: Int): Boolean = file(context, type).exists()
 }

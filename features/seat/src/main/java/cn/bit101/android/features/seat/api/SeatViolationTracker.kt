@@ -22,6 +22,14 @@ import javax.inject.Singleton
  * 界面上的次数一律用服务端返回的列表长度，本地这份 key 集合只服务于通知；
  * 所以文件丢了/坏了，最坏结果是**重发一次通知**，不会显示错数字。
  *
+ * ## ⚠️ 两条容易写错的地方（自检时发现的，别再踩）
+ *
+ * 1. **首次见面只建基线、不通知**。刚装上 App 的人，服务端列表里可能已经有几条
+ *    历史违约 —— 不区分就会一开 App 就「通知」他犯了根本没发生过的错。
+ * 2. **座位（`type=1`）与研讨室（`type=2`）的基线必须各存各的**。共用一个集合时，
+ *    座位那批 key 会让研讨室的第一次拉取「看起来已经有基线」，于是研讨室的历史违约
+ *    被整批当成新增（见 [SeatViolationStore] 的注释）。
+ *
  * ## 谁在调它
  *
  * `SeatReservationRepository.refresh()` —— App 内刷新与**组件后台刷新**都会经过那里，
@@ -32,32 +40,42 @@ class SeatViolationTracker @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
 
-    @Volatile
-    private var keys: Set<String>? = null
+    /** 按 `type` 分开的内存缓存，避免每次都读盘。 */
+    private val cache = mutableMapOf<Int, Set<String>>()
 
-    private fun known(): Set<String> {
-        keys?.let { return it }
-        val loaded = SeatViolationStore.read(context)
-        keys = loaded
-        if (loaded.isNotEmpty()) SeatLog.d(TAG) { "loaded ${loaded.size} known renege key(s)" }
-        return loaded
+    @Synchronized
+    private fun known(type: Int): Set<String> = cache.getOrPut(type) {
+        SeatViolationStore.read(context, type).also {
+            if (it.isNotEmpty()) SeatLog.d(TAG) { "type=$type known keys=${it.size}" }
+        }
     }
 
     /**
      * 用刚拉到的服务端列表更新「见过的集合」，并返回**这次才出现**的条目。
      *
-     * @return 新增的违约（为空表示没有变化）
+     * @param type 服务端的 `type`：1 = 座位、2 = 研讨室
+     * @return 新增的违约（**首次建基线时恒为空**）
      */
     @Synchronized
-    fun observe(records: List<RenegeRecord>): List<RenegeRecord> {
-        val before = known()
+    fun observe(records: List<RenegeRecord>, type: Int): List<RenegeRecord> {
+        val firstSync = !SeatViolationStore.initialized(context, type)
+        val before = known(type)
+        val after = before + records.map { it.key }
+
+        if (firstSync || after != before) {
+            cache[type] = after
+            SeatViolationStore.write(context, type, after)
+        }
+
+        if (firstSync) {
+            // 基线：记住「现在有这些」，但一条都不算新增
+            SeatLog.d(TAG) { "baseline type=$type: ${records.size} record(s), no notify" }
+            return emptyList()
+        }
+
         val fresh = SeatViolationLogic.newRecords(before, records)
         if (fresh.isEmpty()) return emptyList()
-
-        val updated = before + records.map { it.key }
-        keys = updated
-        SeatViolationStore.write(context, updated)
-        SeatLog.w(TAG, "new renege(s)=${fresh.size}, total=${records.size}")
+        SeatLog.w(TAG, "new renege type=$type fresh=${fresh.size} total=${records.size}")
 
         // 一次刷新可能同时冒出多条 —— 只发**一条**通知（固定 id，后发覆盖前发），
         // 否则会把通知栏刷屏。正文用「累计 N 次」，这才是用户要的信息。
@@ -65,18 +83,11 @@ class SeatViolationTracker @Inject constructor(
         runCatching {
             cn.bit101.android.features.notify.SeatViolationNotifier.notify(
                 context = context,
-                title = SeatViolationLogic.noticeTitle(records.size),
+                title = SeatViolationLogic.noticeTitle(records.size, type),
                 text = SeatViolationLogic.noticeText(head.label(), records.size),
             )
         }.onFailure { SeatLog.w(TAG, "notify renege failed: ${it.message}") }
         return fresh
-    }
-
-    /** 丢掉「见过的集合」（调试/排查用；正常情况下不需要）。 */
-    @Synchronized
-    fun reset() {
-        keys = emptySet()
-        SeatViolationStore.write(context, emptySet())
     }
 
     private companion object {

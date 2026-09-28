@@ -54,9 +54,16 @@ object SeatViolationLogic {
         else -> "已违约 $count 次 · 按规则预约权暂停 $SUSPEND_DAYS 天"
     }
 
+    /**
+     * 违约类别的展示名。
+     *
+     * ⚠️ 通知里必须区分 —— 把研讨室违约写成「座位违约」是在说一件没发生的事。
+     */
+    fun typeLabel(type: Int): String = if (type == TYPE_SEMINAR) "研讨室" else "座位"
+
     /** 通知标题。 */
-    fun noticeTitle(total: Int): String =
-        if (total >= LIMIT) "预约权可能已被暂停" else "座位违约 $total/$LIMIT"
+    fun noticeTitle(total: Int, type: Int = TYPE_SEAT): String =
+        if (total >= LIMIT) "预约权可能已被暂停" else "${typeLabel(type)}违约 $total/$LIMIT"
 
     /**
      * 新增违约的通知正文，如

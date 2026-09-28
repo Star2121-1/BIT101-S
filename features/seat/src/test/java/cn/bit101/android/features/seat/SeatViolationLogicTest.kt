@@ -51,6 +51,25 @@ class SeatViolationLogicTest {
         assertEquals("预约权可能已被暂停", SeatViolationLogic.noticeTitle(5))
     }
 
+    /**
+     * ⚠️ 类别词必须跟着 `type` 走：把研讨室违约写成「座位违约」，
+     * 等于通知用户一件**没发生**的事（他会去查一个不存在的座位违约）。
+     */
+    @Test
+    fun `通知标题按类别换词`() {
+        assertEquals("座位", SeatViolationLogic.typeLabel(SeatViolationLogic.TYPE_SEAT))
+        assertEquals("研讨室", SeatViolationLogic.typeLabel(SeatViolationLogic.TYPE_SEMINAR))
+        assertEquals(
+            "研讨室违约 1/5",
+            SeatViolationLogic.noticeTitle(1, SeatViolationLogic.TYPE_SEMINAR),
+        )
+        // 到上限时两句都是「预约权可能已被暂停」，不分类别（规则本身是同一句）
+        assertEquals(
+            SeatViolationLogic.noticeTitle(5, SeatViolationLogic.TYPE_SEAT),
+            SeatViolationLogic.noticeTitle(5, SeatViolationLogic.TYPE_SEMINAR),
+        )
+    }
+
     @Test
     fun `通知正文带累计与剩余`() {
         assertEquals(

@@ -164,12 +164,12 @@ object CampusPlaces {
     }
 
     /**
-     * 该地点所属校区（匹配不到校区名时返回 null）。
+     * 按**校区名**查校区（匹配不到返回 null）。
      *
      * `internal`：[MapCampus] 是地图模块内部类型，不对外暴露。
      */
-    internal fun campusOf(place: CampusPlace): MapCampus? =
-        MapCampus.ALL.firstOrNull { it.name == place.campus }
+    internal fun campusOf(campusName: String): MapCampus? =
+        MapCampus.ALL.firstOrNull { it.name == campusName }
 
     /** 「图」页的路由 —— 从别处跳过来时用（底栏页只认这个 route）。 */
     val route: String get() = PageShowOnNav.Map.toPageData().value

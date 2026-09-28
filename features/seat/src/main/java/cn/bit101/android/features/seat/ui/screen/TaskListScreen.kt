@@ -289,7 +289,9 @@ fun TaskListScreen(
                     item(key = "seminar-header") {
                         SectionHeader(
                             title = "我的研讨间预约",
-                            subtitle = "研讨间与座位共用每天 ${SeatViewModel.CANCELS_PER_DAY} 次取消额度（规则同 h5）",
+                            // ⚠️ 只说确定的事：「同属图书馆空间预约」。
+                            // 「两类是否共用每天的取消额度」服务端没有明说，别写进 UI 当结论
+                            subtitle = "与座位同属图书馆空间预约（同一后端）",
                         )
                     }
                     items(list, key = { "sem-${it.id}" }) { record ->
@@ -420,7 +422,7 @@ fun TaskListScreen(
                 Text(
                     "${record.nameMerge}\n${record.timeText()}\n\n" +
                         "将被取消。规则：每天最多取消 ${SeatViewModel.CANCELS_PER_DAY} 次" +
-                        "（与座位共用额度），今天还剩 $remainingCancels 次。"
+                        "，本机记录今天还剩 $remainingCancels 次。"
                 )
             },
             confirmButton = {

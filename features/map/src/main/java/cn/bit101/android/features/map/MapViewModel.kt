@@ -109,8 +109,7 @@ internal class MapViewModel @Inject constructor(
         if (target == null) {
             goTo(MapCampus.ALL.first())
         } else {
-            MapCampus.ALL.firstOrNull { it.name == target.campus }
-                ?.let { currentCampusState.value = it }
+            CampusPlaces.campusOf(target.campus)?.let { currentCampusState.value = it }
             scrollTo(Position(target.x, target.y, target.scale))
             pendingLabelState.value = target.name
         }
