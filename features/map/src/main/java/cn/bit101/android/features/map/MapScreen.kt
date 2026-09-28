@@ -31,6 +31,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +59,18 @@ fun MapScreen(mainController: MainController) {
     val vm: MapViewModel = hiltViewModel()
 
     val scale by vm.mapScaleFlow.collectAsState(initial = 2f)
+
+    // 从课表 / 考试那边点教室跳过来时，地图已经滚到那栋楼了 ——
+    // ⚠️ 必须给一句反馈：地图本身能拖，不说的话「定位好了」和「没跳转」看起来一样。
+    // 用 rememberSaveable 保证旋转一次不会重复弹。
+    var announcedTarget by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val label = vm.pendingLabel
+        if (!announcedTarget && label != null) {
+            announcedTarget = true
+            mainController.snackbar("已定位到$label")
+        }
+    }
 
     Box {
         // 地图界面

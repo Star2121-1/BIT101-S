@@ -48,6 +48,8 @@ dependencies {
     ksp "com.google.dagger:hilt-android-compiler:${versions.hilt}"
 
     implementation project(':features:common')
+    // 教室 → 地图定位：地点表与跳转目标都归 features:map 所有（方向 schedule → map，不成环）
+    implementation project(':features:map')
     // DDL 增删改后立刻重排提醒（方向 schedule → notify，notify 不认识 schedule，不成环）
     implementation project(':features:notify')
 }

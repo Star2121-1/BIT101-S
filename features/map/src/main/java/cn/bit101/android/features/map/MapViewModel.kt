@@ -93,8 +93,26 @@ internal class MapViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 从别处（课表 / 考试）跳过来时要定位的**地点名**；null 表示没有待定位目标。
+     *
+     * 地图能拖，跳过去不给反馈的话用户分不清「定位了」和「没反应」，
+     * 所以 `MapScreen` 会拿它弹一次提示条。
+     */
+    private val pendingLabelState = mutableStateOf<String?>(null)
+    val pendingLabel: String? get() = pendingLabelState.value
+
     init {
-        // 进页面默认落在第一个校区（改版前是良乡，见 MapCampus.ALL 的顺序约定）
-        goTo(MapCampus.ALL.first())
+        // 别的页面请求过定位（点课表里的教室）→ 直接落在那栋楼；
+        // 否则进页面默认落在第一个校区（见 MapCampus.ALL 的顺序约定）
+        val target = MapTargetHolder.consume()
+        if (target == null) {
+            goTo(MapCampus.ALL.first())
+        } else {
+            MapCampus.ALL.firstOrNull { it.name == target.campus }
+                ?.let { currentCampusState.value = it }
+            scrollTo(Position(target.x, target.y, target.scale))
+            pendingLabelState.value = target.name
+        }
     }
 }

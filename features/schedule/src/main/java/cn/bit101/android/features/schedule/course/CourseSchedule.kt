@@ -16,12 +16,34 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.data.database.entity.CustomScheduleEntity
+import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.component.schedule.AddEditScheduleDialog
 import cn.bit101.android.features.common.component.schedule.CustomScheduleDetailDialog
 import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.common.nav.NavDest
+import cn.bit101.android.features.map.CampusPlaces
+import cn.bit101.android.features.map.MapTargetHolder
 import java.time.LocalDateTime
+
+/**
+ * 教室 / 考场字符串 → 跳到地图并定位到那栋楼。
+ *
+ * ⚠️ 匹配不到时**明说「暂未收录」**，而不是退回到「跳到校区中心」糊弄过去 ——
+ * 地点表只覆盖良乡与中关村（珠海 / 嘉兴在 OSM 上没有可信的建筑坐标），
+ * 指错楼比不指更糟。
+ */
+private fun locateOnMap(mainController: MainController, raw: String) {
+    val place = CampusPlaces.match(raw)
+    if (place == null) {
+        val name = raw.trim().let { if (it.length > 12) it.take(12) + "…" else it }
+        mainController.snackbar(if (name.isEmpty()) "这个地点没有写教室" else "暂未收录「$name」的位置")
+        return
+    }
+    // 坐标先放进中转（底栏页跳转只带 route，传不了参数），再请求切到「图」页
+    MapTargetHolder.request(MapTargetHolder.from(place))
+    GotoRequest.request(CampusPlaces.route)
+}
 
 /**
  * @author flwfdd
@@ -238,7 +260,8 @@ internal fun CourseSchedule(
                     // 课程详情对话框
                     CourseScheduleDetailDialog(
                         course = showCourseDetailState!!,
-                        onDismiss = vm::clearShowCourseDetail
+                        onDismiss = vm::clearShowCourseDetail,
+                        onLocate = { locateOnMap(mainController, it) },
                     )
                 }
                 if(showExamList) {
@@ -259,7 +282,8 @@ internal fun CourseSchedule(
                     ExamScheduleDetailDialog(
                         exam = showExamDetailState!!,
                         onDismiss = vm::clearShowExamDetail,
-                        onAddToCalendar = { vm.addScheduleToSysCalendar(context, it) }
+                        onAddToCalendar = { vm.addScheduleToSysCalendar(context, it) },
+                        onLocate = { locateOnMap(mainController, it) },
                     )
                 }
                 if(showCustomScheduleState != null) {
