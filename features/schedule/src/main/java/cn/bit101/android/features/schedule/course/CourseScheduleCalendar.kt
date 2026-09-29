@@ -38,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -91,7 +90,7 @@ internal fun CourseScheduleCalendar(
     // 配色方案, 为支持可变配色方案, 写在 Compose 层 (其实是因为不让写在 ViewModel 层 XP)
     val colorScheme = MaterialTheme.colorScheme
     val scheduleItemColors = remember(colorScheme) {
-        arrayOf(
+        listOf(
             // 此处顺序和枚举顺序对应
             // 课程
             ScheduleItemColor(
@@ -128,6 +127,20 @@ internal fun CourseScheduleCalendar(
                 ),
             ),
         )
+    }
+
+    // 调休那两天的卡片换色调（见 ScheduleItemTint）：
+    // **放假 → 灰**（日程还在，但表示「这天不上」）、**补课 → 第三色**（这是借来的课表）。
+    // ⚠️ 靠拢程度刻意给得不低：淡一点就看不出来了，那这个功能就白做
+    val holidayItemColors = remember(scheduleItemColors, colorScheme) {
+        scheduleItemColors.map {
+            it.tinted(colorScheme.surfaceVariant, colorScheme.onSurfaceVariant, HOLIDAY_TINT)
+        }
+    }
+    val makeUpItemColors = remember(scheduleItemColors, colorScheme) {
+        scheduleItemColors.map {
+            it.tinted(colorScheme.tertiaryContainer, colorScheme.onTertiaryContainer, MAKEUP_TINT)
+        }
     }
 
     var boxSize by remember { mutableStateOf(IntSize.Zero) }
@@ -252,9 +265,16 @@ internal fun CourseScheduleCalendar(
                     // 用下标反推日期会掩盖这件事
                     val day = column.date
 
+                    // 这一列的卡片用哪套色：放假 → 灰、补课 → 第三色、其余照常
+                    val itemColors =
+                        when (CourseScheduleAdjustmentLogic.tintOf(column.plan)) {
+                            ScheduleItemTint.Normal -> scheduleItemColors
+                            ScheduleItemTint.Holiday -> holidayItemColors
+                            ScheduleItemTint.MakeUp -> makeUpItemColors
+                        }
+
                     // 用于高亮今日 改变颜色
-                    // ⚠️ 放假列用更淡的底色：那一列是**空的**（学校无教学安排），
-                    //    不区分的话看着像渲染坏了
+                    // ⚠️ 放假列用更淡的底色：那天的卡片已经被「灰化」，底色再亮会打架
                     var containerColor = if (column.plan == DayPlan.NoClass) {
                         MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
                     } else {
@@ -301,6 +321,9 @@ internal fun CourseScheduleCalendar(
                                     )
                                 ) + (badge?.let { "\n$it" } ?: ""),
                                 style = MaterialTheme.typography.labelSmall.copy(lineHeight = MaterialTheme.typography.labelSmall.lineHeight * 0.75),
+                                // 放假列的日期也跟着转灰，整列才像是「同一种状态」
+                                color = if (column.plan == DayPlan.NoClass) colorScheme.onSurfaceVariant
+                                else LocalContentColor.current,
                                 textAlign = TextAlign.Center,
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis
@@ -324,7 +347,7 @@ internal fun CourseScheduleCalendar(
                                 if (settingData.showBorder) {
                                     modifier = modifier.border(
                                         1.dp,
-                                        scheduleItemColors[it.color.ordinal].boarderColor,
+                                        itemColors[it.color.ordinal].boarderColor,
                                         shape = CardDefaults.shape
                                     )
                                 }
@@ -336,7 +359,7 @@ internal fun CourseScheduleCalendar(
                                         .clickable(onClick = it.onClick),
                                     week = week,
                                     item = it,
-                                    color = scheduleItemColors[it.color.ordinal],
+                                    color = itemColors[it.color.ordinal],
                                 )
                             }
                         }
@@ -452,8 +475,11 @@ internal fun CourseScheduleCalendar(
     }
 }
 
-internal data class ScheduleItemColor(
-    val boarderColor : Color,
-    val containerColor : Color,
-    val contextColor : Color,
-)
+/**
+ * 放假列 / 补课列的卡片朝「目标色」靠拢的程度。
+ *
+ * ⚠️ 这两个数就是「这个功能到底看不看得出来」的开关：给低了等于没做
+ * （所以别为了「柔和」随手调小）。颜色本身见 [ScheduleItemTint]。
+ */
+private const val HOLIDAY_TINT = 0.85f
+private const val MAKEUP_TINT = 0.6f

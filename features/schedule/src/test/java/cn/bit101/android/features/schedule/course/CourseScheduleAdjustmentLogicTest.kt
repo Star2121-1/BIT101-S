@@ -84,8 +84,14 @@ class CourseScheduleAdjustmentLogicTest {
         assertEquals("按周四", CourseScheduleAdjustmentLogic.badgeText(columns[5].plan))
     }
 
+    /**
+     * ⚠️ **放假不藏课**（2026-09-30 用户要求：「放假的那一天的课程变一种颜色以作区分」）。
+     * 藏掉会让人以为「这天本来就没课」，连这一周的进度都看不出来。
+     * 要的是**看得见、但一眼知道不作数** ⇒ 数据层原样保留，由
+     * [ScheduleItemTint.Holiday] 把它画成灰的。
+     */
     @Test
-    fun `放假隐藏学校下发的课程，但保留用户自己的日程`() {
+    fun `放假保留全部日程，区分交给配色`() {
         val columns = CourseScheduleAdjustmentLogic.applyWeek(
             byWeekday = byWeekday(
                 item(4, "操作系统"),                                  // 教务课程
@@ -97,8 +103,29 @@ class CourseScheduleAdjustmentLogicTest {
         )
         val holiday = columns[3]          // 10/08 周四
         assertEquals(DayPlan.NoClass, holiday.plan)
-        assertEquals(listOf("买火车票"), holiday.items.map { it.title })
+        assertEquals(
+            listOf("操作系统", "高等数学", "买火车票"),
+            holiday.items.map { it.title },
+        )
         assertEquals("放假", CourseScheduleAdjustmentLogic.badgeText(holiday.plan))
+        assertEquals(
+            ScheduleItemTint.Holiday,
+            CourseScheduleAdjustmentLogic.tintOf(holiday.plan),
+        )
+    }
+
+    /** 覆盖 → 色调的映射：放假转灰、补课转第三色、没覆盖照常。 */
+    @Test
+    fun `色调映射`() {
+        assertEquals(ScheduleItemTint.Normal, CourseScheduleAdjustmentLogic.tintOf(null))
+        assertEquals(
+            ScheduleItemTint.Holiday,
+            CourseScheduleAdjustmentLogic.tintOf(DayPlan.NoClass),
+        )
+        assertEquals(
+            ScheduleItemTint.MakeUp,
+            CourseScheduleAdjustmentLogic.tintOf(DayPlan.MakeUp(4)),
+        )
     }
 
     /** 补课日：被指定那天的**课程/考试** + 该日**自己的自定义日程**。 */
@@ -149,7 +176,7 @@ class CourseScheduleAdjustmentLogicTest {
             CourseScheduleAdjustmentLogic.describe(LocalDate.of(2026, 10, 10), DayPlan.MakeUp(4)),
         )
         assertEquals(
-            "10/1（周四）放假，无教学安排",
+            "10/1（周四）放假，当天的课不上",
             CourseScheduleAdjustmentLogic.describe(LocalDate.of(2026, 10, 1), DayPlan.NoClass),
         )
     }
