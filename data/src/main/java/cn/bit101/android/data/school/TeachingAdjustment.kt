@@ -40,6 +40,19 @@ data class TeachingAdjustmentEntry(
 data class TeachingNotice(val title: String, val url: String)
 
 /**
+ * 一次取数的完整结果。
+ *
+ * ⚠️ [notices] 是**所有**教学安排调整通知，含**没能解析出日期**的那些 ——
+ * 那几条也要让用户看到（附原文链接），否则「学校发了通知但 App 没反应」无法解释。
+ * [entries] 才是能落到课表上的东西。
+ */
+data class TeachingAdjustments(
+    val entries: List<TeachingAdjustmentEntry>,
+    val notices: List<TeachingNotice>,
+    val fetchedAtMillis: Long,
+)
+
+/**
  * 教学安排调整的**纯解析逻辑**（不依赖 Android，可单测）。
  *
  * ## 数据来源

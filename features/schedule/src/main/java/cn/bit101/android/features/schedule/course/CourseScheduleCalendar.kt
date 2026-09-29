@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
+import cn.bit101.android.data.school.DayPlan
 import cn.bit101.android.features.common.utils.getCurrentTime
 import cn.bit101.android.features.common.utils.mixColor
 import java.time.LocalDate
@@ -65,9 +66,12 @@ import kotlin.math.roundToInt
 
 @Composable
 internal fun CourseScheduleCalendar(
-    schedules: List<List<ScheduleItem>>,
+    /**
+     * 当周的 7 列。**已套过「教学安排调整」**（放假隐藏、补课装被指定那天的课表）——
+     * 所以这里既不要重算星期几，也不要假设「第 0 列就是周一」。
+     */
+    columns: List<DayColumn>,
     week: Int,
-    firstDay: LocalDate,
     settingData: SettingData,
     timeTable: TimeTable,
 
@@ -241,14 +245,21 @@ internal fun CourseScheduleCalendar(
                 }
 
                 // 遍历每一天
-                schedules.forEachIndexed { index, schedules ->
+                columns.forEachIndexed { index, column ->
                     if (!settingData.showSaturday && index == 5) return@forEachIndexed
                     if (!settingData.showSunday && index == 6) return@forEachIndexed
-                    // 计算星期和日期
-                    val day = firstDay.plusDays((week - 1) * 7 + index.toLong())
+                    // 日期由「列」自带：已套过调休（10/10 周六要显示周四的课），
+                    // 用下标反推日期会掩盖这件事
+                    val day = column.date
 
                     // 用于高亮今日 改变颜色
-                    var containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    // ⚠️ 放假列用更淡的底色：那一列是**空的**（学校无教学安排），
+                    //    不区分的话看着像渲染坏了
+                    var containerColor = if (column.plan == DayPlan.NoClass) {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    }
                     var columnModifier = Modifier
                         .fillMaxHeight()
                         .weight(1f)
@@ -279,22 +290,26 @@ internal fun CourseScheduleCalendar(
                                     )
                                 )
                         ) {
+                            // 调休角标：放假 / 按周X。**没有覆盖就不显示**（不猜）
+                            val badge = CourseScheduleAdjustmentLogic.badgeText(column.plan)
                             Text(
-                                text = ("周${index + 1}\n" + ((day?.format(
+                                // ⚠️ 星期几取自**日期本身**，不用列下标推断 ——
+                                //    补课那一列（10/10 周六装的是周四的课）不能显示成「周4」
+                                text = "周${day.dayOfWeek.value}\n" + day.format(
                                     DateTimeFormatter.ofPattern(
                                         "MM/dd"
                                     )
-                                )) ?: "")),
+                                ) + (badge?.let { "\n$it" } ?: ""),
                                 style = MaterialTheme.typography.labelSmall.copy(lineHeight = MaterialTheme.typography.labelSmall.lineHeight * 0.75),
                                 textAlign = TextAlign.Center,
-                                maxLines = 2,
+                                maxLines = 3,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
 
                         // 遍历一天的每一节课
                         var i = 0.0f // 节次游标, 精确值
-                        schedules.forEach {
+                        column.items.forEach {
                             if (it.startSection >= i
                                 && it.endSection <= courseNumOfDay
                                 && it.endSection > it.startSection + 0.05    // 少数情况下日程会被夹扁 (特别是自定义日程), 此时就干脆不显示了

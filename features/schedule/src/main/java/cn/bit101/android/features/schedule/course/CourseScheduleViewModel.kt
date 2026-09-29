@@ -10,6 +10,9 @@ import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.CustomScheduleEntity
 import cn.bit101.android.data.database.entity.ExamScheduleEntity
 import cn.bit101.android.data.repo.base.CoursesRepo
+import cn.bit101.android.data.repo.base.TeachingAdjustmentRepo
+import cn.bit101.android.data.school.TeachingAdjustmentLogic
+import cn.bit101.android.data.school.TeachingAdjustments
 import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.common.helper.withScope
 import cn.bit101.android.features.common.helper.withSimpleStateLiveData
@@ -46,10 +49,21 @@ internal data class SettingData(
 @HiltViewModel
 internal class CourseScheduleViewModel @Inject constructor(
     private val coursesRepo: CoursesRepo,
-    private val courseScheduleSettings: CourseScheduleSettings
+    private val courseScheduleSettings: CourseScheduleSettings,
+    private val teachingAdjustmentRepo: TeachingAdjustmentRepo,
 ) : ViewModel() {
-    private val _schedules = MutableStateFlow<List<List<ScheduleItem>>>(emptyList())
-    val schedules: StateFlow<List<List<ScheduleItem>>> = _schedules.asStateFlow()
+    /**
+     * 当周的列（7 天）。**已经套过「教学安排调整」**（放假隐藏、补课按指定星期的课表）。
+     *
+     * ⚠️ 之所以不是「按星期几分好的日程」，就是因为调休：学校的循环模板表达不了
+     * 「10/10 周六按周四上课」，必须在**列**这一层重排。
+     */
+    private val _columns = MutableStateFlow<List<DayColumn>>(emptyList())
+    val columns: StateFlow<List<DayColumn>> = _columns.asStateFlow()
+
+    /** 教学安排调整（含原文链接）；`null` = 还没取到（≠ 没有调整）。 */
+    private val _adjustments = MutableStateFlow<TeachingAdjustments?>(null)
+    val adjustments: StateFlow<TeachingAdjustments?> = _adjustments.asStateFlow()
 
     val firstDayFlow = courseScheduleSettings.firstDay.flow
 
@@ -181,6 +195,9 @@ internal class CourseScheduleViewModel @Inject constructor(
     }
 
     init {
+        // 教学安排调整（放假 / 调休 / 补课）：进页面拉一次，失败静默降级
+        refreshAdjustments()
+
         // 考试列表用的全量数据（与课表色块那个开关无关）
         withScope {
             coursesRepo.getExamsFromLocal().collect { _allExams.value = it }
@@ -194,7 +211,7 @@ internal class CourseScheduleViewModel @Inject constructor(
             }
         }
 
-        // 课表、考试安排、周数、学期开始日期、时间表、自定义日程改变
+        // 课表、考试安排、周数、学期开始日期、时间表、**教学安排调整**改变
         withScope {
             combine(
                 // combine 至多比较方便地组合 5 个参数, 所以额外打包一次
@@ -208,7 +225,8 @@ internal class CourseScheduleViewModel @Inject constructor(
                 weekFlow,
                 firstDayFlow,
                 timeTableStringFlow,
-            ) { schedules, week, firstDay, timeTable ->
+                _adjustments,
+            ) { schedules, week, firstDay, timeTable, adjustments ->
                 val courses = schedules.first
                 val exams = schedules.second
                 val customSchedules = schedules.third
@@ -272,10 +290,33 @@ internal class CourseScheduleViewModel @Inject constructor(
                     )
                 }
 
-                _schedules.value = convertWeekSchedules(
-                    weekExamSchedules + weekCourseSchedules + weekCustomSchedules
+                // ⚠️ 最后一步才套「教学安排调整」：
+                //    放假 → 隐藏学校下发的日程；补课 → 装**被指定那天**的课表。
+                //    认不出覆盖的日子 planOf 返回 null，原样照旧（绝不猜）。
+                _columns.value = CourseScheduleAdjustmentLogic.applyWeek(
+                    byWeekday = convertWeekSchedules(
+                        weekExamSchedules + weekCourseSchedules + weekCustomSchedules
+                    ),
+                    weekFirstDate = weekFirstDate,
+                    planOf = { date ->
+                        adjustments?.let { TeachingAdjustmentLogic.planOf(it.entries, date) }
+                    },
                 )
             }.collect()
+        }
+    }
+
+    /**
+     * 拉一次「教学安排调整」（放假 / 调休 / 补课）。
+     *
+     * ⚠️ **失败静默降级**：取不到就保持现状（[TeachingAdjustmentRepo] 内部会退回缓存），
+     * 课表该怎么显示还怎么显示，不弹错误 ——「拿不到调休」只是少了个增强。
+     *
+     * @param force 跳过缓存直接联网（下拉刷新用）。
+     */
+    fun refreshAdjustments(force: Boolean = false) {
+        withScope {
+            _adjustments.value = teachingAdjustmentRepo.load(force)
         }
     }
 

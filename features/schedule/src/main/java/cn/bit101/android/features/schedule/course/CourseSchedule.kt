@@ -3,11 +3,21 @@ package cn.bit101.android.features.schedule.course
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EventNote
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
@@ -16,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.data.database.entity.CustomScheduleEntity
+import cn.bit101.android.data.school.TeachingAdjustmentEntry
 import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.component.schedule.AddEditScheduleDialog
@@ -64,9 +75,12 @@ internal fun CourseSchedule(
     val term by vm.currentTermFlow.collectAsState(initial = null)
 
     /**
-     * 日程数据
+     * 日程数据（7 列，**已套过「教学安排调整」**）
      */
-    val schedules by vm.schedules.collectAsState()
+    val columns by vm.columns.collectAsState()
+
+    /** 教学安排调整（放假 / 调休 / 补课）；`null` = 还没取到 */
+    val adjustments by vm.adjustments.collectAsState()
 
     /**
      * 当前周
@@ -240,11 +254,17 @@ internal fun CourseSchedule(
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
+                // 教学安排调整（放假 / 调休）：只在**本周确实受影响**时出现
+                AdjustmentBanner(
+                    entries = adjustments?.entries.orEmpty(),
+                    columns = columns,
+                    onOpenSource = { url -> mainController.openWebPage(url) },
+                )
+
                 // 日程表
                 CourseScheduleCalendar(
-                    schedules = schedules,
+                    columns = columns,
                     week = week,
-                    firstDay = firstDay!!,
                     timeTable = timeTable!!,
                     settingData = settingData,
 
@@ -313,6 +333,60 @@ internal fun CourseSchedule(
                         onDismiss = { showAddScheduleDialog = false },
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 「教学安排调整」提示条（放假 / 调休 / 补课）。
+ *
+ * ## 为什么只在「当周受影响」时出现
+ * 调休是**最容易记错、记错就缺课**的事，所以那几天必须显眼；但一学期只有 2~4 次，
+ * 平时常驻一行反而变成噪音。所以：本周没有覆盖 → **完全不占位置**。
+ *
+ * 文案里的日期与说明都来自 [CourseScheduleAdjustmentLogic]，
+ * 「原文」按钮直接把学校通知原文交给调用方去打开 —— 用户能自己核对，
+ * 不用只信我们的结论。
+ */
+@Composable
+private fun AdjustmentBanner(
+    entries: List<TeachingAdjustmentEntry>,
+    columns: List<DayColumn>,
+    onOpenSource: (String) -> Unit,
+) {
+    val affected = columns.mapNotNull { c -> c.plan?.let { c.date to it } }
+    if (affected.isEmpty()) return
+
+    val text = affected.joinToString("；") { (date, plan) ->
+        CourseScheduleAdjustmentLogic.describe(date, plan)
+    }
+    val sourceUrl = affected.firstNotNullOfOrNull { (date, _) ->
+        entries.firstOrNull { it.date == date }?.sourceUrl
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+        ) {
+            Icon(
+                Icons.Default.EventNote,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            if (sourceUrl != null) {
+                TextButton(onClick = { onOpenSource(sourceUrl) }) { Text("原文") }
             }
         }
     }

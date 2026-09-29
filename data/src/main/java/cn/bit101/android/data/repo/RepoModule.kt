@@ -42,6 +42,17 @@ internal abstract class RepoModule {
         libBorrowRepo: DefaultLibBorrowRepo
     ): LibBorrowRepo
 
+    /**
+     * 教学安排调整（放假 / 调休 / 补课）—— 课表页按日覆盖的来源。
+     *
+     * 数据源是 `jxzx.bit.edu.cn`（教学运行与考务中心），**免登录**。
+     */
+    @Binds
+    @Singleton
+    abstract fun bindTeachingAdjustmentRepo(
+        teachingAdjustmentRepo: DefaultTeachingAdjustmentRepo
+    ): TeachingAdjustmentRepo
+
     @Binds
     @Singleton
     abstract fun bindVersionRepo(
