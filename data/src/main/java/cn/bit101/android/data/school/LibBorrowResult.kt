@@ -25,6 +25,4 @@ sealed interface LibBorrowResult {
     /** 有数据就取、没有就 null（给不关心原因的调用方）。 */
     val recordsOrNull: List<BorrowRecord>? get() = (this as? Ok)?.records
 
-    /** 已登录且取到了才算「确定」，否则 null —— 通知去重必须用这个。 */
-    val confidentCount: Int? get() = (this as? Ok)?.records?.size
 }

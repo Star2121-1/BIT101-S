@@ -3,6 +3,7 @@ package cn.bit101.android.features.common
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+
 /**
  * 从外部（桌面组件点条目 / 通知）发起的「打开 App 并跳到指定位置」请求。
  *
@@ -105,8 +106,4 @@ object GotoRequest {
         _focus.value = next.takeIf { it.tab != null || !it.key.isNullOrBlank() }
     }
 
-    /** 清掉整个聚焦请求（确认不用处理时调用）。 */
-    fun clearFocus() {
-        _focus.value = null
-    }
 }

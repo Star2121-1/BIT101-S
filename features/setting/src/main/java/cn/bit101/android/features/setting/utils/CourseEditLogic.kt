@@ -6,6 +6,7 @@ import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.schedule.CourseOverlayLogic
 import cn.bit101.android.data.schedule.CourseOverlayLogic.withDisplay
 
+
 /**
  * 「手动修改课程表」页的**纯逻辑**（无 Android 依赖，单测锁）。
  *
@@ -156,24 +157,6 @@ object CourseEditLogic {
         department = course.department,
         description = course.description,
         number = course.number,
-    )
-
-    fun overlayToForm(overlay: CourseOverlayEntity) = CourseForm(
-        name = overlay.name,
-        teacher = overlay.teacher,
-        classroom = overlay.classroom,
-        weeks = displayWeeks(overlay.weeks),
-        weekday = overlay.weekday,
-        startSection = overlay.startSection,
-        endSection = overlay.endSection,
-        campus = overlay.campus,
-        credit = overlay.credit,
-        hour = overlay.hour,
-        type = overlay.type,
-        category = overlay.category,
-        department = overlay.department,
-        description = overlay.description,
-        number = overlay.number,
     )
 
     /**

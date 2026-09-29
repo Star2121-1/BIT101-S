@@ -24,8 +24,6 @@ import androidx.compose.ui.unit.dp
 
 public object MotionConstants {
     public const val DefaultMotionDuration: Int = 300
-    public const val DefaultFadeInDuration: Int = 150
-    public const val DefaultFadeOutDuration: Int = 75
     public val DefaultSlideDistance: Dp = 30.dp
 
     public val EmphasizedDecelerate: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)

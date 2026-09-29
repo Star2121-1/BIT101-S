@@ -4,25 +4,21 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.navigation.NavHostController
 import androidx.navigation.NavOptionsBuilder
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navOptions
 import cn.bit101.android.features.common.component.image.ImageHostState
 import cn.bit101.android.features.common.component.snackbar.SnackbarState
 import cn.bit101.android.features.common.helper.ImageData
 import cn.bit101.android.features.common.nav.NavDest
-import cn.bit101.android.features.common.nav.NavDestConfig
 import cn.bit101.android.features.common.nav.navigate
 import cn.bit101.api.model.common.Image
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+
 
 class MainController(
     val scope: CoroutineScope,
@@ -35,16 +31,6 @@ class MainController(
 
     fun navigate(dest: NavDest, builder: NavOptionsBuilder.() -> Unit) =
         navController.navigate(dest, navOptions(builder))
-
-    @Composable
-    fun currentDestConfigAsState(): State<NavDestConfig?> {
-        return navController.currentBackStackEntryFlow.map {
-            NavDestConfig.fromRoute(it.destination.route)
-        }.collectAsState(initial = null)
-    }
-
-    val startDestId: Int
-        get() = navController.graph.startDestinationId
 
     fun popBackStack() = navController.popBackStack()
 

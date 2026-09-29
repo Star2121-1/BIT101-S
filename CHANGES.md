@@ -1,5 +1,30 @@
 # CHANGES
 
+## 未发布（随下次发版并入）
+
+### 清理死代码 —— 删约 420 行，**无行为变化**
+
+用 `.workbuddy/archive/tools/deadscan.py` 扫出「声明了但全仓零引用」的符号，逐个复核后删除。
+单测 **614 条 0 失败**，与清理前完全一致。
+
+| 位置 | 删掉的东西 |
+|---|---|
+| `features/theme/Type.kt` | **整文件**（34 行）：Android Studio 新建 Compose 项目的模板残留，定义了 `Typography`，但 `MaterialTheme` 只传了 `colorScheme`、从未传 `typography` —— 等于没接上 |
+| `features/theme/Theme.kt` | 4 个从未使用的对比度配色方案 + `ColorFamily` + `unspecified_scheme`（166 行），320 → 154 行 |
+| `features/theme/Color.kt` | Medium/HighContrast 四组共 140 行，221 → 76 行 |
+| `SeatViewModel` | `clearAuthNotice` / `openSeatMapForReserve` |
+| `MainController` | `currentDestConfigAsState` / `startDestId` |
+| `WidgetLogic` | `DDL_HORIZON_DAYS` —— 自己就写着 `@Deprecated`「保留只为兼容旧引用」，而**一个旧引用都没有** |
+| 其余 | `MotionConstants` 两个淡入淡出常量、`Arguments.NavBarHeight`、`LibBorrowResult.confidentCount`、`CourseEditLogic.overlayToForm`、`MaterialSharedAxis.rememberSlideDistance`、`GotoRequest.clearFocus` |
+
+**刻意保留**（扫描会报，但**不是**死代码，别再删）：
+
+- `ScheduleTabs.FREE_CLASSROOM` / `TRANSPORT` —— 组件跳转的**下标契约**，KDoc 明说「改 tab 顺序必须同步改这里」
+- `MaterialSharedAxis` 的 Y 轴变体 —— 与 X/Z 成组的工具 API，砍一半反而是折腾
+- `api/` 下与上游**逐字节相同**的文件（`Orders.kt`、`Object.kt`、`Fliters.kt`）—— 保持与上游一致，还要提 PR
+- 数据模型里未用的字段 —— 供序列化/解析，删掉等于丢掉 API 形状文档
+- 所有 `*Preview` 组合函数与 `src/test` 下的测试类
+
 ## 2026-09-29 v1.9.28 修：课表页签被挤成省略号「…」（字显示不全）
 
 - 现象：课表顶部五个页签（课表 / DDL / 动态 / 空教室 / 交通）**全部显示成 `…`**

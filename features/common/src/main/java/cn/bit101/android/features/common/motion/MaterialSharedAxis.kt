@@ -33,8 +33,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 
@@ -44,16 +42,6 @@ import androidx.compose.ui.unit.Dp
  *
  * @param slideDistance Value to the slide distance dimension, 30dp by default.
  */
-@Composable
-public fun rememberSlideDistance(
-    slideDistance: Dp = MotionConstants.DefaultSlideDistance,
-): Int {
-    val density = LocalDensity.current
-    return remember(density, slideDistance) {
-        with(density) { slideDistance.roundToPx() }
-    }
-}
-
 private const val ProgressThreshold = 0.35f
 
 private val Int.ForOutgoing: Int

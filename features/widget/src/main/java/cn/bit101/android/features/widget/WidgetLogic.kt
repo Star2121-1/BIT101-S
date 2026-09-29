@@ -3,9 +3,7 @@ package cn.bit101.android.features.widget
 import cn.bit101.android.config.setting.base.AppRoutes
 import cn.bit101.android.config.setting.base.PageShowOnNav
 import cn.bit101.android.config.setting.base.TimeTable
-import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.config.setting.base.courseTimeText
-import cn.bit101.android.config.setting.base.hm
 import cn.bit101.android.config.common.FocusKeys
 import cn.bit101.android.config.setting.base.ScheduleTabs
 import cn.bit101.android.config.setting.base.sectionEnd
@@ -19,6 +17,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.temporal.ChronoUnit
+
 
 /**
  * 小组件的数据模型。
@@ -207,11 +206,6 @@ data class DayChoice(
  * 输出 [WidgetData]，**不读取系统时间之外的外部状态**（[now] 显式传入，便于测试）。
  */
 object WidgetLogic {
-
-    /** DDL 页最多往前看多少天内的到期项 */
-    /** @deprecated DDL 不再限制时间范围（用户要求显示全部）；保留常量只为兼容旧引用。 */
-    @Deprecated("DDL 不再限时")
-    const val DDL_HORIZON_DAYS = 14L
 
     /** 剩余时间少于该阈值标记为 urgent（UI 层高亮） */
     const val URGENT_HOURS = 24L

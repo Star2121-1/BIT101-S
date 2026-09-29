@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import javax.inject.Inject
 
+
 /** 座位图当前的查询参数，用于取消预约后按同样条件重新加载（避免日期/时段被回落值覆盖）。 */
 data class SeatQuery(
     val areaId: String,
@@ -101,8 +102,6 @@ class SeatViewModel @Inject constructor(
     /** 会话失效提示。null 表示无提示。 */
     private val _authNotice = MutableStateFlow<String?>(null)
     val authNotice: StateFlow<String?> = _authNotice.asStateFlow()
-
-    fun clearAuthNotice() { _authNotice.value = null }
 
     /**
      * 学校要求短信二次验证时的挑战状态。
@@ -248,12 +247,6 @@ class SeatViewModel @Inject constructor(
     fun preparePick(mode: SeatPickMode) {
         _pickMode.value = mode
         _pickedSeats.value = emptyList()
-    }
-
-    /** 单次预约路径：重置为预约语义。 */
-    fun openSeatMapForReserve(areaId: String, day: String) {
-        _pickMode.value = SeatPickMode.RESERVE
-        openSeatMap(areaId, day)
     }
 
     /**
