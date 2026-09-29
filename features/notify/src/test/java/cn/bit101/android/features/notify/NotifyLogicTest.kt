@@ -856,4 +856,128 @@ class NotifyLogicTest {
         assertNull(NotifyLogic.examDateOfKey("exam:MA10001:not-a-date:1d"))
         assertNull(NotifyLogic.examDateOfKey(""))
     }
+    // -------------------------------------- 到点校正：迟到的提醒不能说谎、不该发的就别发
+
+    /**
+     * ⚠️ 这是**实机事故的回归测试**（2026-09-29 用户截图）：
+     * 13:20 的课，排期时刻 13:10 写死标题「10 分钟后上课」；
+     * 那天下午设备在休眠/免打扰，WorkManager 被拖到 **15:33** 才跑 ——
+     * 于是**下课后 38 分钟**弹出一条「10 分钟后上课」。
+     * 二次校验只拦了「换了一天」，从没拦「课已经开始」。
+     */
+    @Test
+    fun `课已开始就不再补发 —— 下课后再弹 10 分钟后上课 比不弹更糟`() {
+        val at = LocalDateTime.of(2026, 9, 29, 13, 10)
+        assertNull(NotifyLogic.classLeadAtFireTime(at, 10, LocalDateTime.of(2026, 9, 29, 15, 33)))
+    }
+
+    /** 上课那一秒起就算「已开始」；早一分钟仍要发（提前 10 分钟 → 还剩 1 分钟）。 */
+    @Test
+    fun `上课时刻是补发的截止线`() {
+        val at = LocalDateTime.of(2026, 9, 29, 13, 10)
+        val start = LocalDateTime.of(2026, 9, 29, 13, 20)
+        assertNull(NotifyLogic.classLeadAtFireTime(at, 10, start))
+        assertEquals(1L, NotifyLogic.classLeadAtFireTime(at, 10, start.minusMinutes(1)))
+    }
+
+    /** 迟到但没迟到过头：标题要按**实际剩余分钟**重算，不能沿用排期时的数字。 */
+    @Test
+    fun `迟到的提醒按实际剩余分钟重算标题`() {
+        val at = LocalDateTime.of(2026, 9, 29, 13, 10)
+        val now = LocalDateTime.of(2026, 9, 29, 13, 16)   // 迟了 6 分钟
+        val left = NotifyLogic.classLeadAtFireTime(at, 10, now)!!
+        assertEquals(4L, left)
+        assertEquals("4 分钟后上课", NotifyLogic.classTitle(left))
+    }
+
+    /** 提前量跨零点时，上课时刻要看 `at + 提前量`，不能拿提醒时刻的日期糊弄。 */
+    @Test
+    fun `提前量跨零点也按上课时刻判断`() {
+        val at = LocalDateTime.of(2026, 9, 29, 23, 55)     // 次日 00:05 的课、提前 10 分钟
+        assertEquals(10L, NotifyLogic.classLeadAtFireTime(at, 10, at))
+        assertNull(NotifyLogic.classLeadAtFireTime(at, 10, LocalDateTime.of(2026, 9, 30, 0, 5)))
+    }
+
+    /**
+     * ⚠️ 与上课 / 考试**方向相反**：座位签到「发现得晚也必须立刻补发」
+     * （错过签到记一次违约、累计 5 次暂停 7 天），所以过了截止**照样发**，
+     * 只是标题要换成实话。
+     */
+    @Test
+    fun `座位过了签到截止照样要发，只是标题换成实话`() {
+        val deadline = LocalDateTime.of(2026, 9, 29, 11, 3)
+        assertTrue(NotifyLogic.seatLeadAtFireTime(deadline, deadline.plusMinutes(20)) < 0)
+        assertEquals(
+            "签到即将截止",
+            NotifyLogic.seatTitle(NotifyLogic.seatLeadAtFireTime(deadline, deadline.plusMinutes(20))),
+        )
+        assertEquals(5L, NotifyLogic.seatLeadAtFireTime(deadline, deadline.minusMinutes(5)))
+        assertEquals("5 分钟后截止签到", NotifyLogic.seatTitle(5))
+    }
+
+    /** 考试**过了时刻就不补发**（迟到 20 分钟才说「马上开考」只会让人更慌）。 */
+    @Test
+    fun `考试过了时刻不补发`() {
+        val start = LocalDateTime.of(2026, 9, 29, 8, 0)
+        assertNull(NotifyLogic.examLeadAtFireTime(start, start))
+        assertNull(NotifyLogic.examLeadAtFireTime(start, start.plusMinutes(1)))
+        assertEquals(55L, NotifyLogic.examLeadAtFireTime(start, start.minusMinutes(55)))
+        assertEquals("55 分钟后开考", NotifyLogic.examTitle(55))
+        assertEquals("1 小时后开考", NotifyLogic.examTitle(60))
+    }
+
+    // -------------------------------------------------- 去重键解析（都别按位置取）
+
+    /**
+     * 键的第二段是「课程号或课名」，**课名是自由文本**。
+     * 课名里带一个半角冒号，老写法 `split(":")[2]` 就会拿到课名的后半截 →
+     * 二次校验判成「那天没课」→ **该发的提醒被静默丢掉**（比多发一条糟得多）。
+     */
+    @Test
+    fun `日期段按格式取 —— 课名带半角冒号也不能错位`() {
+        val weird = course(name = "专题:前沿技术", number = "")
+        val key = NotifyLogic.courseKey(weird, monday, 10)
+        assertEquals("course:专题:前沿技术:$monday:3:10", key)
+        assertEquals(monday, NotifyLogic.dateOfKey(key))
+    }
+
+    @Test
+    fun `提前量从末段取，前面的冒号不影响`() {
+        assertEquals(10L, NotifyLogic.trailingLeadMinutes("course:专题:前沿:$monday:3:10"))
+        assertNull(NotifyLogic.trailingLeadMinutes("course:专题:$monday:3:abc"))
+        assertNull(NotifyLogic.trailingLeadMinutes(""))
+    }
+
+    /** 座位键里的截止时刻**自身含冒号**，不能 split 后按位置取。 */
+    @Test
+    fun `座位键的截止时刻按切末段取回`() {
+        val key = "seat:018:2026-09-23T11:03:15:15"
+        assertEquals(LocalDateTime.of(2026, 9, 23, 11, 3, 15), NotifyLogic.seatDeadlineOfKey(key))
+        assertEquals(15L, NotifyLogic.trailingLeadMinutes(key))
+        assertEquals("018", NotifyLogic.seatNoOfKey(key))
+    }
+
+    /** 认格式：不是座位键就别硬猜（宁可保留原标题，也不要拿错时刻去算）。 */
+    @Test
+    fun `不是座位键时取不到截止时刻`() {
+        assertNull(NotifyLogic.seatDeadlineOfKey("course:操作系统:$monday:3:10"))
+        assertNull(NotifyLogic.seatDeadlineOfKey("seat:018:坏掉的时刻:15"))
+        assertNull(NotifyLogic.seatDeadlineOfKey(""))
+    }
+
+    /** 考试键末段是 `lead15` 这类带前缀的窗口，要剥掉前缀才拿到分钟数。 */
+    @Test
+    fun `考试键末段剥前缀取提前量`() {
+        assertEquals(15L, NotifyLogic.trailingExamLeadMinutes("exam:CS30001:2026-09-24:lead15"))
+        assertNull(NotifyLogic.trailingExamLeadMinutes("exam:CS30001:2026-09-24:day1"))
+    }
+
+    /** 从 `courseKey` 往返：键末段必须与排期时的提前量一致（否则重算会用错提前量）。 */
+    @Test
+    fun `上课键末段就是提前量`() {
+        for (lead in listOf(0L, 5L, 10L, 30L)) {
+            val key = NotifyLogic.courseKey(course(), monday, lead)
+            assertEquals(lead, NotifyLogic.trailingLeadMinutes(key))
+        }
+    }
 }

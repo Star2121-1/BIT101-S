@@ -463,19 +463,96 @@ object NotifyLogic {
     fun examLeadWindow(leadMinutes: Long): String = "lead$leadMinutes"
 
     /**
-     * 从考试去重键里取回**考试日期**（`worker` 二次校验要用）。
+     * 从去重键里取回**日期段**。
      *
-     * ⚠️ 刻意**不按位置取**（不用 `split(":")[2]`）：键里的第二段是「课程号或课名」，
-     * 课名是自由文本，万一冒出一个半角冒号，按位置取就会整段错位 → 二次校验判成
-     * 「这场考试不存在」→ **该发的提醒被静默丢掉**。
+     * ⚠️ **不能按位置取**（不能用 `split(":")[2]`）：键的第二段是「课程号或课名」，
+     * 课名是自由文本，万一带一个半角冒号就会整段错位 → 二次校验判成「那天没课」
+     * → **该发的提醒被静默丢掉**（比多发一条糟得多）。
      *
-     * 改为**按格式认**：键里唯一长得像 `2026-09-24` 的就是日期段。
-     * 取不到（格式对不上）返回 null，调用方据此放弃这次提醒（宁可漏一次，也不要发错）。
+     * 改为**按格式认**：键里唯一能解析成 `LocalDate` 的就是日期段。
+     * 取不到（格式对不上）返回 null，调用方据此放弃这次提醒 —— 宁可漏一次，也不要发错。
      */
-    fun examDateOfKey(key: String): LocalDate? =
+    fun dateOfKey(key: String): LocalDate? =
         key.split(':')
             .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }
             .firstOrNull()
+
+    /** 考试日期段（等价于 [dateOfKey]，保留旧名给调用方）。 */
+    fun examDateOfKey(key: String): LocalDate? = dateOfKey(key)
+
+    /**
+     * 从座位去重键里取回**签到截止时刻**（`seat:018:2026-09-23T11:03:15:15`）。
+     *
+     * ⚠️ **不能 `split(':')` 后按位置取**：截止时刻是 `LocalDateTime`，
+     * **自身就含冒号**，一拆就碎。做法是先切掉末段的提前量，
+     * 再取「第二个冒号之后」的整段。
+     *
+     * 认格式：第一段不是 `seat` 就返回 null（不是座位键就别硬猜）。
+     */
+    fun seatDeadlineOfKey(key: String): LocalDateTime? {
+        if (key.substringBefore(':') != "seat") return null
+        val withoutLead = key.substringBeforeLast(':')            // seat:018:2026-09-23T11:03:15
+        val deadline = withoutLead.substringAfter(':').substringAfter(':')
+        return runCatching { LocalDateTime.parse(deadline) }.getOrNull()
+    }
+
+    /**
+     * 从去重键**末段**取提前量（上课 / 座位提醒的键都以裸数字结尾）。
+     *
+     * 取末段是安全的：提前量恒定在最后，前面无论含多少冒号都不影响。
+     * （考试键末段是 `lead15` 这类非数字，会返回 null —— 它本来也用不到提前量。）
+     */
+    fun trailingLeadMinutes(key: String): Long? =
+        key.substringAfterLast(':').toLongOrNull()
+
+    /**
+     * 从去重键末段取**考试提醒的提前量**（键末段形如 `lead15`；考前一天的窗口是 `day1`）。
+     */
+    fun trailingExamLeadMinutes(key: String): Long? =
+        key.substringAfterLast(':').removePrefix("lead").toLongOrNull()
+
+    // ------------------------------------------------ 到点时的「实际提前量」
+
+    /** 上课时刻 = 提醒时刻 + 提前量（提前量跨零点时两者不在同一天）。 */
+    fun classStartAt(at: LocalDateTime, leadMinutes: Long): LocalDateTime =
+        at.plusMinutes(leadMinutes)
+
+    /** [target] 距 [now] 还有几分钟（向下取整，已过则为负）。 */
+    fun minutesUntil(target: LocalDateTime, now: LocalDateTime): Long =
+        ChronoUnit.MINUTES.between(now, target)
+
+    /**
+     * 上课提醒**到点时的实际提前量**；**课已开始返回 null**（= 不该再发）。
+     *
+     * ⚠️⚠️ 为什么必须重算 + 必须拦：排期时写死的「10 分钟后上课」是**相对时间**，
+     * 而 WorkManager 会被 Doze / 省电策略大幅延后 —— **实机迟到 2 小时 23 分钟**，
+     * 于是**下课之后**才弹出「10 分钟后上课」（2026-09-29 用户截图实证）。
+     * 这正是「正文写绝对时间」那条原则**没覆盖到的地方：正文是绝对的，标题不是**。
+     * 下课后再弹，比不弹更糟。
+     */
+    fun classLeadAtFireTime(at: LocalDateTime, leadMinutes: Long, now: LocalDateTime): Long? {
+        val startAt = classStartAt(at, leadMinutes)
+        return if (now.isBefore(startAt)) minutesUntil(startAt, now) else null
+    }
+
+    /**
+     * 座位签到提醒**到点时的实际提前量**。
+     *
+     * ⚠️ **已过截止也要返回负数，而不是 null** —— 座位签到是「**发现得晚也必须立刻补发**」
+     * （与考试**方向相反**）：错过签到会记一次违约，累计 5 次暂停 7 天，
+     * 用户至少要知道这件事。这里只负责**把标题换成实话**（`seatTitle` 对 ≤0 写「签到即将截止」）。
+     */
+    fun seatLeadAtFireTime(deadline: LocalDateTime, now: LocalDateTime): Long =
+        minutesUntil(deadline, now)
+
+    /**
+     * 考试提醒**到点时的实际提前量**；**已开考返回 null**（= 不该再发）。
+     *
+     * ⚠️ 与座位相反：考试**过了时刻就不补发** —— 迟到 20 分钟才说「马上开考」
+     * 只会让人更慌，而且已经来不及。
+     */
+    fun examLeadAtFireTime(startAt: LocalDateTime, now: LocalDateTime): Long? =
+        if (now.isBefore(startAt)) minutesUntil(startAt, now) else null
 
     // ------------------------------------------------------------ 去重键
 
