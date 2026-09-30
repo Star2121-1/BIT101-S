@@ -225,29 +225,80 @@ internal class NfcController(
         val steps = CardProbeLogic.firstRound() +
             if (withSfiScan) CardProbeLogic.sfiScan() else emptyList()
 
-        return try {
+        // 先收集「原始回答」，因为下一轮要发哪些命令**取决于上一轮回答里有什么**
+        val raws = mutableListOf<Pair<CardProbeLogic.ProbeStep, CardProbeLogic.ProbeResult>>()
+
+        try {
             iso.connect()
-            steps.map { step ->
-                val apdu = step.apdu
-                if (!CardProbeLogic.isReadOnly(apdu)) {
-                    return@map ProbeLine(step.label, CardProbeLogic.toHex(apdu), "", "被安全闸门拦下（拒绝发出）", null)
-                }
-                val raw = runCatching { iso.transceive(apdu) }.getOrNull()
-                    ?: return@map ProbeLine(step.label, CardProbeLogic.toHex(apdu), "", "transceive 失败", null)
-                val r = CardProbeLogic.parseResponse(raw)
-                val sid = studentId
-                ProbeLine(
-                    label = step.label,
-                    apdu = CardProbeLogic.toHex(apdu),
-                    sw = r.sw,
-                    swText = r.swText,
-                    data = CardProbeLogic.toHex(r.data),
-                    studentIdHit = sid?.let { StudentIdScan.find(r.data, it) },
+            steps.forEach { step -> raws += step to transceive(iso, step) }
+
+            // 目录记录里若有 ADF 名（tag 4F = AID），直接跟着 SELECT 一次 ——
+            // 用户贴一次卡不容易，能多挖一层就多挖一层。
+            val aids = CardProbeLogic.aidsOf(raws.flatMap { CardProbeLogic.parseTlvs(it.second.data) })
+                .take(3)
+            aids.forEach { aid ->
+                val hex = CardProbeLogic.toHexCompact(aid)
+                val step = CardProbeLogic.ProbeStep(
+                    "SELECT 目录里发现的 AID $hex",
+                    CardProbeLogic.selectByName(hex),
                 )
+                raws += step to transceive(iso, step)
             }
         } finally {
             runCatching { iso.close() }
         }
+
+        val sid = studentId
+        return raws.map { (step, r) ->
+            ProbeLine(
+                label = step.label,
+                apdu = CardProbeLogic.toHex(step.apdu),
+                sw = r.sw,
+                swText = r.swText,
+                data = CardProbeLogic.toHex(r.data),
+                studentIdHit = sid?.let { StudentIdScan.find(r.data, it) },
+                tlvs = CardProbeLogic.parseTlvs(r.data).map(::tlvText),
+            )
+        }
+    }
+
+    /**
+     * 发一条命令并解析回答。
+     *
+     * ⚠️ 这里再过一次 [CardProbeLogic.isReadOnly] 是**最后一道门**：
+     * `logic/` 生成的 APDU 原则上已经安全，但将来谁在那边填错一个字节，
+     * 这道门还能兜住，不至于把卡写坏。
+     */
+    /**
+     * 一个 TLV 的人话版：`84=31504159… "1PAY.SYS.DDF01"`。
+     *
+     * 值**全是可打印 ASCII** 时顺手把原文附上 —— 卡名、应用名这类字段就是靠这个
+     * 一眼认出来的，否则人得自己把 `31 50 41 59` 译成 `1PAY`。
+     */
+    private fun tlvText(t: CardProbeLogic.Tlv): String {
+        val hex = CardProbeLogic.toHexCompact(t.value)
+        val ascii = if (t.value.size >= 2 && t.value.all { it.toInt() in 0x20..0x7E }) {
+            " \"" + String(t.value, Charsets.US_ASCII) + "\""
+        } else ""
+        return "${t.tag}=$hex$ascii"
+    }
+
+    private fun transceive(
+        iso: IsoDep,
+        step: CardProbeLogic.ProbeStep,
+    ): CardProbeLogic.ProbeResult {
+        if (!CardProbeLogic.isReadOnly(step.apdu)) {
+            return CardProbeLogic.ProbeResult(
+                sw = "", swText = "被安全闸门拦下（拒绝发出）",
+                data = ByteArray(0), success = false, hasMore = false,
+            )
+        }
+        val raw = runCatching { iso.transceive(step.apdu) }.getOrNull()
+            ?: return CardProbeLogic.ProbeResult(
+                sw = "", swText = "transceive 失败",
+                data = ByteArray(0), success = false, hasMore = false,
+            )
+        return CardProbeLogic.parseResponse(raw)
     }
 
     // ------------------------------------------------------------------ 写
@@ -350,4 +401,6 @@ internal data class ProbeLine(
     val data: String?,
     /** 在这条返回里**找到了学号**（含编码形式与偏移）；没找到是 `null`。 */
     val studentIdHit: String? = null,
+    /** 返回的 TLV 摊平后的 `标签=值`，如 `84=315041592E...`。人肉看十六进制太累。 */
+    val tlvs: List<String> = emptyList(),
 )

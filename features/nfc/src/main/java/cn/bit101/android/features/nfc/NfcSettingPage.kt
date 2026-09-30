@@ -292,6 +292,7 @@ private fun ReadResultCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (!line.data.isNullOrBlank()) MonoText(line.data)
+                    line.tlvs.forEach { MonoText("  $it") }
                     line.studentIdHit?.let { hit ->
                         Text(
                             "★ 在这里找到了学号（$hit）",
@@ -409,6 +410,7 @@ private fun dumpOf(scan: NfcScan): String = buildString {
         lines.forEach { line ->
             appendLine("  [${line.label}] ${line.apdu} -> ${line.sw} ${line.swText ?: "未知状态字"}")
             line.data?.takeIf { it.isNotBlank() }?.let { appendLine("      data: $it") }
+            line.tlvs.forEach { appendLine("      tlv: $it") }
             line.studentIdHit?.let { appendLine("      ★ 命中学号：$it") }
         }
     }

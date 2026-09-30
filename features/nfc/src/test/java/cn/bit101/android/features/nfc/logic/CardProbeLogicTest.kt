@@ -160,13 +160,103 @@ class CardProbeLogicTest {
 
     // ------------------------------------------------------------ 两轮探测的构成
 
+    /**
+     * 第一轮的顺序是**真卡实测**排出来的，别随手整理：
+     * ① SELECT MF 拿卡自称的名字；② SELECT PSE（这张卡认的是 1PAY，不是 2PAY）；
+     * ③ 紧跟三条 READ RECORD —— 它们依赖「当前选中目录」，中间不能被别的 SELECT 打断；
+     * ④ 最后才拿 PPSE 做对照。
+     */
     @Test
-    fun `第一轮先确认通道再问卡里有什么`() {
+    fun `第一轮先 MF 再 PSE 再读记录 最后才是 PPSE 对照`() {
         val steps = CardProbeLogic.firstRound()
-        assertEquals(2, steps.size)
+        assertEquals(6, steps.size)
         assertTrue(steps[0].label.contains("主文件"))
-        assertTrue(steps[1].label.contains("PPSE"))
+        assertTrue(steps[1].label.contains("1PAY"))
+        assertTrue(steps[2].label.contains("READ RECORD"))
+        assertTrue(steps[4].label.contains("READ RECORD"))
+        assertTrue(steps[5].label.contains("2PAY"))
     }
+
+    /** PSE 与 PPSE 只差一个字符（1/2），写错就是 6A82。用 ASCII 反查钉住。 */
+    @Test
+    fun `PSE 与 PPSE 的 AID 分别是 1PAY 与 2PAY`() {
+        assertEquals("1PAY.SYS.DDF01", asciiOf(CardProbeLogic.parseHex(CardProbeLogic.PSE_AID)))
+        assertEquals("2PAY.SYS.DDF01", asciiOf(CardProbeLogic.parseHex(CardProbeLogic.PPSE_AID)))
+    }
+
+    @Test
+    fun `READ RECORD 把 SFI 编进 P2 且记录号进 P1`() {
+        // 记录 1、SFI=1、整条记录（Le=00）→ 00 B2 01 0C 00
+        assertEquals("00 B2 01 0C 00", CardProbeLogic.toHex(CardProbeLogic.readRecord(record = 1, sfi = 1)))
+        // 记录 3、SFI=30 → P2 = 11110_100 = F4
+        assertEquals("00 B2 03 F4 10", CardProbeLogic.toHex(CardProbeLogic.readRecord(record = 3, sfi = 30, length = 16)))
+    }
+
+    @Test
+    fun `READ RECORD 的越界参数早失败`() {
+        assertThrows(IllegalArgumentException::class.java) { CardProbeLogic.readRecord(record = 0, sfi = 1) }
+        assertThrows(IllegalArgumentException::class.java) { CardProbeLogic.readRecord(record = 1, sfi = 31) }
+        assertThrows(IllegalArgumentException::class.java) { CardProbeLogic.readRecord(record = 1, sfi = 1, length = 257) }
+    }
+
+    // ------------------------------------------------------------ TLV（真卡向量）
+
+    /**
+     * 北理工校园卡 `SELECT MF` 的真实回答：
+     * `6F 15 84 0E 31 50 41 59 2E 53 59 53 2E 44 44 46 30 31 A5 03 88 01 01`。
+     *
+     * 这条断言的价值：卡自称 `1PAY.SYS.DDF01`、目录在 SFI=1 ——
+     * 全是**从这一串字节里读出来的**，不是猜的。下一轮探测就是照这两个值往下走。
+     */
+    @Test
+    fun `真卡 FCI 能解出卡名与目录 SFI`() {
+        val data = CardProbeLogic.parseHex("6F15840E315041592E5359532E4444463031A503880101")
+        val tlvs = CardProbeLogic.parseTlvs(data)
+
+        val name = tlvs.first { it.tag == "84" }.value
+        assertEquals("1PAY.SYS.DDF01", asciiOf(name))
+
+        val sfi = tlvs.first { it.tag == "88" }.value
+        assertEquals("01", CardProbeLogic.toHexCompact(sfi))
+    }
+
+    /** 构造型（0x20 置位）必须递归，否则埋在 `A5` 里的 `88` 就拿不到。 */
+    @Test
+    fun `嵌套在构造型里的 tag 也要解析出来`() {
+        // 6F(5) { A5(3) { 88 01 01 } } —— 外层长度必须把内层**全部**算进去
+        val data = CardProbeLogic.parseHex("6F05A503880101")
+        val tags = CardProbeLogic.parseTlvs(data).map { it.tag }
+        assertTrue("应递归出 88：$tags", tags.contains("88"))
+        assertTrue(CardProbeLogic.parseTlvs(data).first { it.tag == "A5" }.constructed)
+        assertFalse(CardProbeLogic.parseTlvs(data).first { it.tag == "88" }.constructed)
+    }
+
+    /** 长格式长度（81 xx / 82 xx xx）也要能读，否则大记录会整条解析失败。 */
+    @Test
+    fun `长格式长度能解析`() {
+        // 70 81 03 84 01 41  → 长度 0x81 后面 1 字节 = 3
+        val tlvs = CardProbeLogic.parseTlvs(CardProbeLogic.parseHex("708103840141"))
+        assertEquals(listOf("70", "84"), tlvs.map { it.tag })
+    }
+
+    @Test
+    fun `挑 AID 只收 4F 且长度合规`() {
+        // 61(10) { 4F 05 A0 00 00 00 01（合法 AID）, 4F 01 FF（过短，应被筛掉） }
+        val tlvs = CardProbeLogic.parseTlvs(CardProbeLogic.parseHex("610A4F05A0000000014F01FF"))
+        val aids = CardProbeLogic.aidsOf(tlvs)
+        assertEquals(1, aids.size)
+        assertEquals("A000000001", CardProbeLogic.toHexCompact(aids.first()))
+    }
+
+    /** 字节被截断/不合法时，宁可少解几条也不要抛异常 —— 探测是在真卡上跑的。 */
+    @Test
+    fun `残缺 TLV 不抛异常`() {
+        CardProbeLogic.parseTlvs(CardProbeLogic.parseHex("6F05"))
+        CardProbeLogic.parseTlvs(CardProbeLogic.parseHex("6F83FF01"))
+        CardProbeLogic.parseTlvs(ByteArray(0))
+    }
+
+    private fun asciiOf(bytes: ByteArray) = String(bytes, Charsets.US_ASCII)
 
     /** 第二轮是探索性的，但每一条都必须过只读闸门 —— 一次误写就是事故。 */
     @Test

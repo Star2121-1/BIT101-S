@@ -40,8 +40,22 @@ internal object CardProbeLogic {
         0x84, // GET CHALLENGE：取随机数（也用来确认通道是活的）
     )
 
-    /** PPSE 的应用名（`2PAY.SYS.DDF01`）。SELECT 它能拿到卡内支付类应用的清单。 */
+    /**
+     * PPSE 的应用名（`2PAY.SYS.DDF01`）—— **非接触式**支付环境的目录入口。
+     */
     const val PPSE_AID = "325041592E5359532E4444463031"
+
+    /**
+     * PSE 的应用名（`1PAY.SYS.DDF01`）—— **接触式**支付环境的目录入口。
+     *
+     * ⚠️ 这个常量是**真卡实测**加进来的，不是照抄标准：
+     * 北理工校园卡 `SELECT MF(3F00)` 返回的 FCI 里，
+     * `84 0E 31 50 41 59 2E 53 59 53 2E 44 44 46 30 31` 解出来就是 `1PAY.SYS.DDF01`，
+     * 而同一张卡 SELECT `2PAY…`（PPSE）回的是 `6A82` 找不到。
+     *
+     * ⇒ **国内校园卡很多走的是接触式 PSE 那一套**，只试 PPSE 会一无所获。两个都试。
+     */
+    const val PSE_AID = "315041592E5359532E4444463031"
 
     /**
      * 一道**发出前的总闸门**：不是白名单里的指令，一律不许出 `IsoDep.transceive`。
@@ -80,6 +94,32 @@ internal object CardProbeLogic {
     /** 按 AID 选 PPSE。卡若支持，会回答一列它自带的应用。 */
     fun selectPpse(): ByteArray = selectByName(PPSE_AID)
 
+    /** 按 AID 选 PSE（接触式目录）。真卡实测：北理工校园卡走的是这一条。 */
+    fun selectPse(): ByteArray = selectByName(PSE_AID)
+
+    /**
+     * `READ RECORD`：`00 B2 <记录号> <P2> <Le>`。
+     *
+     * P2 = `(SFI << 3) | 0x04` —— 与 [readBinary] 同一套 SFI 编码。
+     * 目录文件（PSE/PPSE 的 EF）就是靠一条条记录把 AID 列出来的，
+     * 所以想拿到「卡里有哪些应用」必须发这条，光 SELECT 是不够的。
+     */
+    fun readRecord(record: Int, sfi: Int, length: Int = 0): ByteArray {
+        require(record in 1..254) { "记录号必须在 1~254 之间，实际 $record" }
+        require(sfi in 0..30) { "SFI 必须在 0~30 之间，实际 $sfi" }
+        // Le=0 表示「把整条记录都给我」，最长 256
+        require(length in 0..256) { "length 必须在 0~256 之间，实际 $length" }
+        val le = if (length == 256) 0x00.toByte() else length.toByte()
+
+        return byteArrayOf(
+            0x00,
+            0xB2.toByte(),
+            record.toByte(),
+            ((sfi shl 3) or 0x04).toByte(),
+            le,
+        )
+    }
+
     /**
      * `READ BINARY (with SFI)`：`00 B0 <P1> <offset> <length>`。
      *
@@ -116,10 +156,19 @@ internal object CardProbeLogic {
      * 顺序是有讲究的：先 `SELECT MF` 确认通道通（连这条都答 6E00 的就是非 7816 设备），
      * 再 `SELECT PPSE` 让卡**自己报出**它带的应用 —— 这是唯一不靠猜的发现途径。
      */
-    fun firstRound(): List<ProbeStep> = listOf(
-        ProbeStep("SELECT 主文件 3F00", selectMasterFile()),
-        ProbeStep("SELECT PPSE（问卡里有哪些应用）", selectPpse()),
-    )
+    fun firstRound(): List<ProbeStep> = buildList {
+        add(ProbeStep("SELECT 主文件 3F00", selectMasterFile()))
+        // PSE 排在 PPSE 前面：真卡实测这张卡认的是 1PAY（接触式），PPSE 直接 6A82。
+        // 顺序也有讲究 —— 下面那几条 READ RECORD 依赖「当前选中的是目录文件」，
+        // 所以必须紧跟在 SELECT PSE 之后，中间不能被别的 SELECT 打断。
+        add(ProbeStep("SELECT PSE 1PAY.SYS.DDF01（卡自称的名字）", selectPse()))
+        // SFI=1 也是实测得来的：MF 的 FCI 里 `88 01 01` 说的就是 SFI=1。
+        // 目录文件通常只有一两条记录，取 1~3 足够，多了纯粹浪费时间。
+        (1..3).forEach { rec ->
+            add(ProbeStep("READ RECORD SFI=1 记录 $rec", readRecord(record = rec, sfi = 1)))
+        }
+        add(ProbeStep("SELECT PPSE 2PAY.SYS.DDF01（非接触式，作对照）", selectPpse()))
+    }
 
     /**
      * 第二轮：挨个 SFI 试 `READ BINARY`。
@@ -203,6 +252,91 @@ internal object CardProbeLogic {
     /** 把字节拼成「空格分隔的十六进制」，给导出诊断文本用（人要去对着查）。*/
     fun toHex(bytes: ByteArray): String =
         bytes.joinToString(" ") { b -> "%02X".format(b.unsigned()) }
+
+    /** 紧凑十六进制（无空格）—— 给「解析出来的 AID 再拿去 SELECT」这种场合用。 */
+    fun toHexCompact(bytes: ByteArray): String = toHex(bytes).replace(" ", "")
+
+    // ------------------------------------------------------------------ TLV
+
+    /**
+     * 一个 TLV 条目。
+     *
+     * @param tag 十六进制大写字符串（单字节如 `"4F"`，双字节如 `"9F1F"`）。
+     * @param value 值部分。
+     * @param constructed 是否**构造型**（值里还套着 TLV，如 `6F` / `A5`）。
+     */
+    data class Tlv(
+        val tag: String,
+        val value: ByteArray,
+        val constructed: Boolean,
+    )
+
+    /**
+     * 解析 ISO 7816-4 的 BER-TLV。
+     *
+     * ## 为什么要自己写
+     *
+     * 卡回答的 FCI / 目录记录**全是 TLV**，不解析就只是一串十六进制，
+     * 看不出「哦，它的目录在 SFI=1」。而我们真正要的东西就是几个 tag：
+     * - `84` = DF 名（卡自称叫什么，实测是 `1PAY.SYS.DDF01`）
+     * - `88` = SFI（目录文件在哪）
+     * - `4F` = ADF 名（**下一个要 SELECT 的 AID**，最重要的那个）
+     *
+     * ## 构造型必须递归
+     *
+     * 是否构造看首字节第 6 位（`0x20`）：置位即构造型。
+     * 实测那条返回是 `6F 15 … A5 03 88 01 01`，不递归的话 `88`（SFI）就埋在 `A5` 里拿不到。
+     */
+    fun parseTlvs(bytes: ByteArray): List<Tlv> {
+        val out = mutableListOf<Tlv>()
+        walk(bytes, 0, bytes.size, out, depth = 0)
+        return out
+    }
+
+    private fun walk(bytes: ByteArray, from: Int, to: Int, out: MutableList<Tlv>, depth: Int) {
+        if (depth > 6) return // 防呆：正常卡不会套这么深，套成这样多半是读错了
+        var i = from
+
+        while (i + 1 < to) {
+            val first = bytes[i].unsigned()
+            val tag: String
+            if (first and 0x1F == 0x1F && i + 1 < to) { // 低 5 位全 1 ⇒ tag 还有后续字节
+                tag = "%02X%02X".format(first, bytes[i + 1].unsigned())
+                i += 2
+            } else {
+                tag = "%02X".format(first)
+                i += 1
+            }
+            if (i >= to) return
+
+            var len = bytes[i].unsigned()
+            i += 1
+            if (len >= 0x80) { // 长格式：低 7 位表示「后面还有几个长度字节」
+                val n = len - 0x80
+                if (n !in 1..3 || i + n > to) return
+                len = 0
+                for (k in 0 until n) len = (len shl 8) + bytes[i + k].unsigned()
+                i += n
+            }
+            if (len < 0 || i + len > to) return
+
+            val constructed = first and 0x20 != 0
+            out += Tlv(tag, bytes.copyOfRange(i, i + len), constructed)
+            if (constructed) walk(bytes, i, i + len, out, depth + 1)
+            i += len
+        }
+    }
+
+    /**
+     * 从 TLV 里挑 AID（tag `4F` = ADF 名）。
+     *
+     * 只收 5~16 字节（ISO 7816-5 规定 AID 就在这个长度区间）：
+     * 比这短的多半是别的数据被误读成 tag，收进来只会拿去发一次注定失败的 SELECT。
+     */
+    fun aidsOf(tlvs: List<Tlv>): List<ByteArray> =
+        tlvs.filter { it.tag == "4F" && it.value.size in 5..16 }
+            .map { it.value }
+            .distinctBy { it.toList() }
 
     /** 十六进制串转字节。空串得空数组；奇数长度或非法字符一律报错（早失败好过静默错位）。 */
     fun parseHex(hex: String): ByteArray {
