@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      读 NFC 标签需要的权限。不需要在运行时申请（普通权限，安装时授予）。
+    -->
+    <uses-permission android:name="android.permission.NFC" />
+
+    <!--
+      ⚠️⚠️ 必须 `required="false"`。
+
+      开发用的真机（ZTE NP05J）**没有 NFC 硬件**（`board_uses_nfc=NONE`），
+      写成 `required="true"` 的话，这台机器上 App 会被 Play/安装器直接拒绝，
+      连现有功能都跑不起来。
+
+      因为没有 NFC 的机器也能装，功能就必须**自己降级**：运行前先查
+      `PackageManager.hasSystemFeature(FEATURE_NFC)`，没有时给出明确说明，
+      而不是留一个点了没反应的按钮（这点与本项目「空态不靠隐藏」的纪律一致）。
+    -->
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+
+</manifest>

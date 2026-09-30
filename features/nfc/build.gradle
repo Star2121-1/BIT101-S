@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+    id 'com.google.devtools.ksp'
+    id 'com.google.dagger.hilt.android'
+}
+
+android {
+    namespace 'cn.bit101.android.features.nfc'
+    compileSdk versions.compileSdk
+
+    defaultConfig {
+        minSdk versions.minSdk
+        targetSdk versions.targetSdk
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles "consumer-rules.pro"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility = versions.sourceCompatibility
+        targetCompatibility = versions.targetCompatibility
+    }
+    kotlinOptions {
+        jvmTarget = versions.jvmTarget
+    }
+    buildFeatures {
+        compose true
+    }
+    packagingOptions {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+}
+
+dependencies {
+    // 快捷入口的跳转目标只能取「底栏页 route」与其它无参顶层路由，
+    // 这两个**单一来源**在 :config 里，避免本模块自己抄一份字符串导致漂移。
+    implementation project(':config')
+
+    implementation project(':features:common')
+
+    // hilt
+    implementation "androidx.hilt:hilt-navigation-compose:1.1.0"
+    implementation "com.google.dagger:hilt-android:${versions.hilt}"
+    ksp "com.google.dagger:hilt-android-compiler:${versions.hilt}"
+
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+}
