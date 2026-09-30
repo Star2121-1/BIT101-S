@@ -2,6 +2,7 @@ package cn.bit101.android.features.nfc.logic
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -70,17 +71,24 @@ class CardProbeLogicTest {
         assertEquals("00 A4 00 00 02 3F 00", CardProbeLogic.toHex(CardProbeLogic.selectMasterFile()))
     }
 
+    /**
+     * ⚠️ READ BINARY 的 P1 = `0x80 | SFI`（最高位置 1，低 5 位是 SFI），
+     * **不是** `(SFI<<3)|0x04` —— 后者是 READ RECORD 的 P2 编码，上一版就是抄混了，
+     * 结果扫什么都是「找不到」。这条断言专门钉住这个坑。
+     */
     @Test
-    fun `READ BINARY 把 SFI 编进 P1 的最高五位`() {
-        // SFI=1 → P1 = 00001_100 = 0x0C
-        assertEquals("00 B0 0C 00 20", CardProbeLogic.toHex(CardProbeLogic.readBinary(sfi = 1, length = 32)))
-        // SFI=30 → P1 = 11110_100 = 0xF4
-        assertEquals("00 B0 F4 00 10", CardProbeLogic.toHex(CardProbeLogic.readBinary(sfi = 30, length = 16)))
+    fun `READ BINARY 的 P1 是 80 或上 SFI`() {
+        // SFI=1 → P1 = 0x80 | 1 = 0x81
+        assertEquals("00 B0 81 00 20", CardProbeLogic.toHex(CardProbeLogic.readBinary(sfi = 1, length = 32)))
+        // SFI=30 → P1 = 0x80 | 30 = 0x9E
+        assertEquals("00 B0 9E 00 10", CardProbeLogic.toHex(CardProbeLogic.readBinary(sfi = 30, length = 16)))
+        // 偏移量进 P2
+        assertEquals("00 B0 81 10 10", CardProbeLogic.toHex(CardProbeLogic.readBinary(sfi = 1, offset = 16, length = 16)))
     }
 
     @Test
     fun `长度 256 在 Le 位置编码为 0`() {
-        assertEquals("00 B0 0C 00 00", CardProbeLogic.toHex(CardProbeLogic.readBinary(sfi = 1, length = 256)))
+        assertEquals("00 B0 81 00 00", CardProbeLogic.toHex(CardProbeLogic.readBinary(sfi = 1, length = 256)))
     }
 
     @Test
@@ -266,5 +274,46 @@ class CardProbeLogicTest {
         assertTrue(steps.all { CardProbeLogic.isReadOnly(it.apdu) })
         assertEquals("READ BINARY SFI=1", steps.first().label)
         assertEquals("READ BINARY SFI=30", steps.last().label)
+    }
+
+    /** 「不带 SFI」的 READ BINARY：P1/P2 是**偏移量的高/低字节**，不是 SFI。 */
+    @Test
+    fun `READ BINARY 不带 SFI 时 P1P2 是偏移量`() {
+        assertEquals("00 B0 00 00 20", CardProbeLogic.toHex(CardProbeLogic.readBinaryPlain()))
+        assertEquals("00 B0 10 00 10", CardProbeLogic.toHex(CardProbeLogic.readBinaryPlain(offset = 16, length = 16)))
+        // 越界的偏移要早失败，别等到真卡上回 6B00 才发现
+        assertThrows(IllegalArgumentException::class.java) { CardProbeLogic.readBinaryPlain(offset = 128) }
+    }
+
+    /**
+     * 按 FID 选文件。
+     *
+     * 这条是真卡上**唯一**能发现「MF 下到底有哪些文件」的手段：
+     * AID 那条路实测只摸到一个借来的支付目录名，文件里的东西一概看不到。
+     */
+    @Test
+    fun `SELECT 按文件标识`() {
+        assertEquals("00 A4 02 00 02 00 01", CardProbeLogic.toHex(CardProbeLogic.selectByFileId(0x0001)))
+        assertEquals("00 A4 02 00 02 00 15", CardProbeLogic.toHex(CardProbeLogic.selectByFileId(0x0015)))
+        assertEquals("00 A4 02 00 02 10 01", CardProbeLogic.toHex(CardProbeLogic.selectByFileId(0x1001)))
+        assertEquals("00 A4 02 00 02 FF FF", CardProbeLogic.toHex(CardProbeLogic.selectByFileId(0xFFFF)))
+        assertThrows(IllegalArgumentException::class.java) { CardProbeLogic.selectByFileId(0x10000) }
+        // 与按 AID 选（P1=04）必须区分开：两者选的不是同一类东西
+        assertNotEquals(
+            CardProbeLogic.toHex(CardProbeLogic.selectByFileId(0x3F00)),
+            CardProbeLogic.toHex(CardProbeLogic.selectMasterFile()),
+        )
+    }
+
+    /** FID 扫描：每条都带一个「选中了就读一段」的后续命令，且全部过只读闸门。 */
+    @Test
+    fun `FID 扫描带后续读且全只读`() {
+        val steps = CardProbeLogic.fidScan(0x0001..0x0005)
+        assertEquals(5, steps.size)
+        assertTrue(steps.all { CardProbeLogic.isReadOnly(it.apdu) })
+        assertTrue(steps.all { it.followUp != null && CardProbeLogic.isReadOnly(it.followUp!!) })
+        assertEquals("SELECT 文件 0001", steps.first().label)
+        assertEquals("READ 文件 0001 前 32 字节", steps.first().followUpLabel)
+        assertEquals("00 B0 00 00 20", CardProbeLogic.toHex(steps.first().followUp!!))
     }
 }

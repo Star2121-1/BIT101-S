@@ -123,12 +123,22 @@ internal object CardProbeLogic {
     /**
      * `READ BINARY (with SFI)`：`00 B0 <P1> <offset> <length>`。
      *
-     * P1 的最高位是 1 表示后面 5 位是 SFI（短文件标识），低三位为 100。
-     * @param sfi 短文件标识，规范取值 1~30；0 表示「当前文件」。
+     * ## ⚠️⚠️ P1 的编码 —— 这里踩过一次坑，改之前先看清楚
+     *
+     * ISO 7816-4 里两条读指令的编码**不一样**，我上一版把它们的写法搞混了：
+     * - **READ BINARY**：`P1 = 0x80 | SFI`（最高位置 1 表示「低 5 位是 SFI」），
+     *   `P2` 才是偏移量。
+     * - **READ RECORD**（见 [readRecord]）：`P1` = 记录号，`P2 = (SFI << 3) | 0x04`。
+     *
+     * 上一版用 `(SFI << 3) | 0x04` 填了 READ BINARY 的 P1 —— 整整错了两条指令的编码，
+     * 结果就是扫什么都是找不到。真卡实测确认：按修正后的编码才是对的路子。
+     *
+     * @param sfi 短文件标识，规范取值 1~30。
      * @param length 期望读出的字节数，**不能超过 256**（我们不需要 GET RESPONSE 那一层复杂度）。
      */
     fun readBinary(sfi: Int, offset: Int = 0, length: Int = 32): ByteArray {
-        require(sfi in 0..30) { "SFI 必须在 0~30 之间，实际 $sfi" }
+        require(sfi in 1..30) { "SFI 必须在 1~30 之间，实际 $sfi" }
+        require(offset in 0..255) { "offset 必须在 0~255 之间，实际 $offset" }
         require(length in 1..256) { "length 必须在 1~256 之间，实际 $length" }
         // 256 在 Le 位置编码为 0x00
         val le = if (length == 256) 0x00.toByte() else length.toByte()
@@ -136,18 +146,60 @@ internal object CardProbeLogic {
         return byteArrayOf(
             0x00,
             0xB0.toByte(),
-            ((sfi shl 3) or 0x04).toByte(),
+            (0x80 or sfi).toByte(),
             offset.toByte(),
             le,
         )
     }
 
     /**
+     * `READ BINARY`（**不带 SFI**）：`00 B0 <offset 高字节> <offset 低字节> <length>`。
+     *
+     * 与 [readBinary] 的区别就一个地方：这里 P1 是**偏移量的高 8 位**（不是 `0x80 | SFI`）。
+     * 用途是「已经 SELECT 了某个文件，接着从里面读字节」——
+     * 也就是 [fidScan] 里「选中一个文件就读它一段」的那个搭配。
+     */
+    fun readBinaryPlain(offset: Int = 0, length: Int = 32): ByteArray {
+        require(offset in 0..0x7F) { "offset 必须在 0~127 之间，实际 $offset" }
+        require(length in 1..256) { "length 必须在 1~256 之间，实际 $length" }
+        val le = if (length == 256) 0x00.toByte() else length.toByte()
+
+        return byteArrayOf(0x00, 0xB0.toByte(), offset.toByte(), 0x00, le)
+    }
+
+    /**
+     * `SELECT by file identifier`（按文件标识选）：`00 A4 02 00 02 <FID 高> <FID 低>`。
+     *
+     * 与 [selectByName]（按 AID 选）是**两条不同的路**：AID 选的是应用，FID 选的是 MF 下的文件。
+     * 校园卡的业务数据（学号、钱包）通常躺在具体文件里，而**我们不知道文件的名字** ——
+     * 所以只能靠挨个 FID 试，试中了再 [readBinaryPlain] 读一段。
+     */
+    fun selectByFileId(fid: Int): ByteArray {
+        require(fid in 0..0xFFFF) { "FID 必须在 0~FFFF 之间，实际 $fid" }
+        return byteArrayOf(
+            0x00,
+            0xA4.toByte(),
+            0x02,
+            0x00,
+            0x02,
+            ((fid shr 8) and 0xFF).toByte(),
+            (fid and 0xFF).toByte(),
+        )
+    }
+
+    /**
      * 一条探测项：给人看的 [label] + 待发的 [apdu]。
+     *
+     * @param followUp 这条**成功之后**紧接着再发的一条命令（通常是「选中了就读一段」）。
+     *   为什么塞在这里而不是让上层自己排：两条命令必须**连着发**才有意义
+     *   （中间夹一次别的 SELECT，当前文件就换了，读出来的是另一个文件的东西）。
+     * @param followUpLabel [followUp] 的显示名；为 `null` 时用 `「…」接着读`。
      */
     data class ProbeStep(
         val label: String,
         val apdu: ByteArray,
+        val followUp: ByteArray? = null,
+        val followUpLabel: String? = null,
     )
 
     /**
@@ -179,6 +231,30 @@ internal object CardProbeLogic {
      */
     fun sfiScan(range: IntRange = 1..30, length: Int = 32): List<ProbeStep> =
         range.map { ProbeStep("READ BINARY SFI=$it", readBinary(sfi = it, length = length)) }
+
+    /**
+     * 第三轮：挨个**文件标识（FID）**试 `SELECT`，命中了再接着读一段。
+     *
+     * ## 为什么在 SFI 扫描之外还要这一轮
+     *
+     * `sfiScan` 是「不选中任何文件就去读」，对绝大多数卡等于闭着眼敲门，实测全 `6A82`。
+     * 这一轮反过来：**先选中文件再读** —— 命中一次就知道这个 FID 下真有东西，含金量高得多。
+     *
+     * ⚠️ 这是**最慢**的一轮：默认 255 个 FID，每个都要一次 SELECT（命中的还各加一次读）。
+     * 所以放在深度开关后面，且接线层必须**边收边显示**、中途掉卡也要保留已拿到的部分。
+     *
+     * @param range 要试的 FID 区间。默认 `0001~00FF`：业务文件绝大多数落在低区，
+     *   再往上扫（到 `FFFF`）收益递减而贴卡时间翻倍，不划算。
+     */
+    fun fidScan(range: IntRange = 0x0001..0x00FF): List<ProbeStep> =
+        range.map { fid ->
+            ProbeStep(
+                label = "SELECT 文件 %04X".format(fid),
+                apdu = selectByFileId(fid),
+                followUp = readBinaryPlain(),
+                followUpLabel = "READ 文件 %04X 前 32 字节".format(fid),
+            )
+        }
 
     /**
      * `transceive` 回来的原始字节。

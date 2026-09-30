@@ -75,6 +75,7 @@ fun NfcSettingPage(
     var scan by remember { mutableStateOf<NfcScan?>(null) }
     var route by remember { mutableStateOf<String?>(null) }
     var deepProbe by remember { mutableStateOf(false) }
+    var classicScan by remember { mutableStateOf(true) }
     var studentId by remember { mutableStateOf("") }
     var controller by remember { mutableStateOf<NfcController?>(null) }
 
@@ -108,6 +109,11 @@ fun NfcSettingPage(
         onDispose { }
     }
 
+    DisposableEffect(controller, classicScan) {
+        controller?.withClassicScan = classicScan
+        onDispose { }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -125,9 +131,11 @@ fun NfcSettingPage(
             busy = busy,
             scan = scan,
             deepProbe = deepProbe,
+            classicScan = classicScan,
             studentId = studentId,
             onStudentIdChange = { studentId = it },
             onDeepProbeChange = { deepProbe = it },
+            onClassicScanChange = { classicScan = it },
             onCopy = { mainController.copyText(clipboard, it) },
         )
 
@@ -183,9 +191,11 @@ private fun ReadCardSection(
     busy: NfcController.Busy,
     scan: NfcScan?,
     deepProbe: Boolean,
+    classicScan: Boolean,
     studentId: String,
     onStudentIdChange: (String) -> Unit,
     onDeepProbeChange: (Boolean) -> Unit,
+    onClassicScanChange: (Boolean) -> Unit,
     onCopy: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -223,11 +233,29 @@ private fun ReadCardSection(
         )
 
         Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = classicScan,
+                onCheckedChange = onClassicScanChange,
+                enabled = capability == NfcCapability.Enabled,
+            )
+            Column(Modifier.weight(1f)) {
+                Text("试常见默认密钥读 Classic 扇区")
+                Text(
+                    "双界面卡才有用：拿出厂默认那批密钥去认证扇区，过了就只读块、不写任何东西。" +
+                        "学号经常明文躺在这些块里 —— 这是眼下最有可能挖出来的一条路。" +
+                        "认证失败就停，不会去破密钥。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(checked = deepProbe, onCheckedChange = onDeepProbeChange, enabled = capability == NfcCapability.Enabled)
             Column(Modifier.weight(1f)) {
-                Text("顺便扫一遍文件区（更慢）")
+                Text("再扫一遍文件区（很慢，要贴住几秒）")
                 Text(
-                    "CPU 卡才有用：挨个短文件标识试 READ BINARY，把命中的罗出来。全部只读。",
+                    "CPU 卡才有用：挨个文件标识试 SELECT，命中了就读开头 32 字节。" +
+                        "共 300 多条命令，中途掉卡也保留已经拿到的部分。全部只读。",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -279,6 +307,42 @@ private fun ReadResultCard(
                 HorizontalDivider()
                 Text("卡面号候选 —— 请和你卡上印的那串数字对一下：", style = MaterialTheme.typography.bodySmall)
                 scan.cardNoCandidates.forEach { KeyValue(it.label, it.value) }
+            }
+
+            scan.classic?.let { sectors ->
+                HorizontalDivider()
+                Text(
+                    "Classic 扇区（默认密钥 + 只读块）：",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                sectors.forEach { sector ->
+                    Text(
+                        "扇区 ${sector.sector} · ${sector.key ?: "认证失败"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    sector.note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+                    val nonBlank = sector.blocks.filter { !it.blank }
+                    val blanks = sector.blocks.filter { it.blank }
+                    nonBlank.forEach { block ->
+                        MonoText("  块 ${block.block} ${block.hex}")
+                        block.bcdDigits?.let { MonoText("    BCD 数字 $it") }
+                        block.ascii?.let { MonoText("    ASCII \"$it\"") }
+                        block.studentIdHit?.let { hit ->
+                            Text(
+                                "    ★ 在这里找到了学号（$hit）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    if (blanks.isNotEmpty()) {
+                        Text(
+                            "  空块 ${blanks.size} 个：${blanks.joinToString(",") { it.block.toString() }}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
             }
 
             scan.probe?.let { lines ->
@@ -404,6 +468,23 @@ private fun dumpOf(scan: NfcScan): String = buildString {
     if (scan.cardNoCandidates.isNotEmpty()) {
         appendLine("卡面号候选:")
         scan.cardNoCandidates.forEach { appendLine("  ${it.label} = ${it.value}") }
+    }
+    scan.classic?.let { sectors ->
+        appendLine("Classic 扇区（默认密钥 + 只读块）:")
+        sectors.forEach { sector ->
+            appendLine("  扇区 ${sector.sector} · ${sector.key ?: "认证失败"}")
+            sector.note?.let { appendLine("      $it") }
+            sector.blocks.forEach { block ->
+                if (block.blank) {
+                    appendLine("      块 ${block.block}: （全零）")
+                } else {
+                    appendLine("      块 ${block.block}: ${block.hex}")
+                    block.bcdDigits?.let { appendLine("          BCD 数字: $it") }
+                    block.ascii?.let { appendLine("          ASCII: $it") }
+                    block.studentIdHit?.let { appendLine("          ★ 命中学号：$it") }
+                }
+            }
+        }
     }
     scan.probe?.let { lines ->
         appendLine("只读探测:")

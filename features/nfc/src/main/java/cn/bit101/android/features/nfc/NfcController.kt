@@ -6,11 +6,13 @@ import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
+import android.nfc.tech.MifareClassic
 import android.nfc.tech.Ndef
 import android.nfc.tech.NdefFormatable
 import android.os.Handler
 import android.os.Looper
 import cn.bit101.android.features.nfc.logic.CardKind
+import cn.bit101.android.features.nfc.logic.ClassicProbeLogic
 import cn.bit101.android.features.nfc.logic.CardProbeLogic
 import cn.bit101.android.features.nfc.logic.NdefShortcutLogic
 import cn.bit101.android.features.nfc.logic.NfcCardLogic
@@ -65,9 +67,19 @@ internal class NfcController(
     @Volatile
     var pendingWrite: String? = null
 
-    /** 是否在小目标上多跑一轮 SFI 扫描（只对 CPU 卡有意义，且明显更慢）。 */
+    /** 是否在小目标上多跑一轮 SFI / FID 扫描（只对 CPU 卡有意义，且明显更慢）。 */
     @Volatile
     var withSfiScan: Boolean = false
+
+    /**
+     * 是否拿常见默认密钥去试 MIFARE Classic 扇区（只读，默认开）。
+     *
+     * 默认**开**是因为这是眼下最有可能挖出学号的一条路：
+     * APDU 那条路实测只摸到一个借来的目录名，而校园卡的学号经常明文躺在扇区块里。
+     * 认证失败不伤卡、只是白跑一次，没有理由让用户手动去打开它。
+     */
+    @Volatile
+    var withClassicScan: Boolean = true
 
     /**
      * 本人学号。**只用来在探测返回里找**，不做任何网络请求、不上传。
@@ -152,6 +164,27 @@ internal class NfcController(
         val description = NfcCardLogic.describe(raw)
         val shortcut = readShortcut(tag)
 
+        // 三轮的顺序是有讲究的，而且**每轮各自吞掉自己的异常**：
+        // ① APDU 基础轮最快、最稳，先跑；
+        // ② Classic 扇区轮是当前最可能挖出学号的一轮，抢在慢轮前面；
+        // ③ 深度轮（SFI + 255 个 FID）又慢又容易贴不住掉卡，放最后 ——
+        //    就算它整轮崩掉，前面两轮拿到的数据也已经落袋了。
+        val base = if (description.supportsApdu) {
+            runCatching { probeApdu(tag, CardProbeLogic.firstRound()) }.getOrNull()
+        } else null
+
+        val classic = if (description.classicCompat && withClassicScan) {
+            runCatching { probeClassic(tag) }.getOrNull()
+        } else null
+
+        val deep = if (description.supportsApdu && withSfiScan) {
+            runCatching {
+                probeApdu(tag, CardProbeLogic.sfiScan() + CardProbeLogic.fidScan())
+            }.getOrNull()
+        } else null
+
+        val probeLines = base.orEmpty() + deep.orEmpty()
+
         return NfcScan(
             uid = raw.id,
             kind = description.kind,
@@ -162,7 +195,8 @@ internal class NfcController(
             shortcut = shortcut,
             // 用 supportsApdu 而不是 kind：判断依据就是「能不能发指令」本身，
             // 万一将来 kind 的枚举又加了一类，这里也不会漏掉能跑探测的卡。
-            probe = if (description.supportsApdu) probe(tag) else null,
+            probe = probeLines.takeIf { it.isNotEmpty() },
+            classic = classic,
             error = null,
         )
     }
@@ -219,18 +253,27 @@ internal class NfcController(
      * `logic/` 里生成的 APDU 原则上已经是安全的，但这层是**最后一道门**：
      * 将来谁在 `CardProbeLogic` 里填错一个字节，这道门还能兜住，不至于把卡写坏。
      */
-    private fun probe(tag: Tag): List<ProbeLine> {
+    private fun probeApdu(tag: Tag, steps: List<CardProbeLogic.ProbeStep>): List<ProbeLine> {
         val iso = runCatching { IsoDep.get(tag) }.getOrNull() ?: return emptyList()
-
-        val steps = CardProbeLogic.firstRound() +
-            if (withSfiScan) CardProbeLogic.sfiScan() else emptyList()
 
         // 先收集「原始回答」，因为下一轮要发哪些命令**取决于上一轮回答里有什么**
         val raws = mutableListOf<Pair<CardProbeLogic.ProbeStep, CardProbeLogic.ProbeResult>>()
 
         try {
             iso.connect()
-            steps.forEach { step -> raws += step to transceive(iso, step) }
+            steps.forEach { step ->
+                raws += step to transceive(iso, step)
+                // 「选中了就读一段」：只在成功时跟发，且**紧接着**发 ——
+                // 中间夹一次别的 SELECT，当前文件就换了，读到的就不是这个文件的东西。
+                val next = step.followUp
+                if (next != null && raws.last().second.success) {
+                    val sub = CardProbeLogic.ProbeStep(
+                        label = step.followUpLabel ?: "「${step.label}」接着读",
+                        apdu = next,
+                    )
+                    raws += sub to transceive(iso, sub)
+                }
+            }
 
             // 目录记录里若有 ADF 名（tag 4F = AID），直接跟着 SELECT 一次 ——
             // 用户贴一次卡不容易，能多挖一层就多挖一层。
@@ -260,6 +303,104 @@ internal class NfcController(
                 tlvs = CardProbeLogic.parseTlvs(r.data).map(::tlvText),
             )
         }
+    }
+
+    /**
+     * MIFARE Classic 侧的**只读**扇区探测：拿常见默认密钥去认证，过了才读块。
+     *
+     * ## ⚠️⚠️ 这个方法的红线
+     *
+     * 只调 `authenticateSectorWithKeyA/B` 与 `readBlock`。
+     * **不许**在这里出现 `writeBlock` / `increment` / `decrement` / `restore` / `transfer`，
+     * 也不许拿 `MifareClassic.transceive` 发任何非只读指令 ——
+     * 校园卡是别人的资产，写坏了没有厂商密钥就恢复不了。
+     *
+     * ## 认证失败为什么不继续
+     *
+     * 过不了就是过不了。我们**不去破密钥**（不跑嵌套认证攻击之类的东西）：
+     * 那既是在撬别人的门锁，又几乎肯定徒劳（校园卡扇区密钥多是发卡时随机的）。
+     * 如实回报「默认密钥都没过」，让用户知道这条路走到了头，比给一个假希望有用。
+     */
+    private fun probeClassic(tag: Tag): List<ClassicSectorLine> {
+        val mc = runCatching { MifareClassic.get(tag) }.getOrNull() ?: return emptyList()
+        val out = mutableListOf<ClassicSectorLine>()
+
+        try {
+            mc.connect()
+
+            val size = runCatching { mc.size }.getOrNull() ?: 0
+            val totalBlocks = runCatching { mc.blockCount }.getOrNull() ?: 0
+            if (totalBlocks <= 0) {
+                return listOf(
+                    ClassicSectorLine(
+                        sector = -1,
+                        key = null,
+                        blocks = emptyList(),
+                        note = "拿不到卡容量（size=$size），跳过扇区探测",
+                    ),
+                )
+            }
+
+            val planned = ClassicProbeLogic.plan(size).filter { it.block < totalBlocks }
+            val sid = studentId
+
+            planned.groupBy { it.sector }.forEach { (sector, reads) ->
+                val key = authenticate(mc, sector)
+                if (key == null) {
+                    out += ClassicSectorLine(
+                        sector = sector,
+                        key = null,
+                        blocks = emptyList(),
+                        note = "默认密钥都没通过（到此为止，不会去破密钥）",
+                    )
+                    return@forEach
+                }
+
+                val blocks = reads.mapNotNull { r ->
+                    val data = runCatching { mc.readBlock(r.block) }.getOrNull()
+                        ?: return@mapNotNull null
+                    val view = ClassicProbeLogic.decode(data)
+                    ClassicBlockLine(
+                        block = r.block,
+                        indexInSector = r.indexInSector,
+                        hex = view.hex,
+                        ascii = view.ascii,
+                        bcdDigits = view.bcdDigits,
+                        blank = ClassicProbeLogic.isBlank(data),
+                        studentIdHit = sid?.let { StudentIdScan.find(data, it) },
+                    )
+                }
+                out += ClassicSectorLine(sector = sector, key = key, blocks = blocks, note = null)
+            }
+        } finally {
+            runCatching { mc.close() }
+        }
+        return out
+    }
+
+    /**
+     * 用候选密钥挨个试某个扇区，Key A 不成再试 Key B。
+     *
+     * @return 命中的密钥描述（`名字(十六进制) KeyA/KeyB`）；全都没过返回 `null`。
+     *
+     * ⚠️ `authenticateSectorWithKey*` 的返回值与异常都要接住：
+     * 有的 ROM 回 `false`，有的直接抛 `IOException`（标签掉了 / 参数越界），
+     * 任何一种都算「这一个密钥不对」，继续试下一个，不能让整个探测崩在这里。
+     */
+    private fun authenticate(mc: MifareClassic, sector: Int): String? {
+        for (candidate in ClassicProbeLogic.DEFAULT_KEYS) {
+            val key = CardProbeLogic.parseHex(candidate.hex)
+            for (useB in booleanArrayOf(false, true)) {
+                val ok = runCatching {
+                    if (useB) mc.authenticateSectorWithKeyB(sector, key)
+                    else mc.authenticateSectorWithKeyA(sector, key)
+                }.getOrDefault(false)
+                if (ok) {
+                    return "${candidate.name} ${candidate.hex} ${if (useB) "KeyB" else "KeyA"}"
+                }
+            }
+        }
+        return null
     }
 
     /**
@@ -389,8 +530,42 @@ internal data class NfcScan(
     val cardNoCandidates: List<cn.bit101.android.features.nfc.logic.CardNoCandidate> = emptyList(),
     val shortcut: String? = null,
     val probe: List<ProbeLine>? = null,
+    /** MIFARE Classic 侧的只读扇区探测结果；这张卡没有 Classic 兼容层时是 `null`。 */
+    val classic: List<ClassicSectorLine>? = null,
     val error: String? = null,
     val writeOutcome: String? = null,
+)
+
+/**
+ * Classic 一个扇区的探测结果。
+ *
+ * @param key 认证成功的那个密钥（`null` = 全都没过）。
+ * @param blocks 读出来的块；认证失败时为空。
+ * @param note 需要额外说明的一句话（认证失败、拿不到容量等）。
+ */
+internal data class ClassicSectorLine(
+    val sector: Int,
+    val key: String?,
+    val blocks: List<ClassicBlockLine>,
+    val note: String?,
+)
+
+/**
+ * Classic 一个块的读值。
+ *
+ * 三种**并列**的读法都给出来（hex / ascii / BCD 数字串），因为没人预先知道学号
+ * 是用哪种方式存的 —— 让人一眼扫过去，比我们替他挑一种要好。
+ */
+internal data class ClassicBlockLine(
+    val block: Int,
+    val indexInSector: Int,
+    val hex: String,
+    val ascii: String?,
+    val bcdDigits: String?,
+    /** 全零块：多半是没写过的空块，UI 会折叠掉。 */
+    val blank: Boolean,
+    /** 在这个块里**找到了学号**（含编码形式与偏移）；没找到是 `null`。 */
+    val studentIdHit: String?,
 )
 
 internal data class ProbeLine(
