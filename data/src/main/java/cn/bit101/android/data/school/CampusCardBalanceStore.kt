@@ -1,7 +1,7 @@
 package cn.bit101.android.data.school
 
 import android.content.Context
-import java.io.File
+import cn.bit101.android.data.common.TextFileCache
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -23,8 +23,7 @@ object CampusCardBalanceStore {
         CampusCardBalanceLogic.decode(readRaw(context))
 
     /** 读原始文本（调试用：`adb shell cat files/…` 看到的就是它）。 */
-    fun readRaw(context: Context): String? =
-        runCatching { File(context.filesDir, FILE_NAME).readText() }.getOrNull()
+    fun readRaw(context: Context): String? = TextFileCache.read(context, FILE_NAME)
 
     /**
      * 记一笔余额并返回**记完之后**的趋势。
@@ -44,9 +43,7 @@ object CampusCardBalanceStore {
 
         // 内容没变（同一天、余额也一样）就别写盘 —— 本页每次进都会刷新一次
         if (updated != existing) {
-            runCatching {
-                File(context.filesDir, FILE_NAME).writeText(CampusCardBalanceLogic.encode(updated))
-            }
+            TextFileCache.write(context, FILE_NAME, CampusCardBalanceLogic.encode(updated))
         }
 
         return CampusCardBalanceLogic.trend(updated, LocalDate.now(zone), zone)

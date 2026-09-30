@@ -21,9 +21,6 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,6 +42,7 @@ import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.eclass.EclassDdlLogic
 import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.component.PageFab
 import cn.bit101.android.features.common.nav.NavDest
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -213,61 +211,36 @@ internal fun DDLSchedule(
             }
 
             // 悬浮按钮组
-            val fabSize = 42.dp
             Column(
                 modifier = Modifier
                     .padding(10.dp, 20.dp)
             ) {
                 // 添加按钮
-                FloatingActionButton(
-                    modifier = Modifier
-                        .size(fabSize),
+                PageFab(
+                    icon = Icons.Rounded.Add,
+                    description = "next week",
                     onClick = {
                         editData = null
                         showEditDialog.value = true
                     },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    elevation = FloatingActionButtonDefaults.elevation(0.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Add,
-                        contentDescription = "next week",
-                    )
-                }
+                )
                 Spacer(modifier = Modifier.height(10.dp))
                 // 「学士帽」= 去作业平台的主页。**两个平台都还能用**，所以不默认只去一个，
                 // 而是弹窗问一句（用户 2026-09-23 要求）。
                 // ⚠️ 必须用 **App 内 WebView** 打开：只有它和我们共用的 CookieManager 互通，
                 //    换成系统浏览器登录的话，App 这边拿不到会话（见 WebViewCookieSync）
-                FloatingActionButton(
-                    modifier = Modifier
-                        .size(fabSize),
+                PageFab(
+                    icon = Icons.Outlined.School,
+                    description = "作业平台主页",
                     onClick = { showPlatformDialog.value = true },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    elevation = FloatingActionButtonDefaults.elevation(0.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.School,
-                        contentDescription = "作业平台主页",
-                    )
-                }
+                )
                 Spacer(modifier = Modifier.height(10.dp))
                 // 设置按钮
-                FloatingActionButton(
-                    modifier = Modifier
-                        .size(fabSize),
+                PageFab(
+                    icon = Icons.Outlined.Settings,
+                    description = "settings",
                     onClick = { mainController.navigate(NavDest.Setting("ddl")) },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    elevation = FloatingActionButtonDefaults.elevation(0.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Settings,
-                        contentDescription = "settings",
-                    )
-                }
+                )
             }
         }
 

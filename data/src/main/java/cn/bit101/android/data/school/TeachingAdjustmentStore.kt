@@ -1,7 +1,7 @@
 package cn.bit101.android.data.school
 
 import android.content.Context
-import java.io.File
+import cn.bit101.android.data.common.TextFileCache
 import java.time.LocalDate
 
 /**
@@ -35,13 +35,10 @@ object TeachingAdjustmentStore {
     private const val VERSION = "v1"
 
     fun read(context: Context): Cached? =
-        runCatching { File(context.filesDir, FILE_NAME).readText() }.getOrNull()?.let(::parse)
+        TextFileCache.read(context, FILE_NAME)?.let(::parse)
 
-    fun write(context: Context, cached: Cached) {
-        runCatching {
-            File(context.filesDir, FILE_NAME).writeText(encode(cached))
-        }
-    }
+    fun write(context: Context, cached: Cached) =
+        TextFileCache.write(context, FILE_NAME, encode(cached))
 
     // ------------------------------------------------------------ 编解码（纯函数，可单测）
 
@@ -52,13 +49,15 @@ object TeachingAdjustmentStore {
                 .append('|').append(e.date)
                 .append('|').append(if (e.plan is DayPlan.MakeUp) "MAKEUP" else "NOCLASS")
                 .append('|').append((e.plan as? DayPlan.MakeUp)?.targetWeekday ?: "")
-                .append('|').append(sanitize(e.note))
-                .append('|').append(sanitize(e.sourceTitle))
-                .append('|').append(sanitize(e.sourceUrl))
+                .append('|').append(TextFileCache.sanitizeField(e.note))
+                .append('|').append(TextFileCache.sanitizeField(e.sourceTitle))
+                .append('|').append(TextFileCache.sanitizeField(e.sourceUrl))
                 .append('\n')
         }
         cached.notices.forEach { n ->
-            append("N").append('|').append(sanitize(n.title)).append('|').append(sanitize(n.url)).append('\n')
+            append("N").append('|')
+                .append(TextFileCache.sanitizeField(n.title)).append('|')
+                .append(TextFileCache.sanitizeField(n.url)).append('\n')
         }
     }
 
@@ -103,8 +102,4 @@ object TeachingAdjustmentStore {
         }
         return Cached(fetchedAt, entries, notices)
     }
-
-    /** `|` 与换行会破坏格式，落盘前换成 `/`。 */
-    private fun sanitize(s: String): String =
-        s.replace('\n', ' ').replace('\r', ' ').replace('|', '/').trim()
 }

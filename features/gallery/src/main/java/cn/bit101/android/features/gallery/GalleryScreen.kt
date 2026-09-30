@@ -1,8 +1,5 @@
 package cn.bit101.android.features.gallery
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.interaction.Interaction
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -12,7 +9,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,6 +22,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.component.AnimatedPage
+import cn.bit101.android.features.common.component.BackToTopFab
+import cn.bit101.android.features.common.component.PageFab
 import cn.bit101.android.features.common.component.loadable.rememberLoadableLazyColumnState
 import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.common.nav.NavDest
@@ -290,66 +288,31 @@ fun GalleryScreen(
                             .align(Alignment.BottomEnd)
                             .padding(10.dp, 20.dp, 10.dp, 20.dp)
                     ) {
-                        val fabSize = 42.dp
-
                         if (postersState.refreshState is SimpleState.Success) {
                             val show by remember { derivedStateOf { posterStates[horizontalPagerState.currentPage].state.lazyListState.firstVisibleItemIndex > 1 } }
-                            AnimatedVisibility(
-                                visible = show,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
-                                FloatingActionButton(
-                                    modifier = Modifier
-                                        .size(fabSize),
-                                    onClick = {
-                                        scope.launch {
-                                            postersState.state.lazyListState.animateScrollToItem(0, 0)
-                                        }
-                                    },
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                                    contentColor = MaterialTheme.colorScheme.primary,
-                                    elevation = FloatingActionButtonDefaults.elevation(0.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.ArrowUpward,
-                                        contentDescription = "回到顶部"
-                                    )
+                            BackToTopFab(visible = show) {
+                                scope.launch {
+                                    postersState.state.lazyListState.animateScrollToItem(0, 0)
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            FloatingActionButton(
-                                modifier = Modifier.size(fabSize),
+                            PageFab(
+                                icon = Icons.Rounded.Add,
+                                description = "张贴Poster",
                                 onClick = onPost,
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                                contentColor = MaterialTheme.colorScheme.primary,
-                                elevation = FloatingActionButtonDefaults.elevation(0.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Add,
-                                    contentDescription = "张贴Poster"
-                                )
-                            }
+                            )
 
                             Spacer(modifier = Modifier.height(10.dp))
                         }
 
                         // 无论有没有加载出来都可以把设置按钮显示出来
-                        FloatingActionButton(
-                            modifier = Modifier
-                                .size(fabSize),
+                        PageFab(
+                            icon = Icons.Outlined.Settings,
+                            description = "settings",
                             onClick = { mainController.navigate(NavDest.Setting("gallery")) },
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                            contentColor = MaterialTheme.colorScheme.primary,
-                            elevation = FloatingActionButtonDefaults.elevation(0.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Settings,
-                                contentDescription = "settings",
-                            )
-                        }
+                        )
                     }
                 }
             }

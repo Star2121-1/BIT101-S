@@ -1,5 +1,58 @@
 # CHANGES
 
+## 2026-09-30 v1.9.33 重复代码审计（第二批）：文本缓存骨架 + 页面 FAB 样式
+
+v1.9.32 审计完 SSO 之后用户追问「还有没有类似情况」，于是扫了全仓。
+做法：写 `dupscan.py`（`.workbuddy/archive/tools/`）机械找**逐字相同**的连续代码块，
+再人工筛掉框架样板（import 头、Dialog 按钮、`}` 括号组）——
+工具报了 25 组，最后真正值得动的只有两处。
+
+### ① 文本文件缓存骨架：5 处 → 1 处
+
+新增 `data/common/TextFileCache.kt`：`read`（**失败返回 null**）、
+`write`（**失败静默**）、`sanitizeField`（`|` / 换行净化）。
+
+替换：`TeachingAdjustmentStore` / `ScoreCheckStore` / `CampusCardBalanceStore` /
+`CampusNetTrafficStore` / `SeatViolationStore`。
+
+要紧的不是行数，是**这三个约定以前各写一遍**：读失败该不该抛、写失败要不要上报、
+字段里的 `|` 怎么处理 —— 抄 5 遍就会各自演化。
+
+- ⚠️ **落盘格式一个字没动**（仍是 `|` 分隔的纯文本，`adb shell cat files/…` 能看）
+  ⇒ 磁盘上的旧缓存照常能读
+- ⚠️ 净化**不能改成"转义"**（如 `\|`）：解析侧是 `split('|')`，且磁盘上已有旧数据
+- ⚠️ `SeatViolationStore.initialized` 的判据从「文件存在」改为「能读到」——
+  读不出来算**没建过基线**：代价是漏一次通知，好过把一批历史违约当新增连发一串
+
+### ② 页面 FAB 样式：14 处 → 1 处
+
+新增 `features/common/component/PageFab.kt`（`PageFab` + `BackToTopFab`）。
+
+替换：课表 5 / 话廊 3 / DDL 3 / 空教室 2 / 动态 1 = **14 个 FAB**。
+
+这套样式（`42dp` + `primaryContainer` 八成透明 + `primary` 前景 + 零海拔）
+此前**逐字重复 5 遍**，而且已经走样：动态页那份是直接 `size(42.dp)`，
+没走页内的 `fabSize` 变量 —— 想调样式得改 5 个文件，很容易漏掉它。
+
+- ⚠️ **地图页**（50dp 实心校区切换钮，还有选中态）与**课程编辑页**（Material3 默认外观）
+  **刻意不动** —— 它们本来就不是这套样式，硬统一会改变观感
+- ⚠️ `BackToTopFab` 的 `onClick` 放在**最后一个参数**：Kotlin 尾随 lambda 只认最后一个参数，
+  放中间就写不出 `BackToTopFab(visible = show) { … }`（这个顺序踩过一次编译错误）
+- ⚠️ 「回到顶部」的出现判据**不统一**（话廊 `> 1`、空教室 `> 0`）：两个列表首屏高矮不同
+
+### ⚠️ 一处「说到没做到」（如实记下）
+
+原计划是抽「可拖动 FAB 竖排（5 处 → 1 处）」。读代码后发现**拖动只有课表那一处有**，
+其余 4 处的定位方式与条件显示逻辑各不相同 —— 硬抽容器会改变布局。
+真正重复的只是按钮样式，所以改抽 `PageFab`，收益一样而风险低得多。
+
+### 验证
+
+- `data` / `seat` / `schedule` / `gallery` / `common` 五个模块单测全绿、编译通过
+- ⚠️ **本轮没构建 APK、没做真机走查**：工作区里的 `features/nfc` 尚在开发中
+  （`NfcController` 引用未定义的 `readShortcut`、`NfcSettingPage` 缺 import、
+  `features/setting` 引用了它）⇒ app 层编译不过。等 NFC 收尾后需补这两步
+
 ## 2026-09-30 v1.9.32 SSO 认证链路审计：统一共享件，消掉 6 处重复
 
 起因：用户要求「让程序更稳健 —— 先检查所有需要 SSO 认证的部分是否都复用了，

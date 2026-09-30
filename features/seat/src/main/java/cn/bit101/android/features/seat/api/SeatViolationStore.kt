@@ -1,8 +1,8 @@
 package cn.bit101.android.features.seat.api
 
 import android.content.Context
+import cn.bit101.android.data.common.TextFileCache
 import cn.bit101.android.features.seat.SeatViolationLogic
-import java.io.File
 
 /**
  * 「已经见过的违约条目」的小文件存储（`filesDir/seat_renege_keys_<type>`）。
@@ -25,23 +25,24 @@ import java.io.File
  */
 object SeatViolationStore {
 
-    private fun file(context: Context, type: Int) =
-        File(context.filesDir, "seat_renege_keys_$type")
+    /** 每类违约各自一个文件（理由见类 KDoc）。 */
+    private fun fileNameOf(type: Int) = "seat_renege_keys_$type"
 
     fun read(context: Context, type: Int): Set<String> =
-        SeatViolationLogic.decode(
-            runCatching { file(context, type).readText() }.getOrNull().orEmpty()
-        )
+        SeatViolationLogic.decode(TextFileCache.read(context, fileNameOf(type)).orEmpty())
 
-    fun write(context: Context, type: Int, keys: Set<String>) {
-        runCatching { file(context, type).writeText(SeatViolationLogic.encode(keys)) }
-    }
+    fun write(context: Context, type: Int, keys: Set<String>) =
+        TextFileCache.write(context, fileNameOf(type), SeatViolationLogic.encode(keys))
 
     /**
      * 这一类是否**建立过基线**。
      *
-     * 判据是「文件存在」而不是「内容非空」—— 空集合也是一份有效基线
+     * 判据是「能读到这份文件」而不是「内容非空」—— 空集合也是一份有效基线
      * （确实一条违约都没有），不能因为空就每轮都当首次。
+     *
+     * ⚠️ 读不出来（文件不在 / 权限 / IO 异常）**算没建过基线**：代价只是漏一次通知，
+     * 比反过来把一批历史违约当成新增、连着发一串通知要好。
      */
-    fun initialized(context: Context, type: Int): Boolean = file(context, type).exists()
+    fun initialized(context: Context, type: Int): Boolean =
+        TextFileCache.read(context, fileNameOf(type)) != null
 }

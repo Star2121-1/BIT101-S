@@ -22,9 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
@@ -46,6 +43,7 @@ import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.eclass.EclassDdlLogic
 import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.component.PageFab
 import cn.bit101.android.features.common.nav.NavDest
 import java.time.LocalDateTime
 
@@ -162,21 +160,13 @@ internal fun EclassActivityScreen(mainController: MainController) {
             }
         }
 
-        // 设置按钮 —— 与 DDL 页 FAB 同规格（42dp、右下角）
-        FloatingActionButton(
-            modifier = Modifier
-                .padding(end = 10.dp, bottom = 20.dp)
-                .size(42.dp),
+        // 设置按钮 —— 统一走 PageFab（与 DDL 页同规格：42dp、右下角）
+        PageFab(
+            icon = Icons.Outlined.Settings,
+            description = "settings",
             onClick = { mainController.navigate(NavDest.Setting("activity")) },
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-            contentColor = MaterialTheme.colorScheme.primary,
-            elevation = FloatingActionButtonDefaults.elevation(0.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Settings,
-                contentDescription = "settings",
-            )
-        }
+            modifier = Modifier.padding(end = 10.dp, bottom = 20.dp),
+        )
     }
 }
 

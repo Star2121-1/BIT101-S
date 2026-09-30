@@ -12,7 +12,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowRight
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -31,6 +30,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.component.BackToTopFab
+import cn.bit101.android.features.common.component.PageFab
 import cn.bit101.android.features.common.helper.SimpleDataState
 import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.common.nav.NavDest
@@ -564,52 +565,23 @@ internal fun FreeClassroomSearch(
         }
 
         // 悬浮按钮组
-        val fabSize = 42.dp
         Column(
             modifier = Modifier
                 .padding(10.dp, 20.dp)
         ) {
             // 从话廊那毛过来的回到顶部按钮
             val show by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
-            AnimatedVisibility(
-                visible = show,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                FloatingActionButton(
-                    modifier = Modifier
-                        .size(fabSize),
-                    onClick = {
-                        coroutineScope.launch {
-                            listState.animateScrollToItem(0)
-                        }
-                    },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    elevation = FloatingActionButtonDefaults.elevation(0.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.ArrowUpward,
-                        contentDescription = "回到顶部"
-                    )
-                }
+            BackToTopFab(visible = show) {
+                coroutineScope.launch { listState.animateScrollToItem(0) }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
             // 设置按钮
-            FloatingActionButton(
-                modifier = Modifier
-                    .size(fabSize),
+            PageFab(
+                icon = Icons.Outlined.Settings,
+                description = "settings",
                 onClick = { mainController.navigate(NavDest.Setting("freeClassroom")) },
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                contentColor = MaterialTheme.colorScheme.primary,
-                elevation = FloatingActionButtonDefaults.elevation(0.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Settings,
-                    contentDescription = "settings",
-                )
-            }
+            )
         }
     }
 }

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.*
@@ -26,9 +25,6 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -49,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.features.common.component.PageFab
 import cn.bit101.android.features.common.utils.getCurrentTime
 import cn.bit101.android.features.common.utils.mixColor
 import java.time.LocalDate
@@ -378,8 +375,6 @@ internal fun CourseScheduleCalendar(
         val fabPaddingVerticalDp = 20.dp // 垂直边距
         val fabPaddingVerticalPx = LocalDensity.current.run { fabPaddingVerticalDp.toPx() }
         val fabPaddingHorizontalDp = 10.dp // 水平边距
-        val fabSpacerSize = 10.dp // 按钮间距
-        val fabSize = 42.dp
         var fabsSize by remember { mutableStateOf(IntSize.Zero) }
         Column(
             modifier = Modifier
@@ -404,73 +399,35 @@ internal fun CourseScheduleCalendar(
                                 -boxSize.height + fabPaddingVerticalPx * 2 + fabsSize.height
                     }
                 ),
-            verticalArrangement = Arrangement.spacedBy(fabSpacerSize),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            FloatingActionButton(
-                modifier = Modifier
-                    .size(fabSize),
+            // ⚠️ 统一用 PageFab（统一样式在 features/common），别在这里手写
+            // FloatingActionButton + 那四行颜色配置 —— 那正是审计里清掉的重复
+            PageFab(
+                icon = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                description = "next week",
                 onClick = { onChangeWeek(week + 1) },
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                contentColor = MaterialTheme.colorScheme.primary,
-                elevation = FloatingActionButtonDefaults.elevation(0.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                    contentDescription = "next week",
-                )
-            }
-            FloatingActionButton(
-                modifier = Modifier
-                    .size(fabSize),
+            )
+            PageFab(
+                icon = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                description = "last week",
                 onClick = { onChangeWeek(week - 1) },
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                contentColor = MaterialTheme.colorScheme.primary,
-                elevation = FloatingActionButtonDefaults.elevation(0.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
-                    contentDescription = "last week",
-                )
-            }
-            FloatingActionButton(
-                modifier = Modifier
-                    .size(fabSize),
+            )
+            PageFab(
+                icon = Icons.Outlined.EventNote,
+                description = "考试安排",
                 onClick = onShowExams,
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                contentColor = MaterialTheme.colorScheme.primary,
-                elevation = FloatingActionButtonDefaults.elevation(0.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.EventNote,
-                    contentDescription = "考试安排",
-                )
-            }
-            FloatingActionButton(
-                modifier = Modifier
-                    .size(fabSize),
+            )
+            PageFab(
+                icon = Icons.Rounded.Add,
+                description = "add schedule",
                 onClick = onAddSchedule,
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                contentColor = MaterialTheme.colorScheme.primary,
-                elevation = FloatingActionButtonDefaults.elevation(0.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Add,
-                    contentDescription = "add schedule",
-                )
-            }
-            FloatingActionButton(
-                modifier = Modifier
-                    .size(fabSize),
+            )
+            PageFab(
+                icon = Icons.Outlined.Settings,
+                description = "settings",
                 onClick = onConfig,
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(0.8f),
-                contentColor = MaterialTheme.colorScheme.primary,
-                elevation = FloatingActionButtonDefaults.elevation(0.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Settings,
-                    contentDescription = "settings",
-                )
-            }
+            )
         }
     }
 }

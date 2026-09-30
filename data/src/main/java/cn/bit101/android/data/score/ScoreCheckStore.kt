@@ -1,7 +1,7 @@
 package cn.bit101.android.data.score
 
 import android.content.Context
-import java.io.File
+import cn.bit101.android.data.common.TextFileCache
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -62,11 +62,10 @@ object ScoreCheckStore {
     private const val FILE_NAME = "score_last_check_status"
 
     fun read(context: Context): Status? =
-        runCatching { File(context.filesDir, FILE_NAME).readText() }.getOrNull()?.let(::parse)
+        TextFileCache.read(context, FILE_NAME)?.let(::parse)
 
-    fun write(context: Context, status: Status) {
-        runCatching { File(context.filesDir, FILE_NAME).writeText(encode(status)) }
-    }
+    fun write(context: Context, status: Status) =
+        TextFileCache.write(context, FILE_NAME, encode(status))
 
     fun encode(status: Status): String = buildString {
         append(status.atMillis).append('|').append(status.code.name).append('|').append(status.count)
@@ -99,10 +98,9 @@ object ScoreCheckStore {
     fun humanReason(detail: String?): String? =
         detail?.substringBefore('[')?.trim()?.takeIf { it.isNotBlank() }?.take(60)
 
-    /** 落盘前净化：去掉换行与分隔符，并限长（诊断够用即可）。 */
+    /** 落盘前净化（分隔符规则见 [TextFileCache.sanitizeField]），并限长（诊断够用即可）。 */
     private fun sanitizeDetail(detail: String?): String? =
-        detail?.replace('\n', ' ')?.replace('\r', ' ')?.replace('|', '/')?.trim()
-            ?.takeIf { it.isNotBlank() }?.take(200)
+        detail?.let { TextFileCache.sanitizeField(it) }?.takeIf { it.isNotBlank() }?.take(200)
 
     /** 设置页显示文案（纯函数，可单测）。 */
     fun statusText(status: Status?): String {
