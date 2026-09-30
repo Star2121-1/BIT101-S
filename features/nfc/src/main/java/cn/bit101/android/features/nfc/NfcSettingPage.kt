@@ -109,16 +109,17 @@ fun NfcSettingPage(
     ) {
         CapabilityCard(capability = capability, context = context)
 
-        if (capability != NfcCapability.Unsupported) {
-            ReadCardSection(
-                capability = capability,
-                busy = busy,
-                scan = scan,
-                deepProbe = deepProbe,
-                onDeepProbeChange = { deepProbe = it },
-                onCopy = { mainController.copyText(clipboard, it) },
-            )
-        }
+        // ⚠️ 这里**不做** `if (capability != Unsupported)`：哪怕本机不支持，读卡区块也照渲染。
+        // 「有数据才渲染」这条纪律是这个项目踩过三次换来的 —— 把区块藏起来的话，
+        // 用户根本不知道有这个功能，换到有 NFC 的机器上也想不起来回来看。
+        ReadCardSection(
+            capability = capability,
+            busy = busy,
+            scan = scan,
+            deepProbe = deepProbe,
+            onDeepProbeChange = { deepProbe = it },
+            onCopy = { mainController.copyText(clipboard, it) },
+        )
 
         ShortcutSection(
             capability = capability,
@@ -178,22 +179,24 @@ private fun ReadCardSection(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionTitle("校园卡读取（诊断）")
 
+        val prompt = when {
+            busy == NfcController.Busy.Reading -> null
+            capability == NfcCapability.Unsupported ->
+                "这台机器读不了卡（见上面那张卡）。换一台带 NFC 的安卓机，这个区块就活了。"
+            capability == NfcCapability.Disabled -> "先把 NFC 打开才能读卡。"
+            else -> "把校园卡贴在手机背面。读到什么就列什么，不加我们自己的推断。"
+        }
         if (busy == NfcController.Busy.Reading) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(16.dp))
                 Text("正在读卡…")
             }
-        } else if (capability == NfcCapability.Disabled) {
-            Text("先把 NFC 打开才能读卡。", style = MaterialTheme.typography.bodySmall)
         } else {
-            Text(
-                "把校园卡贴在手机背面。读到什么就列什么，不加我们自己的推断。",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            prompt?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(checked = deepProbe, onCheckedChange = onDeepProbeChange, enabled = capability != NfcCapability.Disabled)
+            Switch(checked = deepProbe, onCheckedChange = onDeepProbeChange, enabled = capability == NfcCapability.Enabled)
             Column(Modifier.weight(1f)) {
                 Text("顺便扫一遍文件区（更慢）")
                 Text(
