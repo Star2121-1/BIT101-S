@@ -101,6 +101,80 @@ internal data class CardNoCandidate(
 )
 
 /**
+ * 在卡内数据里**找学号**。
+ *
+ * ## 为什么这件事值得单独做
+ *
+ * 上游当年判「NFC 刷校园卡登录不可行」，根因是**卡号 → 学号 的映射表只在一卡通中心**，
+ * 我们拿不到。但如果**学号本身就写在卡里**，那层映射根本不需要 ——
+ * 卡自己就报出了它是谁的。
+ *
+ * ⚠️ 这是**假设**，不是结论：会不会写、写在哪个文件、用什么编码，只有真卡扫一遍才知道。
+ * 所以这里的职责很窄 —— 拿用户给的学号，把可能的编码都列出来，去返回字节里**找**；
+ * 找得到就标出来，找不到就如实说没找到，**绝不猜一个**。
+ */
+internal object StudentIdScan {
+
+    /**
+     * 学号在卡里可能的编码形式。
+     *
+     * - **BCD**：学号最常见的存法。两位十进制压进一个字节，
+     *   如 `1120241355` → `11 20 24 13 55`（5 字节）。校园卡的脱机钱包文件里基本都是这个。
+     * - **ASCII**：直接当文本存，`"1120241355"`（10 字节）。少数系统会这么干。
+     * - **反序 BCD**：字节序反过来。扇区数据有大端小端之争，两种都试一遍成本为零。
+     */
+    fun encodingsOf(studentId: String): List<Pair<String, ByteArray>> {
+        val digits = studentId.trim()
+        if (digits.isEmpty() || digits.any { !it.isDigit() }) return emptyList()
+
+        val bcd = bcdOf(digits) ?: return emptyList()
+        return buildList {
+            add("BCD" to bcd)
+            add("BCD 反序" to bcd.reversedArray())
+            add("ASCII" to digits.toByteArray(Charsets.US_ASCII))
+        }
+    }
+
+    /**
+     * 在 [data] 里找学号。
+     *
+     * @return 命中描述（含编码形式与偏移），没找到则 `null`。
+     */
+    fun find(data: ByteArray, studentId: String): String? {
+        if (data.isEmpty()) return null
+        encodingsOf(studentId).forEach { (name, needle) ->
+            val at = indexOf(data, needle)
+            if (at >= 0) return "$name 形式，偏移 $at"
+        }
+        return null
+    }
+
+    /**
+     * BCD：两位十进制压一个字节。奇数位**末尾补 0**（补在尾部而不是头部，
+     * 是因为卡里高位在前；若补错位置就永远匹配不上，所以这里不做别的猜测）。
+     */
+    private fun bcdOf(digits: String): ByteArray? {
+        val padded = if (digits.length % 2 == 0) digits else digits + "0"
+        return ByteArray(padded.length / 2) { i ->
+            val hi = padded[i * 2].digitToIntOrNull() ?: return null
+            val lo = padded[i * 2 + 1].digitToIntOrNull() ?: return null
+            (hi * 16 + lo).toByte()
+        }
+    }
+
+    private fun indexOf(data: ByteArray, needle: ByteArray): Int {
+        if (needle.isEmpty() || needle.size > data.size) return -1
+        outer@ for (i in 0..(data.size - needle.size)) {
+            for (j in needle.indices) {
+                if (data[i + j] != needle[j]) continue@outer
+            }
+            return i
+        }
+        return -1
+    }
+}
+
+/**
  * 读卡结果的**无关框架**翻译层。
  *
  * 输入是从系统 `Tag` 抄下来的 [RawTag]，输出不需要任何 Android 类参与 ——

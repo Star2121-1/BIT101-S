@@ -194,6 +194,51 @@ class NfcCardLogicTest {
         assertEquals("2079356279", values["UID 反序当整数（十进制）"])
     }
 
+    // ------------------------------------------------------------ 卡内找学号
+
+    @Test
+    fun `学号 BCD 编码是两位十进制压一个字节`() {
+        val bcd = StudentIdScan.encodingsOf("1120241355").first { it.first == "BCD" }.second
+        assertEquals("11 20 24 13 55", CardProbeLogic.toHex(bcd))
+    }
+
+    @Test
+    fun `学号在返回数据里能被 BCD 形式找到`() {
+        // 前面塞几个无关字节，模拟「学号在某个文件的中间」
+        val data = byteArrayOf(0x00, 0x6F, 0x11, 0x20, 0x24, 0x13, 0x55, 0x90.toByte(), 0x00)
+        val hit = StudentIdScan.find(data, "1120241355")
+        assertTrue("应命中 BCD：$hit", hit?.contains("BCD") == true)
+        assertTrue("偏移应是 2：$hit", hit?.contains("偏移 2") == true)
+    }
+
+    @Test
+    fun `学号以 ASCII 形式存放也能找到`() {
+        val data = ("\u0000\u0000" + "1120241355" + "\u0000").toByteArray(Charsets.ISO_8859_1)
+        val hit = StudentIdScan.find(data, "1120241355")
+        assertTrue("应命中 ASCII：$hit", hit?.contains("ASCII") == true)
+    }
+
+    @Test
+    fun `找不到就返回 null 而不是猜一个`() {
+        val data = byteArrayOf(0x11, 0x22, 0x33)
+        assertNull(StudentIdScan.find(data, "1120241355"))
+        assertNull(StudentIdScan.find(ByteArray(0), "1120241355"))
+    }
+
+    /** 学号里混了非数字（比如有人把 `1120241355x` 贴进来）时不该编出半个 BCD。 */
+    @Test
+    fun `非数字学号不产出任何编码`() {
+        assertTrue(StudentIdScan.encodingsOf("1120241355x").isEmpty())
+        assertTrue(StudentIdScan.encodingsOf("").isEmpty())
+    }
+
+    /** 奇数位学号补 0 在**尾部**：补错位置就永远匹配不上，这里钉住。 */
+    @Test
+    fun `奇数位学号末尾补零`() {
+        val bcd = StudentIdScan.encodingsOf("12345").first { it.first == "BCD" }.second
+        assertEquals("12 34 50", CardProbeLogic.toHex(bcd))
+    }
+
     /** 7 字节 UID 转整数会超出 Int/Long 的按位拼装直觉，这里确认没溢出也没丢符号。 */
     @Test
     fun `7 字节 UID 的整串整数用无符号大数算`() {

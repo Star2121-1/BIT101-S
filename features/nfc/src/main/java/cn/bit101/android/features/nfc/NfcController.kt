@@ -15,6 +15,7 @@ import cn.bit101.android.features.nfc.logic.CardProbeLogic
 import cn.bit101.android.features.nfc.logic.NdefShortcutLogic
 import cn.bit101.android.features.nfc.logic.NfcCardLogic
 import cn.bit101.android.features.nfc.logic.RawTag
+import cn.bit101.android.features.nfc.logic.StudentIdScan
 import java.util.concurrent.Executors
 
 /**
@@ -67,6 +68,15 @@ internal class NfcController(
     /** 是否在小目标上多跑一轮 SFI 扫描（只对 CPU 卡有意义，且明显更慢）。 */
     @Volatile
     var withSfiScan: Boolean = false
+
+    /**
+     * 本人学号。**只用来在探测返回里找**，不做任何网络请求、不上传。
+     *
+     * 为什么值得找：学号若就写在卡里，「卡号 → 学号」那层映射就不需要外部表了 ——
+     * 卡自己会报出它是谁的。这是上游当年判「不可行」的根因所在，能不能翻案就看这一找。
+     */
+    @Volatile
+    var studentId: String? = null
 
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -225,7 +235,15 @@ internal class NfcController(
                 val raw = runCatching { iso.transceive(apdu) }.getOrNull()
                     ?: return@map ProbeLine(step.label, CardProbeLogic.toHex(apdu), "", "transceive 失败", null)
                 val r = CardProbeLogic.parseResponse(raw)
-                ProbeLine(step.label, CardProbeLogic.toHex(apdu), r.sw, r.swText, CardProbeLogic.toHex(r.data))
+                val sid = studentId
+                ProbeLine(
+                    label = step.label,
+                    apdu = CardProbeLogic.toHex(apdu),
+                    sw = r.sw,
+                    swText = r.swText,
+                    data = CardProbeLogic.toHex(r.data),
+                    studentIdHit = sid?.let { StudentIdScan.find(r.data, it) },
+                )
             }
         } finally {
             runCatching { iso.close() }
@@ -330,4 +348,6 @@ internal data class ProbeLine(
     val sw: String,
     val swText: String?,
     val data: String?,
+    /** 在这条返回里**找到了学号**（含编码形式与偏移）；没找到是 `null`。 */
+    val studentIdHit: String? = null,
 )

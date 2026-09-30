@@ -24,6 +24,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,6 +75,7 @@ fun NfcSettingPage(
     var scan by remember { mutableStateOf<NfcScan?>(null) }
     var route by remember { mutableStateOf<String?>(null) }
     var deepProbe by remember { mutableStateOf(false) }
+    var studentId by remember { mutableStateOf("") }
     var controller by remember { mutableStateOf<NfcController?>(null) }
 
     DisposableEffect(activity, capability) {
@@ -92,6 +94,12 @@ fun NfcSettingPage(
                 created.shutdown()
             }
         }
+    }
+
+    // 学号一变就同步给控制器；控制器在别的线程上读它。
+    DisposableEffect(controller, studentId) {
+        controller?.studentId = studentId.trim().takeIf { it.isNotEmpty() }
+        onDispose { }
     }
 
     // 开关一变就同步给控制器；控制器在别的线程上读它。
@@ -117,6 +125,8 @@ fun NfcSettingPage(
             busy = busy,
             scan = scan,
             deepProbe = deepProbe,
+            studentId = studentId,
+            onStudentIdChange = { studentId = it },
             onDeepProbeChange = { deepProbe = it },
             onCopy = { mainController.copyText(clipboard, it) },
         )
@@ -173,6 +183,8 @@ private fun ReadCardSection(
     busy: NfcController.Busy,
     scan: NfcScan?,
     deepProbe: Boolean,
+    studentId: String,
+    onStudentIdChange: (String) -> Unit,
     onDeepProbeChange: (Boolean) -> Unit,
     onCopy: (String) -> Unit,
 ) {
@@ -194,6 +206,21 @@ private fun ReadCardSection(
         } else {
             prompt?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
+
+        OutlinedTextField(
+            value = studentId,
+            onValueChange = onStudentIdChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("学号（可选）") },
+            placeholder = { Text("填了才会在探测结果里找学号") },
+        )
+        Text(
+            "填了学号之后，每一条探测返回都会拿它去比：先试 BCD（两位十进制压一个字节），" +
+                "再试 ASCII，还试反序。命中就标出来 —— 学号若真写在卡里，\"卡号换不来学号\"这个" +
+                "旧结论就可以翻案。学号只在手机上比对，不发到任何地方。",
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(checked = deepProbe, onCheckedChange = onDeepProbeChange, enabled = capability == NfcCapability.Enabled)
@@ -265,6 +292,13 @@ private fun ReadResultCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (!line.data.isNullOrBlank()) MonoText(line.data)
+                    line.studentIdHit?.let { hit ->
+                        Text(
+                            "★ 在这里找到了学号（$hit）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
 
@@ -375,6 +409,7 @@ private fun dumpOf(scan: NfcScan): String = buildString {
         lines.forEach { line ->
             appendLine("  [${line.label}] ${line.apdu} -> ${line.sw} ${line.swText ?: "未知状态字"}")
             line.data?.takeIf { it.isNotBlank() }?.let { appendLine("      data: $it") }
+            line.studentIdHit?.let { appendLine("      ★ 命中学号：$it") }
         }
     }
     scan.error?.let { appendLine("错误: $it") }
