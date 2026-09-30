@@ -125,4 +125,81 @@ class NfcCardLogicTest {
         val desc = NfcCardLogic.describe(RawTag(id = byteArrayOf(0x04), techs = listOf("android.nfc.tech.NfcA")))
         assertNull(desc.historicalHex)
     }
+
+    // ------------------------------------------------- 北理工校园卡真卡实测（2026-09-30）
+
+    /**
+     * 用户从真校园卡贴回来的 techList：
+     * `[IsoDep, NfcA, NfcA, MifareClassic, NdefFormatable]`。
+     *
+     * 这一条是整个模块最重要的一组断言：上一版把 `MifareClassic` 排在 `IsoDep` 前面，
+     * 结果这种**双界面卡**被判成「纯 Classic，要密钥，读不了」——
+     * 那条唯一能安全取数的 APDU 通道被我们自己掐了，贴了卡却拿不到任何探测结果。
+     */
+    @Test
+    fun `校园卡双界面必须判成 CPU 卡而不是 MIFARE Classic`() {
+        val raw = RawTag(
+            id = byteArrayOf(0x77, 0x75, 0xF0.toByte(), 0x7B),
+            techs = listOf(
+                "android.nfc.tech.IsoDep",
+                "android.nfc.tech.NfcA",
+                "android.nfc.tech.NfcA",
+                "android.nfc.tech.MifareClassic",
+                "android.nfc.tech.NdefFormatable",
+            ),
+        )
+
+        assertEquals(CardKind.CPU_CARD, NfcCardLogic.recognize(raw))
+        assertTrue(NfcCardLogic.supportsApdu(raw))
+        // 同时要记住它带 Classic 层 —— 写入流程靠这个标记拦住危险操作
+        assertTrue(NfcCardLogic.describe(raw).classicCompat)
+    }
+
+    @Test
+    fun `重复的 tech 在展示列表里只留一个`() {
+        val raw = RawTag(
+            id = byteArrayOf(0x77),
+            techs = listOf("android.nfc.tech.IsoDep", "android.nfc.tech.NfcA", "android.nfc.tech.NfcA"),
+        )
+        assertEquals(listOf("IsoDep", "NfcA"), NfcCardLogic.techShortNames(raw))
+    }
+
+    /** 只有 Classic 没有 IsoDep 的卡，仍然是 Classic —— 别把上面那条顺序改过头。 */
+    @Test
+    fun `纯 MIFARE Classic 不会被误判成 CPU 卡`() {
+        val raw = RawTag(
+            id = byteArrayOf(0x01),
+            techs = listOf("android.nfc.tech.NfcA", "android.nfc.tech.MifareClassic"),
+        )
+        assertEquals(CardKind.MIFARE_CLASSIC, NfcCardLogic.recognize(raw))
+        assertFalse(NfcCardLogic.supportsApdu(raw))
+        assertTrue(NfcCardLogic.describe(raw).classicCompat)
+    }
+
+    /**
+     * 「整串当无符号整数」是上一版漏掉的一项 —— 用户把真卡的候选全列出来之后发现
+     * 9 位与 12 位都对不上卡面。补进来后最可能命中的就是那个 10 位的数字。
+     */
+    @Test
+    fun `卡面号候选含整串整数且列在最前`() {
+        val candidates = NfcCardLogic.candidates(byteArrayOf(0x77, 0x75, 0xF0.toByte(), 0x7B))
+        val labels = candidates.map { it.label }
+
+        assertEquals("UID 正序当整数（十进制）", labels.first())
+        assertEquals("UID 反序当整数（十进制）", labels[1])
+
+        val values = candidates.associate { it.label to it.value }
+        // 0x7775F07B 与 0x7BF07577 的十进制值（用 `python -c "print(hex)"` 核过，别手算）
+        assertEquals("2004217979", values["UID 正序当整数（十进制）"])
+        assertEquals("2079356279", values["UID 反序当整数（十进制）"])
+    }
+
+    /** 7 字节 UID 转整数会超出 Int/Long 的按位拼装直觉，这里确认没溢出也没丢符号。 */
+    @Test
+    fun `7 字节 UID 的整串整数用无符号大数算`() {
+        val seven = byteArrayOf(0x04, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66)
+        val value = NfcCardLogic.candidates(seven).first().value
+        assertEquals(java.math.BigInteger(1, seven).toString(), value)
+        assertTrue(value.length >= 16)
+    }
 }

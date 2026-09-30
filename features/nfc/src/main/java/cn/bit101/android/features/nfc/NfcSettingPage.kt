@@ -228,6 +228,13 @@ private fun ReadResultCard(
             KeyValue("UID", scan.uidHex)
             KeyValue("技术列表", scan.techShortNames.joinToString(" / "))
             scan.kind?.let { KeyValue("卡类型", kindLabel(it)) }
+            if (scan.classicCompat) {
+                Text(
+                    "双界面卡：同时提供 ISO 14443-4 通道与 MIFARE Classic 兼容层。" +
+                        "正因为有前一条，下面的 APDU 探测才跑得起来；也因为有后一条，这张卡**不能写入**。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
 
             scan.shortcut?.let { text ->
                 HorizontalDivider()
@@ -357,6 +364,7 @@ private fun dumpOf(scan: NfcScan): String = buildString {
     appendLine("UID: ${scan.uidHex}")
     appendLine("技术: ${scan.techShortNames.joinToString(", ")}")
     appendLine("卡类型: ${scan.kind?.let(::kindLabel) ?: "未判定"}")
+    if (scan.classicCompat) appendLine("双界面: 同时有 MIFARE Classic 兼容层（禁止写入）")
     scan.shortcut?.let { appendLine("标签载荷: $it") }
     if (scan.cardNoCandidates.isNotEmpty()) {
         appendLine("卡面号候选:")

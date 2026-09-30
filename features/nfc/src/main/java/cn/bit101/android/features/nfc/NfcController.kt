@@ -147,9 +147,12 @@ internal class NfcController(
             kind = description.kind,
             uidHex = NfcCardLogic.uidHex(raw.id),
             techShortNames = description.techShortNames,
+            classicCompat = description.classicCompat,
             cardNoCandidates = NfcCardLogic.candidates(raw.id),
             shortcut = shortcut,
-            probe = if (description.kind == CardKind.CPU_CARD) probe(tag) else null,
+            // 用 supportsApdu 而不是 kind：判断依据就是「能不能发指令」本身，
+            // 万一将来 kind 的枚举又加了一类，这里也不会漏掉能跑探测的卡。
+            probe = if (description.supportsApdu) probe(tag) else null,
             error = null,
         )
     }
@@ -234,10 +237,41 @@ internal class NfcController(
     /**
      * 往贴纸里写一条快捷入口。
      *
-     * 两条 NDEF 记录：① 我们自己的载荷；② Android Application Record（AAR）——
-     * 没有 AAR 的话，别人碰这张贴纸会弹「要用哪个应用打开」，而我们的 App 大概率不在那列表里。
+     * ## ⚠️⚠️ 第一道红线：不许往校园卡上写
+     *
+     * 真卡实测发现校园卡的 techList 里**有 `NdefFormatable`**（NDEF 区是空白、可格式化）——
+     * 它的字面意思是「可以拿来当标签用」，但这类卡同时**有 `MifareClassic`**。
+     * 对 MIFARE Classic 写 NDEF（尤其是 `NdefFormatable.format()`）会**重写扇区尾块**，
+     * 也就是密钥 A/B 与存取位；一旦弄坏，学校的读卡器就不认这张卡了，
+     * 而我们手里没有厂商密钥，**无法恢复**。
+     *
+     * 所以这里先拦一道：只要还带 Classic tech，就一律不写 ——
+     * 「能写」和「该写」是两回事，省一条分支换来一张废卡不值得。
+     * 快捷入口请写在我们自己的 NTAG 贴纸上（`Ndef` / 纯 `NdefFormatable` 的那种）。
      */
     private fun writeShortcut(tag: Tag, payload: String): NfcScan {
+        val techs = tag.techList.toList()
+
+        fun refused(why: String) = NfcScan(
+            uid = tag.id,
+            kind = null,
+            uidHex = NfcCardLogic.uidHex(tag.id),
+            techShortNames = techs.map { it.substringAfterLast('.') }.distinct(),
+            cardNoCandidates = emptyList(),
+            shortcut = null,
+            probe = null,
+            error = null,
+            writeOutcome = why,
+        )
+
+        if (techs.contains("android.nfc.tech.MifareClassic")) {
+            return refused(
+                "拒绝写入：这张卡带 MIFARE Classic 扇区（校园卡就是这种）。" +
+                    "往 Classic 卡写 NDEF 会重写扇区尾块，可能把它弄成废卡。" +
+                    "快捷入口请写在自己的 NTAG 贴纸上。"
+            )
+        }
+
         val record = NdefRecord.createUri(payload)
         val aar = NdefRecord.createApplicationRecord(activity.packageName)
         val message = NdefMessage(arrayOf(record, aar))
@@ -266,17 +300,7 @@ internal class NfcController(
             }
         }.getOrElse { e -> "写入失败：${e.message}" }
 
-        return NfcScan(
-            uid = tag.id,
-            kind = null,
-            uidHex = tag.id.let(NfcCardLogic::uidHex),
-            techShortNames = tag.techList.map { it.substringAfterLast('.') },
-            cardNoCandidates = emptyList(),
-            shortcut = null,
-            probe = null,
-            error = null,
-            writeOutcome = outcome,
-        )
+        return refused(outcome)
     }
 }
 
@@ -291,6 +315,8 @@ internal data class NfcScan(
     val kind: CardKind?,
     val uidHex: String = "",
     val techShortNames: List<String> = emptyList(),
+    /** 双界面卡（同时有 Classic 兼容层）；UI 要明说是这种卡，写入流程会据此拒绝。 */
+    val classicCompat: Boolean = false,
     val cardNoCandidates: List<cn.bit101.android.features.nfc.logic.CardNoCandidate> = emptyList(),
     val shortcut: String? = null,
     val probe: List<ProbeLine>? = null,

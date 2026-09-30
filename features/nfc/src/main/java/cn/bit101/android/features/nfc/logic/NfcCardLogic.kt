@@ -73,6 +73,15 @@ internal data class CardDescription(
     val uidSize: Int,
     /** 能不能对它发 APDU —— 决定要不要接着跑 `CardProbeLogic`。 */
     val supportsApdu: Boolean,
+    /**
+     * 是否**同时**暴露了 MIFARE Classic 兼容层。
+     *
+     * 北理工校园卡实测就是这种双界面卡（`IsoDep` 与 `MifareClassic` 同时在 techList 里）。
+     * 两个用处：① UI 告诉用户「它既是 CPU 卡、也能当 Classic 读」；
+     * ② ⚠️ 写入前当**红线** —— 见 `NfcController.writeShortcut`：往这种卡写 NDEF
+     * 会重写扇区尾块（密钥与存取位），可能把一卡通数据搞坏。
+     */
+    val classicCompat: Boolean,
     /** 去掉 `android.nfc.tech.` 前缀后的技术列表，如 `["NfcA", "MifareClassic"]`。 */
     val techShortNames: List<String>,
     /** 历史字节的十六进制字符串；没有则 `null`。 */
@@ -104,16 +113,17 @@ internal object NfcCardLogic {
     /**
      * 判断卡的大类。
      *
-     * ## 顺序为什么是这样
-     *
-     * Type 4 标签会同时报 `IsoDep` 和 `Ndef`：此时它**确实能发 APDU**，
-     * 对我们更有用的是把它当 [CardKind.CPU_CARD] 去跑 SELECT 探测 ——
-     * 当成贴纸处理的话，APDU 这条唯一的取数路就断了。
-     * 所以 `IsoDep` 的判断要排在 `Ndef` **前面**。
+     * `IsoDep` 优先于 `MifareClassic`：两者的取舍写在下面的注释里，是真卡实测换来的，
+     * 不要依据「Classic 更常见」这类直觉调回去。
      */
     fun recognize(raw: RawTag): CardKind = when {
-        raw.techs.contains(TECH_PREFIX + "MifareClassic") -> CardKind.MIFARE_CLASSIC
+        // ⚠️⚠️ `IsoDep` 必须排在 `MifareClassic` **前面** —— 这条顺序是**真卡实测**换来的。
+        // 北理工校园卡实测 techList = [IsoDep, NfcA, NfcA, MifareClassic, NdefFormatable]：
+        // 它同时具备 Classic 兼容层与 ISO 14443-4 通道。判成 MIFARE_CLASSIC 的后果是
+        // 上层认为「要密钥，读不了」直接放弃 —— 那条**唯一能安全取数**的 APDU 通道就被我们自己掐了。
+        // 只要有 IsoDep 就一定能发 APDU；反过来 Classic 读扇区要密钥，我们大概率没有。
         raw.techs.contains(TECH_PREFIX + "IsoDep") -> CardKind.CPU_CARD
+        raw.techs.contains(TECH_PREFIX + "MifareClassic") -> CardKind.MIFARE_CLASSIC
         raw.techs.contains(TECH_PREFIX + "NfcV") -> CardKind.NFC_V
         raw.techs.any { it == TECH_PREFIX + "Ndef" || it == TECH_PREFIX + "NdefFormatable" } ->
             CardKind.NFC_FORUM_TAG
@@ -124,9 +134,15 @@ internal object NfcCardLogic {
     fun supportsApdu(raw: RawTag): Boolean =
         raw.techs.contains(TECH_PREFIX + "IsoDep")
 
-    /** 把 techList 里的全限定名压成短名，便于人读。不是本模块认识的 tech 原样返回。 */
+    /**
+     * 去掉 `android.nfc.tech.` 前缀后的技术列表。
+     *
+     * 做了去重是因为**真的会有重复**：北理工校园卡实测报回来的是
+     * `[IsoDep, NfcA, NfcA, MifareClassic, NdefFormatable]`（部分 ROM 会重复枚举同一 tech）。
+     * 重复项不携带额外信息，列出来只会让人以为有两种不同的技术。
+     */
     fun techShortNames(raw: RawTag): List<String> =
-        raw.techs.map { it.removePrefix(TECH_PREFIX) }
+        raw.techs.map { it.removePrefix(TECH_PREFIX) }.distinct()
 
     /** UID 的十六进制表示（大写、无分隔符、按给定顺序）。 */
     fun uidHex(bytes: ByteArray): String =
@@ -147,6 +163,11 @@ internal object NfcCardLogic {
         val rev = reversed(id)
         val out = mutableListOf<CardNoCandidate>()
 
+        // ⚠️ 「整串当一个无符号整数」放在**最前面**：这是现实的校园卡里最常见的那一版，
+        // 卡面上印的多半是 10 位数字。上一版只给了 3 位补零拼接（12 位）与十六进制，
+        // 用户拿着真卡来对，一个都对不上 —— 这个遗漏是**实测 dump 之后**补进来的。
+        out += CardNoCandidate("UID 正序当整数（十进制）", decimalOfWhole(id))
+        out += CardNoCandidate("UID 反序当整数（十进制）", decimalOfWhole(rev))
         out += CardNoCandidate("UID 正序（十六进制）", uidHex(id))
         out += CardNoCandidate("UID 反序（十六进制）", uidHex(rev))
         out += CardNoCandidate("UID 正序（十进制拼接）", decimalConcat(id))
@@ -167,15 +188,24 @@ internal object NfcCardLogic {
         kind = recognize(raw),
         uidSize = raw.id.size,
         supportsApdu = supportsApdu(raw),
+        classicCompat = raw.techs.contains(TECH_PREFIX + "MifareClassic"),
         techShortNames = techShortNames(raw),
         historicalHex = raw.historicalBytes?.let(::uidHex),
     )
 
-    /**
-     * 把每个字节当成一个 0~255 的数、按三位一组拼起来。
+    /** 把每个字节当成一个 0~255 的数、按三位一组拼起来。
      *
      * 例：`04 A2 3F` → `"004162063"`。这是印刷号最常见的拼法（补齐三位是为了不错位）。
      */
+    /**
+     * 把整串字节当成一个**大端无符号整数**转十进制。
+     *
+     * 例：`77 75 F0 7B` → `2004218299`（10 位）。
+     * ⚠️ 不能用 `Long` 手算：7 字节 UID 会溢出。这里用 `BigInteger(1, bytes)` 直接拿无符号值。
+     */
+    private fun decimalOfWhole(bytes: ByteArray): String =
+        java.math.BigInteger(1, bytes).toString()
+
     private fun decimalConcat(bytes: ByteArray): String =
         bytes.joinToString("") { b -> "%03d".format(b.unsigned()) }
 
