@@ -179,7 +179,15 @@ internal class NfcController(
 
         val deep = if (description.supportsApdu && withSfiScan) {
             runCatching {
-                probeApdu(tag, CardProbeLogic.sfiScan() + CardProbeLogic.fidScan())
+                // FID 扫描排前面：真卡实测它是**唯一**能挖出文件的路径，
+                // 而 MF 下裸发 READ BINARY SFI=n 在实测里 30 条全是 6A82。
+                // 顺序还有一个用意 —— 目录（DF）是在 FID 扫描过程中认出来的，
+                // 最后才进目录里再扫一层。
+                probeApdu(
+                    tag,
+                    CardProbeLogic.fidScan() + CardProbeLogic.sfiScan(),
+                    drilldown = true,
+                )
             }.getOrNull()
         } else null
 
@@ -253,10 +261,16 @@ internal class NfcController(
      * `logic/` 里生成的 APDU 原则上已经是安全的，但这层是**最后一道门**：
      * 将来谁在 `CardProbeLogic` 里填错一个字节，这道门还能兜住，不至于把卡写坏。
      */
-    private fun probeApdu(tag: Tag, steps: List<CardProbeLogic.ProbeStep>): List<ProbeLine> {
+    private fun probeApdu(
+        tag: Tag,
+        steps: List<CardProbeLogic.ProbeStep>,
+        drilldown: Boolean = false,
+    ): List<ProbeLine> {
         val iso = runCatching { IsoDep.get(tag) }.getOrNull() ?: return emptyList()
         val sid = studentId
         val rawLines = mutableListOf<RawLine>()
+        // 选中了、却吃不下 READ BINARY 的文件 ⇒ 疑似目录，稍后进去再扫一层。
+        val directorySuspects = mutableListOf<Int>()
 
         try {
             iso.connect()
@@ -264,30 +278,43 @@ internal class NfcController(
                 val out = exchange(iso, step.label, step.apdu, sid)
                 rawLines += out
 
-                if (out.sw == "9000" && step.followUp != null) {
-                    // 「选中了就读一段」：只在成功时跟发，且**紧接着**发 ——
+                if (step.followUp != null && out.sw == "9000") {
+                    // 「选中了就读一段」：只在选中成功时跟发，且**紧接着**发 ——
                     // 中间夹一次别的 SELECT，当前文件就换了，读到的就不是这个文件的东西。
                     val followLabel = step.followUpLabel ?: "「${step.label}」接着读"
                     var r = exchange(iso, followLabel, step.followUp, sid)
                     rawLines += r
 
-                    // 一路往下读：文件多长事先不知道，读了一段就断定「没有更多」是不成立的。
-                    step.followUpMore.forEachIndexed { index, more ->
-                        if (r.sw != "9000") return@forEachIndexed
-                        r = exchange(iso, "$followLabel（续读第 ${index + 2} 段）", more, sid)
-                        rawLines += r
-                    }
-                } else if (out.sw == "6981" || out.sw == "6986") {
-                    // 文件在、但这条命令它不吃（定长记录文件就是这样）。
-                    // 换 READ RECORD 再试 —— 真卡实测 0018 文件正是这一种，
-                    // 一条 READ BINARY 失败就收工会把整类文件漏掉。
-                    for (rec in 1..3) {
-                        rawLines += exchange(
-                            iso,
-                            "改读记录：当前文件 记录 $rec",
-                            CardProbeLogic.readRecordCurrentEf(rec),
-                            sid,
-                        )
+                    when {
+                        // ⚠️ 回退的判断依据是**读命令的结果**，不是上面 SELECT 的。
+                        // SELECT 回的是 9000，拿它判断的话这条回退永远不触发 ——
+                        // 真卡 0018 就是被这么漏掉的（回 6981 的是 READ，不是 SELECT）。
+                        CardProbeLogic.shouldTryRecords(r.sw) -> {
+                            // 读到哪算哪：记录文件有几条事先不知道，
+                            // 读不到下一条的卡会自己回错误，不会白读。
+                            for (rec in 1..5) {
+                                rawLines += exchange(
+                                    iso,
+                                    "改读记录：$followLabel 记录 $rec",
+                                    CardProbeLogic.readRecordCurrentEf(rec),
+                                    sid,
+                                )
+                            }
+                        }
+
+                        CardProbeLogic.looksLikeDirectory(r.sw) -> {
+                            step.fid?.let { directorySuspects += it }
+                        }
+
+                        else -> {
+                            // 一路往下读：文件多长事先不知道，
+                            // 读了一段就断定「没有更多」是不成立的。
+                            step.followUpMore.forEachIndexed { index, more ->
+                                if (r.sw != "9000") return@forEachIndexed
+                                r = exchange(iso, "$followLabel（续读第 ${index + 2} 段）", more, sid)
+                                rawLines += r
+                            }
+                        }
                     }
                 }
             }
@@ -306,11 +333,65 @@ internal class NfcController(
                     sid,
                 )
             }
+
+            if (drilldown) drillIntoDirectories(iso, directorySuspects.distinct(), sid, rawLines)
         } finally {
             runCatching { iso.close() }
         }
 
         return rawLines.map { it.toLine() }
+    }
+
+    /**
+     * 进目录（DF）里再扫一层。
+     *
+     * ## 为什么必须做
+     *
+     * 真卡 `0010` 的 FCI 是 `6F 18 84 10 D1560001…1002 A5 04 9F 08 01 02` ——
+     * `6F` 底下挂 `84`（16 字节 DF 名）和 `A5`，这是**目录**的结构；
+     * 普通文件的 FCI 里是 `80`/`82`/`83` 那一套。所以 `READ 0010` 回 `6986` 是对的：
+     * 目录不是文件，不能直接读。**它的内容在它自己那一层里。**
+     *
+     * ⚠️ 进去之后 `READ BINARY` 要改用 **SFI** 而不是 FID（EMV 的一贯做法），
+     * 所以这里两种都试：先沿 SFI 扫（这是规范里的正路），再扫一小段 FID 兜底。
+     *
+     * 成本：每个目录约 35 条只读命令。所以**最多进 2 个**目录 ——
+     * 用户贴在手机上不动的那几秒是有限的，不能无节制地贪。
+     */
+    private fun drillIntoDirectories(
+        iso: IsoDep,
+        fids: List<Int>,
+        sid: String?,
+        rawLines: MutableList<RawLine>,
+    ) {
+        fids.take(2).forEach { fid ->
+            val tag = "%04X".format(fid)
+            rawLines += exchange(
+                iso,
+                "重新进入目录 $tag",
+                CardProbeLogic.selectByFileId(fid),
+                sid,
+            )
+
+            // 目录内按 SFI 找文件：这才是规范里的正路。
+            CardProbeLogic.sfiScan(1..20).forEach { step ->
+                rawLines += exchange(iso, "目录 $tag 内 ${step.label}", step.apdu, sid)
+            }
+
+            // 有些卡在目录内也编号文件，兜一段低区。
+            CardProbeLogic.fidScan(0x0001..0x000F).forEach { step ->
+                val o = exchange(iso, "目录 $tag 内 ${step.label}", step.apdu, sid)
+                rawLines += o
+                if (o.sw == "9000" && step.followUp != null) {
+                    rawLines += exchange(
+                        iso,
+                        "目录 $tag 内 ${step.followUpLabel}",
+                        step.followUp,
+                        sid,
+                    )
+                }
+            }
+        }
     }
 
     /**

@@ -376,6 +376,40 @@ class CardProbeLogicTest {
         assertTrue(CardProbeLogic.statusText("6986")!!.contains("目录"))
     }
 
+    /**
+     * 该不该改读记录 / 该不该进目录。
+     *
+     * ⚠️ 这两条判据必须分开：`6981` 是**定长记录文件**（改 READ RECORD 就好），
+     * `6986` 是**目录**（要进去再扫一层）。混成一个就会出现「对目录发 READ RECORD」
+     * 这种白费力气的事。真卡 0018 回 6981、0010 回 6986，正好各占一边。
+     */
+    @Test
+    fun `记录文件与目录要用不同的判据`() {
+        assertTrue(CardProbeLogic.shouldTryRecords("6981"))
+        assertTrue(CardProbeLogic.shouldTryRecords("6986"))
+        assertTrue(CardProbeLogic.looksLikeDirectory("6986"))
+        assertFalse(CardProbeLogic.looksLikeDirectory("6981"))
+        // 正常/找不到文件都不该触发任何回退
+        for (sw in listOf("9000", "6A82", "6B00", "6C1E", "6982")) {
+            assertFalse("$sw 不该触发改读记录", CardProbeLogic.shouldTryRecords(sw))
+            assertFalse("$sw 不该被当成目录", CardProbeLogic.looksLikeDirectory(sw))
+        }
+    }
+
+    /** FID 扫描的每一步都要带上文件号 —— 进目录时得靠它重新 SELECT。 */
+    @Test
+    fun `FID 扫描的每步都记得自己是哪个文件号`() {
+        val steps = CardProbeLogic.fidScan(0x0001..0x0012)
+        assertEquals(18, steps.size)
+        assertEquals(0x0001, steps.first().fid)
+        assertEquals(0x0010, steps[15].fid)
+        assertEquals(0x0012, steps.last().fid)
+        assertEquals("SELECT 文件 0010", steps[15].label)
+        // 不是按文件号选的那些步骤不该有 fid（SFI 扫描、SELECT MF 等）
+        assertTrue(CardProbeLogic.sfiScan(1..3).all { it.fid == null })
+        assertTrue(CardProbeLogic.firstRound().all { it.fid == null })
+    }
+
     /** GBK 文本解码 —— 真卡 `0016` 文件里就是姓名，解不出来等于白读。 */
     @Test
     fun `GBK 文本能被认出来`() {

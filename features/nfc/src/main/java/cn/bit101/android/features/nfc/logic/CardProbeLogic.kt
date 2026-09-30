@@ -258,6 +258,14 @@ internal object CardProbeLogic {
         val followUp: ByteArray? = null,
         val followUpLabel: String? = null,
         val followUpMore: List<ByteArray> = emptyList(),
+        /**
+         * 这条命令是「按文件标识选文件（[selectByFileId]）」时带上它选的是哪个 FID。
+         *
+         * 用处：某个 FID 选中了却吃不下 `READ BINARY`（回 `6986`）时，
+         * 它**很可能是个目录（DF）**，要进去再扫一层 —— 但那时需要重新 SELECT 它，
+         * 而光看标签字符串是拿不到文件号的（真卡上 `0010` 就是这样，见 nfc-card-probe.md）。
+         */
+        val fid: Int? = null,
     )
 
     /**
@@ -317,8 +325,29 @@ internal object CardProbeLogic {
                     readBinaryPlain(offset = 0x20),
                     readBinaryPlain(offset = 0x40),
                 ),
+                fid = fid,
             )
         }
+
+    /**
+     * 这个状态字是不是在说「**命令用错了，换个命令再试**」。
+     *
+     * 真卡实测的教训：`0018` 文件 SELECT 回 `9000`（文件在），紧接着 READ BINARY 回 `6981`
+     * （命令与文件结构不兼容）—— 它是定长记录文件，要用 `READ RECORD` 才读得到。
+     * ⚠️ 判断依据必须是**读命令的结果**，不是 SELECT 的结果：SELECT 回的是 `9000`，
+     * 回退挂在它上面就永远不会触发（这个 bug 真发生过一次，白丢了一个文件）。
+     */
+    fun shouldTryRecords(sw: String): Boolean = sw == "6981" || sw == "6986"
+
+    /**
+     * 这个状态字是不是在说「**选中的多半是个目录，不是文件**」。
+     *
+     * `6986` = 当前文件不允许这条命令。对 DF（目录）发 `READ BINARY` 就是回这个 ——
+     * 它的资源不直接暴露，得**进去**按 SFI 或 FID 找。真卡 `0010` 正是如此：
+     * FCI 里 `6F` 下挂的是 `84`（16 字节 DF 名）与 `A5`，那是 DF 的 FCI 结构，
+     * 而普通 EF 的 FCI 里是 `80`（长度）`82`（存取条件）`83`（文件标识）那一套。
+     */
+    fun looksLikeDirectory(sw: String): Boolean = sw == "6986"
 
     /**
      * `transceive` 回来的原始字节。
@@ -412,7 +441,9 @@ internal object CardProbeLogic {
         "6983" -> "已被锁定（别再试了，可能是重试计数用尽）"
         "6985" -> "使用条件不满足"
         "6700" -> "长度不对"
-        "6B00" -> "偏移量超界"
+        // 6B00 不是故障：它说的是「你要的偏移量已经越过文件末尾了」——
+        // 在「沿文件往下读」时这正是「这个文件到这里就没了」的答复。
+        "6B00" -> "偏移量超界（多半是已经读到文件末尾了）"
         else -> null
     }
 
