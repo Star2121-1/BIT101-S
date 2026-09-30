@@ -1,11 +1,18 @@
 package cn.bit101.android.data.net
 
 import cn.bit101.api.model.common.SchoolCookie
+import cn.bit101.api.model.common.SchoolDomains
 import java.net.CookieStore
 import java.net.HttpCookie
 import java.net.URI
 import java.time.Instant
 
+/**
+ * 学校域 cookie 在「全局 [CookieStore]」与 [SchoolCookie] 之间的读写。
+ *
+ * ⚠️ 「哪些 cookie 算学校的」这条判据统一在 [SchoolDomains]，**别在这里另写一套**
+ * —— 2026-09-30 的 SSO 审计前，这条判据在全 App 被抄了 4 遍且互不一致。
+ */
 internal object SchoolCookieStore {
     fun replace(
         cookieStore: CookieStore,
@@ -16,7 +23,7 @@ internal object SchoolCookieStore {
         require(converted.isNotEmpty()) { "学校登录未返回可用 Cookie" }
 
         cookieStore.cookies
-            .filter { it.domain.isSchoolDomain() }
+            .filter { SchoolDomains.isSchoolDomain(it.domain) }
             .forEach { cookieStore.remove(it.uri(), it) }
 
         converted.forEach { cookieStore.add(it.uri(), it) }
@@ -27,7 +34,7 @@ internal object SchoolCookieStore {
         nowEpochSeconds: Long = Instant.now().epochSecond,
     ): List<SchoolCookie> =
         cookieStore.cookies
-            .filter { it.domain.isSchoolDomain() && !it.hasExpired() }
+            .filter { SchoolDomains.isSchoolDomain(it.domain) && !it.hasExpired() }
             .map { it.toSchoolCookie(nowEpochSeconds) }
 
     internal fun HttpCookie.toSchoolCookie(nowEpochSeconds: Long): SchoolCookie {
@@ -54,11 +61,6 @@ internal object SchoolCookieStore {
             secure = this@toHttpCookie.secure
             maxAge = remainingSeconds ?: -1
         }
-    }
-
-    private fun String?.isSchoolDomain(): Boolean {
-        val normalized = this?.trimStart('.')?.lowercase() ?: return false
-        return normalized == "bit.edu.cn" || normalized.endsWith(".bit.edu.cn")
     }
 
     private fun HttpCookie.uri(): URI {

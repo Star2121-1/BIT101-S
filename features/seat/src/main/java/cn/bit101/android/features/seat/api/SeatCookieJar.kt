@@ -17,6 +17,9 @@ import java.net.URI
  * 此前这段转换在 `SeatApi` / `SeatSession` / `SeatCasLogin` **三处各写了一遍**，
  * 实现细节还有分歧（`maxAge` 的类型、`domain`/`path` 的兜底、是否设置 version）。
  * 统一到这里，避免三份实现各自演化。
+ *
+ * ⚠️ 本类只负责 **OkHttp 桥**。「WebView → cookie store 的同步」**不在**这里 ——
+ * 那份已统一到 `:data` 的 `WebViewCookieSync`，见 [SeatHttp.syncWebViewCookies]。
  */
 internal class SeatCookieJar(private val cookieManager: CookieManager) : CookieJar {
 
@@ -30,21 +33,10 @@ internal class SeatCookieJar(private val cookieManager: CookieManager) : CookieJ
     override fun loadForRequest(url: HttpUrl): List<Cookie> =
         cookieManager.cookieStore.get(uriOf(url)).map { it.toOkHttpCookie(url.host) }
 
-    /** 以「同名覆盖」语义写入单个 cookie，避免同名 cookie 在 store 里堆积。 */
-    fun put(uri: URI, name: String, value: String) {
-        cookieManager.cookieStore.get(uri)
-            .filter { it.name == name }
-            .forEach { cookieManager.cookieStore.remove(uri, it) }
-
-        val cookie = HttpCookie(name, value).apply {
-            domain = uri.host
-            path = "/"
-        }
-        cookieManager.cookieStore.add(uri, cookie)
-    }
-
-    /** 读取某个 URL 下尚未过期的 cookie 数量（仅用于日志）。 */
-    fun count(uri: URI): Int = cookieManager.cookieStore.get(uri).size
+    // ⚠️ 这里曾有 `put()`（同名覆盖写单个 cookie）与 `count()`（数 cookie 个数）。
+    //    2026-09-30 的 SSO 审计把「WebView → cookie store 的同步」统一到
+    //    `:data` 的 `WebViewCookieSync`（那份是**逐条容错**的），这两个方法就没了调用者。
+    //    别再往这个类里加 cookie 写入逻辑 —— 共享件在 data 层，座位侧只留 OkHttp 桥。
 
     private fun uriOf(url: HttpUrl): URI = URI.create("${url.scheme}://${url.host}")
 }

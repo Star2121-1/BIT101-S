@@ -38,13 +38,13 @@ import cn.bit101.android.data.school.LibBorrowLogic
 import cn.bit101.android.data.school.LibBorrowResult
 import cn.bit101.android.data.school.CampusCardSnapshot
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.utils.InAppWebUrls
 import java.time.LocalDateTime
 
-/** 一卡通首页（CAS service 指回这里；登录在 App 内 WebView 完成）。 */
-private const val CAMPUS_CARD_LOGIN_URL = "https://dkykt.info.bit.edu.cn/home/openHomePageByCas"
-
-/** 校园网认证门户（深澜 Srun）。点「去认证」在 App 内 WebView 打开。 */
-private const val CAMPUS_NET_PORTAL_URL = "http://10.0.0.55/"
+// ⚠️ 这些登录地址都有**唯一来源**，别在本文件里再写字面量（2026-09-30 SSO 审计前，
+//    一卡通地址与校园网门户地址在别处各写了一份、共 4 处）：
+//    · 一卡通首页 → [CampusCardLogic.HOME_URL]（取数用的就是它，两边必须一致）
+//    · 校园网门户 → [InAppWebUrls.CAMPUS_NET_PORTAL_URL]
 
 /**
  * 「校园服务」详情页 —— 一卡通（余额摘要；流水卡在卡务系统，Web 端不可得）+
@@ -139,7 +139,7 @@ fun CampusServiceScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { mainController.openWebPage(CAMPUS_CARD_LOGIN_URL) },
+                        onClick = { mainController.openWebPage(CampusCardLogic.HOME_URL) },
                     ) {
                         Text(text = "登录一卡通")
                     }
@@ -187,7 +187,7 @@ fun CampusServiceScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = { mainController.openWebPage(CAMPUS_NET_PORTAL_URL) },
+                            onClick = { mainController.openWebPage(InAppWebUrls.CAMPUS_NET_PORTAL_URL) },
                         ) {
                             Text(text = "去认证")
                         }

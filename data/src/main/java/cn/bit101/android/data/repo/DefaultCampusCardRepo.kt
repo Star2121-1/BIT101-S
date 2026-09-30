@@ -30,9 +30,8 @@ internal class DefaultCampusCardRepo @Inject constructor(
     private val loginStatus: LoginStatus,
 ) : CampusCardRepo {
 
-    private companion object {
-        const val HOME_URL = "https://dkykt.info.bit.edu.cn/home/openHomePageByCas"
-    }
+    // ⚠️ 首页地址统一在 [CampusCardLogic.HOME_URL] —— 它同时是「校园服务」页
+    //    「登录一卡通」按钮的目标，两边必须是同一个字符串（2026-09-30 SSO 审计）
 
     private val client = OkHttpClient.Builder()
         .cookieJar(JavaNetCookieJar(loginStatus.cookieManager))
@@ -42,7 +41,7 @@ internal class DefaultCampusCardRepo @Inject constructor(
         .build()
 
     private fun syncCookies() {
-        WebViewCookieSync.sync(loginStatus.cookieManager, listOf(HOME_URL))
+        WebViewCookieSync.sync(loginStatus.cookieManager, listOf(CampusCardLogic.HOME_URL))
     }
 
     override suspend fun fetchSnapshot(): CampusCardSnapshot = withContext(Dispatchers.IO) {
@@ -51,13 +50,13 @@ internal class DefaultCampusCardRepo @Inject constructor(
         val (html, finalUrl, failed) = runCatching {
             client.newCall(
                 Request.Builder()
-                    .url(HOME_URL)
+                    .url(CampusCardLogic.HOME_URL)
                     .header("Accept", "text/html,application/xhtml+xml")
                     .build()
             ).execute().use { resp ->
                 Triple(resp.body?.string().orEmpty(), resp.request.url.toString(), false)
             }
-        }.getOrElse { Triple("", HOME_URL, true) }
+        }.getOrElse { Triple("", CampusCardLogic.HOME_URL, true) }
 
         // ⚠️ 请求失败**不能**当成「未登录」：那会让 UI 说「点开登录」（用户明明登录过），
         // 真正该说的是「获取失败，重试」

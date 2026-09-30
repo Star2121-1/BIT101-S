@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.utils.InAppWebUrls
 import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.api.SeatSmsChallenge
 import kotlinx.coroutines.CoroutineScope
@@ -54,19 +55,12 @@ private const val TAG = "CasLoginScreen"
 private const val SEATLIB_BASE = "https://seatlib.bit.edu.cn"
 private const val SEATLIB_HOST = "seatlib.bit.edu.cn"
 
-/**
- * CAS 登录过程中会被重定向到的域名，**必须留在 WebView 内加载**。
- *
- * ⚠️ 这里曾经只放行 `seatlib.bit.edu.cn`，其余一律交给外部浏览器 ——
- * 而 phpCAS 的登录链路必然要跳到学校统一身份认证 `login.bit.edu.cn`，
- * 于是导航被拦截、WebView 停在空白页，CAS 会话落进外部浏览器而 App 读不到 cookie，
- * **整条「App 内 WebView 完成 CAS」的链路实际是断的**（2026-09-18 模拟器实测发现）。
- *
- * 现在的判据是：学校自己的域名（`*.bit.edu.cn`）都留在 WebView 内，
- * 只有真正的外链才交给浏览器。
- */
-private fun isSchoolHost(host: String?): Boolean =
-    host != null && (host == "bit.edu.cn" || host.endsWith(".bit.edu.cn"))
+// ⚠️ 这里曾有一条**只放行 `seatlib.bit.edu.cn`** 的判据：其余一律交给外部浏览器。
+//    而 phpCAS 的登录链路必然要跳到学校统一身份认证，于是导航被拦截、WebView 停在空白页，
+//    CAS 会话落进外部浏览器而 App 读不到 cookie —— 整条「App 内 WebView 完成 CAS」
+//    的链路实际是断的（2026-09-18 模拟器实测）。
+//    判据现已统一到 [InAppWebUrls.isSchoolHost]（与「网」页共用，2026-09-30 SSO 审计），
+//    **别在页面里就地再写一份**。
 
 /**
  * 从回调 URL 里取 CAS ticket。
@@ -160,8 +154,9 @@ fun CasLoginScreen(
                                 val host = request.url.host
                                 SeatLog.d(TAG, "shouldOverrideUrlLoading: $url")
 
-                                // 学校域名一律留在 WebView 内，否则 CAS 链路会断（见 isSchoolHost 注释）
-                                if (isSchoolHost(host)) {
+                                // 学校域名一律留在 WebView 内，否则 CAS 链路会断
+                                // —— 判据统一在 [InAppWebUrls.isSchoolHost]
+                                if (InAppWebUrls.isSchoolHost(host)) {
                                     // phpCAS 回调带上 ticket 时直接换取 JWT
                                     val ticket = extractTicket(url)
                                     if (ticket != null) {

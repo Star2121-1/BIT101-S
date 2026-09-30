@@ -5,6 +5,16 @@ package cn.bit101.android.data.school
  */
 object CampusCardLogic {
 
+    /**
+     * 一卡通首页（CAS 的 service 指回这里）——
+     * **「登录一卡通」按钮的目标与取数地址必须是同一条**。
+     *
+     * ⚠️ 2026-09-30 的 SSO 审计发现：这个字符串原本在「校园服务」页与
+     * `DefaultCampusCardRepo` 里各写了一遍。改一处漏一处 = 用户点「登录一卡通」
+     * 进的是 A 地址、而 App 取数读的是 B 地址 —— 登录白做，且很难看出来。
+     */
+    const val HOME_URL = "https://dkykt.info.bit.edu.cn/home/openHomePageByCas"
+
     private const val SSO_HOST = "sso.bit.edu.cn"
 
     /**

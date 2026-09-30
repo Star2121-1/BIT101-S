@@ -1,6 +1,7 @@
 package cn.bit101.api.service.school
 
 import cn.bit101.api.model.common.SchoolCookie
+import cn.bit101.api.model.common.SchoolDomains
 import cn.bit101.bitlogin.Config
 import cn.bit101.bitlogin.NetworkEnv
 import cn.bit101.bitlogin.http.HttpClient
@@ -47,8 +48,10 @@ internal suspend fun openSchoolSession(
     // 复制一份到 webvpn 域名下, 让网关转发给后端服务
     if (webVpn) {
         cookies.filter {
-            it.domain.trimStart('.').lowercase() != WEBVPN_HOST
-                && it.domain.trimStart('.').lowercase().endsWith(".bit.edu.cn")
+            val domain = it.domain.trimStart('.').lowercase()
+            // ⚠️ 刻意用**子域**判据（不含根域 `bit.edu.cn`）：把根域 cookie 复制到
+            //    webvpn 主机没有意义。判据统一在 [SchoolDomains]，别在这里另写
+            domain != WEBVPN_HOST && SchoolDomains.isSchoolSubdomain(domain)
         }.forEach { cookie ->
             val expires = cookie.expiresEpochSeconds
             if (expires == null || expires > nowEpochSeconds) {

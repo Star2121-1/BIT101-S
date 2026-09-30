@@ -1,11 +1,10 @@
 package cn.bit101.android.features.seat.api
 
-import android.webkit.CookieManager
 import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.data.net.WebViewCookieSync
 import cn.bit101.android.features.seat.SeatLog
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
-import java.net.URI
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -21,7 +20,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class SeatHttp @Inject constructor(
-    loginStatus: LoginStatus,
+    private val loginStatus: LoginStatus,
 ) {
 
     companion object {
@@ -78,22 +77,15 @@ class SeatHttp @Inject constructor(
      *
      * Android WebView 与 OkHttp 的 cookie 存储彼此独立，不同步的话
      * WebView 里刚建立的 phpCAS 会话在后续 OkHttp 请求上就不存在。
+     *
+     * ⚠️ 这里**委托给 `:data` 的 [WebViewCookieSync]**，不再自己写一遍。
+     * 2026-09-30 的 SSO 审计发现：两边各写一份时，**这一份没有逐条容错** ——
+     * 只要有一条 cookie 的值含 `HttpCookie` 不接受的字符，整次同步就抛异常，
+     * 表现是「座位突然未登录」，而且失败得很安静（调用方只看到「没数据」）。
+     * eclass / 图书馆 / 一卡通 用的那份一直是逐条容错的，行为不该分叉。
      */
     fun syncWebViewCookies() {
-        val webCookieManager = CookieManager.getInstance()
-        listOf(BASE, SSO_BASE).forEach urlLoop@{ url ->
-            val raw = webCookieManager.getCookie(url)?.takeIf { it.isNotEmpty() } ?: return@urlLoop
-            val uri = URI.create(url)
-            var count = 0
-            raw.split(';').forEach partLoop@{ part ->
-                val eq = part.indexOf('=')
-                if (eq <= 0) return@partLoop
-                val name = part.substring(0, eq).trim()
-                if (name.isEmpty()) return@partLoop
-                cookieJar.put(uri, name, part.substring(eq + 1).trim())
-                count++
-            }
-            SeatLog.d(TAG) { "synced $count cookie(s) from $url" }
-        }
+        val synced = WebViewCookieSync.sync(loginStatus.cookieManager, listOf(BASE, SSO_BASE))
+        SeatLog.d(TAG) { "synced cookies: $synced" }
     }
 }

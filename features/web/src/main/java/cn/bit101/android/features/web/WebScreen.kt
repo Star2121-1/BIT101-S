@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.utils.InAppWebUrls
 import cn.bit101.android.features.theme.LocalThemeIsDark
 import com.google.accompanist.web.AccompanistWebChromeClient
 import com.google.accompanist.web.AccompanistWebViewClient
@@ -137,7 +138,8 @@ internal fun WebContent(
                 // —— 统一身份认证（CAS）登录只有留在 App 内，会话 cookie 才会落进
                 // App 的 CookieManager；丢给外部浏览器等于白登（2026-09-25 实测：
                 // 一卡通登录被踢去 nubia 浏览器，App 里始终显示未登录）
-                if (!isInternalUrl(request?.url?.toString())) {
+                // 判据见 [InAppWebUrls]（与座位 CAS 页共用，2026-09-30 统一）
+                if (!InAppWebUrls.isInternal(request?.url?.toString())) {
                     // 设备上没有能接的浏览器也不能崩
                     runCatching {
                         context.startActivity(
@@ -228,15 +230,5 @@ fun WebScreen(
 
 }
 
-/** 是否应留在 App 内 WebView：BIT101 自己的站 + 学校域名（含各子系统）。 */
-/** 校园网认证门户（深澜 Srun，纯 HTTP 内网）—— 点「去认证」要留在 App 内。 */
-private const val CAMPUS_NET_PORTAL_HOST = "10.0.0.55"
-
-private fun isInternalUrl(url: String?): Boolean {
-    if (url.isNullOrBlank()) return false
-    // 域名大小写不敏感；含非法字符的 URL 会让 URI 抛异常 —— 按外部链接处理
-    val host = runCatching { java.net.URI(url).host }.getOrNull()?.lowercase() ?: return false
-    return host == "bit101.cn" || host.endsWith(".bit101.cn") ||
-        host == "bit.edu.cn" || host.endsWith(".bit.edu.cn") ||
-        host == CAMPUS_NET_PORTAL_HOST
-}
+// 「这个地址要不要留在 App 内 WebView」的判据统一在 [InAppWebUrls]
+// —— 2026-09-30 的 SSO 审计前，这里与座位 CAS 页各写了一份，而且判据不一致。
