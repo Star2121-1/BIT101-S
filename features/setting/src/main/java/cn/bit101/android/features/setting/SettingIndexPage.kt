@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.EditCalendar
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Nfc
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -86,6 +87,14 @@ internal fun SettingIndexPage(
             subTitle = "上课 / 作业 / 座位 / 考试 / 出分 / 网费",
             icon = Icons.Outlined.NotificationsNone,
             onClick = { navController.navigate("notify") },
+        ),
+        SettingItemData.IndexCard(
+            title = "NFC",
+            // ⚠️ 副标题不要写「刷校园卡」—— 那项目前还做不到（卡号换不来会话，且开发机没 NFC）。
+            // 写得比实际能力大，用户点进来只会觉得被骗。这里只写实际能做的两件事。
+            subTitle = "贴纸快捷入口 / 校园卡读取诊断",
+            icon = Icons.Outlined.Nfc,
+            onClick = { navController.navigate("nfc") },
         ),
         SettingItemData.IndexCard(
             title = "空教室查询设置",

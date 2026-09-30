@@ -9,6 +9,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.nav.NavDest
+import cn.bit101.android.features.nfc.NfcSettingPage
 import cn.bit101.android.features.common.nav.enterTransition
 import cn.bit101.android.features.common.nav.exitTransition
 import cn.bit101.android.features.common.nav.popEnterTransition
@@ -165,6 +166,16 @@ fun SettingScreen(
                 navController = navController,
             ) {
                 FreeClassroomSettingPage(onSnackBar = onSnackBar)
+            }
+        }
+
+        composable("nfc") {
+            SettingPage(
+                mainController = mainController,
+                title = "NFC",
+                navController = navController,
+            ) {
+                NfcSettingPage(mainController = mainController)
             }
         }
     }

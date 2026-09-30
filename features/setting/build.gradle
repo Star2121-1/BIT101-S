@@ -59,4 +59,7 @@ dependencies {
     implementation project(':features:versions')
     // 提醒设置页要触发一次重排（改了提前量必须重排才生效）
     implementation project(':features:notify')
+
+    // 设置里挂一个「NFC」入口页
+    implementation project(':features:nfc')
 }
