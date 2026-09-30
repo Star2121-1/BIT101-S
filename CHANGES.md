@@ -1,5 +1,63 @@
 # CHANGES
 
+## 2026-09-30 v1.9.32 SSO 认证链路审计：统一共享件，消掉 6 处重复
+
+起因：用户要求「让程序更稳健 —— 先检查所有需要 SSO 认证的部分是否都复用了，
+有没有几乎相同的代码写了多次」。
+
+### 审计结论：**核心是复用的**，问题在外围
+
+| 环节 | 现状 |
+|---|---|
+| CAS 协议实现 | **只有一份** —— BIT-Login 库的 `SsoLogin`。主登录（`SchoolLoginService`）与座位直登（`SeatSession.loginWithCredentials`）共用；早期手写的「取 salt → AES → POST 表单」已删 |
+| cookie 存储 | **只有一份** —— `LoginStatus.cookieManager`（定义在 `:config`）。座位 / eclass / 图书馆 / 一卡通 / 空教室 / DDL 全读它 |
+| cookie 读写 | `SchoolCookieStore`（5 个 repo 复用）、`WebViewCookieSync`（4 处复用） |
+
+**不存在「各建一套账号体系」的问题。**
+
+### 6 处同款代码写多遍（★ = 真隐患）
+
+| # | 内容 | 原状 | 处置 |
+|---|---|---|---|
+| **A** ★ | WebView → OkHttp 的 cookie 同步 | 2 份：`WebViewCookieSync`（逐条容错）vs `SeatHttp.syncWebViewCookies`（**无容错**） | 座位侧改为委托共享实现；删 `SeatCookieJar.put/count` |
+| **B** | 同名覆盖写单个 cookie | 2 份逐字相同 | 随 A 消掉 |
+| **C** ★ | 「是不是学校域名」判断 | **4 处且判据不一致** | 抽出 `SchoolDomains`（:api）+ `InAppWebUrls`（:features:common），4 处调用点全部替换 |
+| **D** | OkHttpClient 超时配置 | 2 份逐字相同（图书馆 / 一卡通） | 本轮未动（记入待办） |
+| **E** | 一卡通首页地址 | 2 处：UI 与 Repo 各写一遍 | 抽到 `CampusCardLogic.HOME_URL` |
+| **F** | `CookieManager` ↔ OkHttp 桥 | `SeatCookieJar`（自写）vs 第三方 `JavaNetCookieJar` | 技术选型不同，保持 |
+
+**为什么 A、C 是「真隐患」而不是「不好看」**：
+- A 的那一份**没有逐条容错** —— 只要有一条 cookie 的值含 `HttpCookie` 不接受的字符，
+  整次同步就抛异常。表现是「座位突然未登录」，**而且失败得很安静**（调用方只看到「没数据」）。
+  其它三个模块用的那份一直是逐条容错的，同一件事不该有两种行为。
+- C 的四处判据**互不一致**（有的含根域、有的不含；`WebScreen` 还多含 `bit101.cn` 与校园网门户）。
+  漏改一处的后果正是我们记录过的那条：**CAS 链路跳出 App、cookie 不回 App = 白登**。
+
+### 收敛后的落点（以后只改这里）
+
+- `api/.../model/common/SchoolDomains.kt` —— `isSchoolDomain`（含根域）/ `isSchoolSubdomain`（不含根域）。
+  **两种语义都保留**，不改各自原有行为。
+- `features/common/.../utils/InAppWebUrls.kt` —— `isSchoolHost` / `isInternal` +
+  校园网门户 host 与 URL 常量。
+- `data/.../net/WebViewCookieSync.kt` —— 全 App 唯一的 WebView→cookie 同步实现。
+- `data/.../school/CampusCardLogic.kt` 的 `HOME_URL` / `LibBorrowLogic.LOGIN_URL` —— 登录地址与取数地址同源。
+
+### 一个跨模块的坑（记下来）
+
+`features:seat` **不直接依赖 `:data`**，但它依赖 `:features:common`，而 common 用的是
+`api project(':data')` —— 所以 **seat 看得到 `:data` 的 public API**。
+A 的复用路径就是靠这个成立的；反过来 `:data` 看不到 seat 的 `internal`，
+当初 `WebViewCookieSync` 之所以自己写一份，正是这个不对称造成的。
+
+### 验证
+
+- 全量单测 **660 条全绿**，**条数与重构前完全一致** ⇒ 确认是行为等价的重构，
+  没有顺手改掉任何既有行为。
+- 真机走查：课表调休配色（v1.9.30/31 之前未目视的项，本次一并确认）、
+  座位列表页与会话数据、预约页校区树、「我」页校园服务 —— 均正常。
+- ⚠️ **仍未实测**：`syncWebViewCookies()` 只在 CAS 登录流程里被调用，
+  要等下次座位会话失效重新登录时才能真机覆盖这条路径。
+
 ## 2026-09-29 v1.9.31 调休那天「看得出来」：放假 / 补课的日程换色调
 
 用户反馈：「放假的那一天的课程其实可以变一种颜色以作区分」。
