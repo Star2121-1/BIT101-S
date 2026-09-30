@@ -255,54 +255,90 @@ internal class NfcController(
      */
     private fun probeApdu(tag: Tag, steps: List<CardProbeLogic.ProbeStep>): List<ProbeLine> {
         val iso = runCatching { IsoDep.get(tag) }.getOrNull() ?: return emptyList()
-
-        // 先收集「原始回答」，因为下一轮要发哪些命令**取决于上一轮回答里有什么**
-        val raws = mutableListOf<Pair<CardProbeLogic.ProbeStep, CardProbeLogic.ProbeResult>>()
+        val sid = studentId
+        val rawLines = mutableListOf<RawLine>()
 
         try {
             iso.connect()
             steps.forEach { step ->
-                raws += step to transceive(iso, step)
-                // 「选中了就读一段」：只在成功时跟发，且**紧接着**发 ——
-                // 中间夹一次别的 SELECT，当前文件就换了，读到的就不是这个文件的东西。
-                val next = step.followUp
-                if (next != null && raws.last().second.success) {
-                    val sub = CardProbeLogic.ProbeStep(
-                        label = step.followUpLabel ?: "「${step.label}」接着读",
-                        apdu = next,
-                    )
-                    raws += sub to transceive(iso, sub)
+                val out = exchange(iso, step.label, step.apdu, sid)
+                rawLines += out
+
+                if (out.sw == "9000" && step.followUp != null) {
+                    // 「选中了就读一段」：只在成功时跟发，且**紧接着**发 ——
+                    // 中间夹一次别的 SELECT，当前文件就换了，读到的就不是这个文件的东西。
+                    val followLabel = step.followUpLabel ?: "「${step.label}」接着读"
+                    var r = exchange(iso, followLabel, step.followUp, sid)
+                    rawLines += r
+
+                    // 一路往下读：文件多长事先不知道，读了一段就断定「没有更多」是不成立的。
+                    step.followUpMore.forEachIndexed { index, more ->
+                        if (r.sw != "9000") return@forEachIndexed
+                        r = exchange(iso, "$followLabel（续读第 ${index + 2} 段）", more, sid)
+                        rawLines += r
+                    }
+                } else if (out.sw == "6981" || out.sw == "6986") {
+                    // 文件在、但这条命令它不吃（定长记录文件就是这样）。
+                    // 换 READ RECORD 再试 —— 真卡实测 0018 文件正是这一种，
+                    // 一条 READ BINARY 失败就收工会把整类文件漏掉。
+                    for (rec in 1..3) {
+                        rawLines += exchange(
+                            iso,
+                            "改读记录：当前文件 记录 $rec",
+                            CardProbeLogic.readRecordCurrentEf(rec),
+                            sid,
+                        )
+                    }
                 }
             }
 
             // 目录记录里若有 ADF 名（tag 4F = AID），直接跟着 SELECT 一次 ——
             // 用户贴一次卡不容易，能多挖一层就多挖一层。
-            val aids = CardProbeLogic.aidsOf(raws.flatMap { CardProbeLogic.parseTlvs(it.second.data) })
+            val aids = rawLines.flatMap { CardProbeLogic.parseTlvs(it.bytes) }
+                .let(CardProbeLogic::aidsOf)
                 .take(3)
             aids.forEach { aid ->
                 val hex = CardProbeLogic.toHexCompact(aid)
-                val step = CardProbeLogic.ProbeStep(
+                rawLines += exchange(
+                    iso,
                     "SELECT 目录里发现的 AID $hex",
                     CardProbeLogic.selectByName(hex),
+                    sid,
                 )
-                raws += step to transceive(iso, step)
             }
         } finally {
             runCatching { iso.close() }
         }
 
-        val sid = studentId
-        return raws.map { (step, r) ->
-            ProbeLine(
-                label = step.label,
-                apdu = CardProbeLogic.toHex(step.apdu),
-                sw = r.sw,
-                swText = r.swText,
-                data = CardProbeLogic.toHex(r.data),
-                studentIdHit = sid?.let { StudentIdScan.find(r.data, it) },
-                tlvs = CardProbeLogic.parseTlvs(r.data).map(::tlvText),
-            )
-        }
+        return rawLines.map { it.toLine() }
+    }
+
+    /**
+     * 一条已经发出去并拿到回答的命令（还没翻译成人能看的 [ProbeLine]）。
+     *
+     * 中间这一层存在的原因：`probeApdu` 要**先看看返回里有什么**才能决定下一步
+     * （TLV 里挖 AID、`6981` 要改读记录），所以原始字节得先留着。
+     */
+    private data class RawLine(
+        val label: String,
+        val apdu: String,
+        val sw: String,
+        val swText: String?,
+        val bytes: ByteArray,
+        val note: String?,
+        val studentIdHit: String?,
+    ) {
+        fun toLine(): ProbeLine = ProbeLine(
+            label = label,
+            apdu = apdu,
+            sw = sw,
+            swText = swText,
+            data = CardProbeLogic.toHex(bytes),
+            note = note,
+            text = CardProbeLogic.decodeText(bytes),
+            studentIdHit = studentIdHit,
+            tlvs = CardProbeLogic.parseTlvs(bytes).map(::tlvText),
+        )
     }
 
     /**
@@ -411,33 +447,79 @@ internal class NfcController(
      * 这道门还能兜住，不至于把卡写坏。
      */
     /**
-     * 一个 TLV 的人话版：`84=31504159… "1PAY.SYS.DDF01"`。
+     * 发一条命令、拿到回答，并且在必要时**自动接着谈下去**。
      *
-     * 值**全是可打印 ASCII** 时顺手把原文附上 —— 卡名、应用名这类字段就是靠这个
-     * 一眼认出来的，否则人得自己把 `31 50 41 59` 译成 `1PAY`。
+     * ## 为什么必须自动跟 —— 真卡实测两次吃亏
+     *
+     * - 卡回 `6C xx`（「你 Le 写错了，正确的是 xx」）：
+     *   北理工校园卡上 `READ 文件 0015` 回的就是 `6C1E`。不按 0x1E 重发，
+     *   那个 30 字节的文件里一个字节都拿不到。
+     * - 卡回 `61 xx`（「数据还有 xx 字节」）：标准要求再发一次 `GET RESPONSE`。
+     *
+     * 这两种回答**都不是失败**，卡在说「话还没说完」。把它们当错误处理，
+     * 表现出来就是「这卡读不出来」，而实际上数据就在那儿。
+     *
+     * ⚠️ 每一轮补发之前都再过一次只读闸门（[CardProbeLogic.isReadOnly]）——
+     * `GET RESPONSE` 与改 Le 都只是读，闸门必须仍然认。
      */
-    private fun tlvText(t: CardProbeLogic.Tlv): String {
-        val hex = CardProbeLogic.toHexCompact(t.value)
-        val ascii = if (t.value.size >= 2 && t.value.all { it.toInt() in 0x20..0x7E }) {
-            " \"" + String(t.value, Charsets.US_ASCII) + "\""
-        } else ""
-        return "${t.tag}=$hex$ascii"
+    private fun exchange(
+        iso: IsoDep,
+        label: String,
+        apdu: ByteArray,
+        studentId: String?,
+    ): RawLine {
+        var current = apdu
+        var note: String? = null
+        var result = send(iso, current)
+
+        // 最多谈三轮：正常卡一轮就够，三轮是防呆（别让坏卡把我们卡在死循环里）。
+        var guard = 0
+        while (guard++ < 3) {
+            val next: ByteArray = when {
+                result.hasMore -> {
+                    val n = CardProbeLogic.remainingOf(result.sw) ?: break
+                    note = listOfNotNull(note, "卡说还有 $n 字节，发 GET RESPONSE 取").joinToString("；")
+                    CardProbeLogic.getResponse(n)
+                }
+
+                result.correctLe != null -> {
+                    val n = result.correctLe
+                    note = listOfNotNull(note, "卡说 Le 该是 $n，按它重发").joinToString("；")
+                    runCatching { CardProbeLogic.withLe(current, n) }.getOrNull() ?: break
+                }
+
+                else -> break
+            }
+            current = next
+            result = send(iso, current)
+        }
+
+        return RawLine(
+            label = label,
+            apdu = CardProbeLogic.toHex(current),
+            sw = result.sw,
+            swText = result.swText,
+            bytes = result.data,
+            note = note,
+            studentIdHit = studentId?.let { StudentIdScan.find(result.data, it) },
+        )
     }
 
-    private fun transceive(
-        iso: IsoDep,
-        step: CardProbeLogic.ProbeStep,
-    ): CardProbeLogic.ProbeResult {
-        if (!CardProbeLogic.isReadOnly(step.apdu)) {
+    /**
+     * 发**一条**命令并解析回答。⚠️ 这是唯一一个真正碰 `transceive` 的地方，
+     * 也是最后一道只读闸门 —— 上面所有路径都得从这儿过。
+     */
+    private fun send(iso: IsoDep, apdu: ByteArray): CardProbeLogic.ProbeResult {
+        if (!CardProbeLogic.isReadOnly(apdu)) {
             return CardProbeLogic.ProbeResult(
                 sw = "", swText = "被安全闸门拦下（拒绝发出）",
-                data = ByteArray(0), success = false, hasMore = false,
+                data = ByteArray(0), success = false,
             )
         }
-        val raw = runCatching { iso.transceive(step.apdu) }.getOrNull()
+        val raw = runCatching { iso.transceive(apdu) }.getOrNull()
             ?: return CardProbeLogic.ProbeResult(
                 sw = "", swText = "transceive 失败",
-                data = ByteArray(0), success = false, hasMore = false,
+                data = ByteArray(0), success = false,
             )
         return CardProbeLogic.parseResponse(raw)
     }
@@ -574,8 +656,45 @@ internal data class ProbeLine(
     val sw: String,
     val swText: String?,
     val data: String?,
+    /** 与卡「继续谈」的过程说明（`6Cxx` 改 Le 重发、`61xx` 取 GET RESPONSE）。 */
+    val note: String? = null,
+    /**
+     * 把这段返回当文本读出来的结果（GBK）。
+     *
+     * 真卡实测的价值：`0016` 文件里存的是姓名，不加这一栏，
+     * 用户和我们看到的就只是一串 `B8 DF CC EC CF E8`。
+     */
+    val text: String? = null,
     /** 在这条返回里**找到了学号**（含编码形式与偏移）；没找到是 `null`。 */
     val studentIdHit: String? = null,
     /** 返回的 TLV 摊平后的 `标签=值`，如 `84=315041592E...`。人肉看十六进制太累。 */
     val tlvs: List<String> = emptyList(),
-)
+) {
+    /**
+     * 这一条**真的拿到了东西**（不是只有状态字、也不是一整段零）。
+     *
+     * 用途：一次深度扫描会产生三四百条记录，绝大多数是「找不到这个文件」。
+     * 全平铺出来会把人淹掉，所以 UI 默认只列有数据的，同时**如实标出总条数**，
+     * 想看全的可以一键展开 —— 既不是把信息藏起来，也不是把用户埋掉。
+     */
+    val hasData: Boolean
+        get() = studentIdHit != null ||
+            text != null ||
+            (data?.split(" ")?.any { it != "00" && it.isNotEmpty() } == true)
+}
+
+/**
+ * 一个 TLV 的人话版：`84=31504159… "1PAY.SYS.DDF01"`。
+ *
+ * 值**全是可打印 ASCII** 时顺手把原文附上 —— 卡名、应用名这类字段就是靠这个
+ * 一眼认出来的，否则人得自己把 `31 50 41 59` 译成 `1PAY`。
+ *
+ * 放在顶层而不是 `NfcController` 的成员：嵌套的 [NfcController.RawLine] 取不到外层实例成员。
+ */
+private fun tlvText(t: CardProbeLogic.Tlv): String {
+    val hex = CardProbeLogic.toHexCompact(t.value)
+    val ascii = if (t.value.size >= 2 && t.value.all { it.toInt() in 0x20..0x7E }) {
+        " \"" + String(t.value, Charsets.US_ASCII) + "\""
+    } else ""
+    return "${t.tag}=$hex$ascii"
+}

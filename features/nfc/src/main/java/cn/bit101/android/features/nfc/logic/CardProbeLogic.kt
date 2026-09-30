@@ -153,6 +153,59 @@ internal object CardProbeLogic {
     }
 
     /**
+     * `READ RECORD`（**当前已选中的 EF**）：`00 B2 <记录号> 04 <Le>`。
+     *
+     * 与 [readRecord] 的区别在 P2：那边 P2 = `(SFI << 3) | 0x04` 指定「哪个文件的第几条记录」，
+     * 这边 P2 的低 5 位仍是 4（表示记录号在 P1）、高 3 位为 0（表示**就用当前选中的文件**）。
+     *
+     * ## 为什么需要它 —— 真卡实测
+     *
+     * 北理工校园卡上 `SELECT 0018` 回 `9000`（文件在），紧接着 `READ BINARY` 回 `6981`
+     * （命令与文件结构不兼容）。这就是**定长记录文件**的典型表现：它不吃 READ BINARY，
+     * 只吃 READ RECORD。一条 READ BINARY 失败就收工，会把这类文件整片漏掉。
+     */
+    fun readRecordCurrentEf(record: Int, length: Int = 0): ByteArray {
+        require(record in 1..254) { "记录号必须在 1~254 之间，实际 $record" }
+        require(length in 0..256) { "length 必须在 0~256 之间，实际 $length" }
+        val le = if (length == 256) 0x00.toByte() else length.toByte()
+
+        return byteArrayOf(0x00, 0xB2.toByte(), record.toByte(), 0x04, le)
+    }
+
+    /** `GET RESPONSE`：`00 C0 00 00 <Le>`。卡回 `61 xx` 表示「数据还有 xx 字节，再问一次」。 */
+    fun getResponse(length: Int): ByteArray {
+        require(length in 1..256) { "length 必须在 1~256 之间，实际 $length" }
+        val le = if (length == 256) 0x00.toByte() else length.toByte()
+        return byteArrayOf(0x00, 0xC0.toByte(), 0x00, 0x00, le)
+    }
+
+    /**
+     * 把一条**读命令**末尾的 Le 换掉，其余字节原样不动。
+     *
+     * ## 为什么需要它 —— 真卡实测
+     *
+     * 卡回 `6C xx` 是标准（ISO 7816-4）的「你 Le 写错了，正确的是 xx」。
+     * 北理工校园卡上 `READ 文件 0015 前 32 字节` 就回了 **`6C1E`** ——
+     * 意思是「这个文件只有 0x1E = 30 字节，按 30 来问」。不按它说的重发，
+     * 那个文件里的东西就一个字节都拿不到（我们就是这么白丢过一次机会的）。
+     *
+     * ⚠️ 只允许对**读指令**（[READ_ONLY_INS] 里的 B0/B2/C0）用。
+     * 因为「末尾就是 Le」这个前提不是所有命令都成立 —— 比如
+     * [selectByFileId] 生成的 `00 A4 02 00 02 00 10`，末尾那个 `10` 是文件号的一部分，
+     * 换掉它就变成去选另一个文件了。宁可这里直接拒绝，也不要悄悄改错一条命令。
+     */
+    fun withLe(apdu: ByteArray, length: Int): ByteArray {
+        require(length in 1..256) { "length 必须在 1~256 之间，实际 $length" }
+        require(apdu.size >= 5) { "命令太短，末尾不可能是 Le：${apdu.size} 字节" }
+        val ins = apdu[1].unsigned()
+        require(ins == 0xB0 || ins == 0xB2 || ins == 0xC0) {
+            "只对读指令协商 Le，这条的 INS 是 %02X".format(ins)
+        }
+        val le = if (length == 256) 0x00.toByte() else length.toByte()
+        return apdu.copyOf().also { it[it.size - 1] = le }
+    }
+
+    /**
      * `READ BINARY`（**不带 SFI**）：`00 B0 <offset 高字节> <offset 低字节> <length>`。
      *
      * 与 [readBinary] 的区别就一个地方：这里 P1 是**偏移量的高 8 位**（不是 `0x80 | SFI`）。
@@ -194,12 +247,17 @@ internal object CardProbeLogic {
      *   为什么塞在这里而不是让上层自己排：两条命令必须**连着发**才有意义
      *   （中间夹一次别的 SELECT，当前文件就换了，读出来的是另一个文件的东西）。
      * @param followUpLabel [followUp] 的显示名；为 `null` 时用 `「…」接着读`。
+     * @param followUpMore 只要上一条还成功，就**继续沿着文件往下读**的命令。
+     *   为什么要连续读：文件长度事先不知道，而「读到 32 字节就没下文」并不等于
+     *   「文件只有 32 字节」—— 后面可能还有。多读两段的成本是两条只读命令，
+     *   收益是「不会因为一次读短了就把数据当成不存在」。
      */
     data class ProbeStep(
         val label: String,
         val apdu: ByteArray,
         val followUp: ByteArray? = null,
         val followUpLabel: String? = null,
+        val followUpMore: List<ByteArray> = emptyList(),
     )
 
     /**
@@ -253,6 +311,12 @@ internal object CardProbeLogic {
                 apdu = selectByFileId(fid),
                 followUp = readBinaryPlain(),
                 followUpLabel = "READ 文件 %04X 前 32 字节".format(fid),
+                // 真卡实测：0011 / 0012 / 0013 / 001A / 001B 前 32 字节全是零，
+                // 但「前 32 字节是零」不等于「文件是空的」—— 继续往下读两段看看。
+                followUpMore = listOf(
+                    readBinaryPlain(offset = 0x20),
+                    readBinaryPlain(offset = 0x40),
+                ),
             )
         }
 
@@ -271,7 +335,15 @@ internal object CardProbeLogic {
         val data: ByteArray,
         val success: Boolean,
         /** 还要接着发 `GET RESPONSE` 取剩下的数据（`sw` 以 `61` 开头）。 */
-        val hasMore: Boolean,
+        val hasMore: Boolean = false,
+        /**
+         * 卡回了 `6C xx`：**Le 写错了，正确的是 `xx`**。
+         *
+         * 不是错误、更不是「没这个文件」—— 按它给的字节数原样重发一次就能拿到数据。
+         * 真卡实测：`READ 文件 0015` 回 `6C1E`，那个文件只有 30 字节。不按它说的重发，
+         * 文件内容一个字节都拿不到。`xx` 为 `00` 时按规范表示 256。
+         */
+        val correctLe: Int? = null,
     )
 
     /**
@@ -295,7 +367,22 @@ internal object CardProbeLogic {
             data = data,
             success = sw == "9000",
             hasMore = sw.startsWith("61"),
+            correctLe = if (sw.startsWith("6C")) {
+                // 0x00 按规范代表 256，不是 0 —— 当成 0 会生成一条非法命令
+                sw.substring(2).toIntOrNull(16)?.let { if (it == 0) 256 else it }
+            } else null,
         )
+    }
+
+    /**
+     * `61 xx` 里的那个 `xx`：还要用 [getResponse] 取多少字节。
+     *
+     * 与 [ProbeResult.correctLe] 同一个坑：`xx = 00` 按规范代表 **256**，
+     * 当成 0 会生成一条取不到东西的命令。
+     */
+    fun remainingOf(sw: String): Int? {
+        if (!sw.startsWith("61") || sw.length != 4) return null
+        return sw.substring(2).toIntOrNull(16)?.let { if (it == 0) 256 else it }
     }
 
     /**
@@ -317,6 +404,10 @@ internal object CardProbeLogic {
         "6D00" -> "指令（INS）不支持"
         "6E00" -> "类别（CLA）不支持"
         "6F00" -> "未指明的错误"
+        // 这两条是真卡实测加进来的，它们是「文件在、但命令用错了」的信号 ——
+        // 见到就要换一条命令再试（见 readRecordCurrentEf），而不是当成「没有这个文件」。
+        "6981" -> "命令与文件结构不兼容（这类文件不吃这条命令，多半要改用 READ RECORD）"
+        "6986" -> "当前文件不允许这条命令（选中的多半是目录，不是文件）"
         "6982" -> "不满足安全条件（要认证/要密钥）"
         "6983" -> "已被锁定（别再试了，可能是重试计数用尽）"
         "6985" -> "使用条件不满足"
@@ -331,6 +422,47 @@ internal object CardProbeLogic {
 
     /** 紧凑十六进制（无空格）—— 给「解析出来的 AID 再拿去 SELECT」这种场合用。 */
     fun toHexCompact(bytes: ByteArray): String = toHex(bytes).replace(" ", "")
+
+    /**
+     * 试着把一段数据当**文本**读出来，读不出来就返回 `null`。
+     *
+     * ## 为什么必须试 —— 真卡实测
+     *
+     * 北理工校园卡的 `SELECT 0016` 读回来是
+     * `00 00 B8 DF CC EC CF E8 00 00 …`，GBK 一解就是**姓名「高天翔」**。
+     * 不试着解码的话，用户（和我们）看到的就只是一串十六进制 ——
+     * 数据明明已经拿到了，却认不出来，等于没拿到。
+     *
+     * ## 为什么是 GBK 而不是 UTF-8
+     *
+     * 国内校园卡一卡通系统绝大多数是 GBK（GB2312 超集）：
+     * `B8 DF` = 「高」，这是 GBK 的编码，用 UTF-8 解出来只会是乱码。
+     * GBK 是 ASCII 的超集，所以英文内容也走这一条，不用分两遍。
+     *
+     * ## 判据：解出来不能有替换字符
+     *
+     * 随便一段二进制用 GBK 硬解也会出字符，所以这里要求**每一个字符都是可打印的**
+     * （`>= 0x20` 且不是 U+FFFD）。汉字都满足，乱码里的控制字节不满足。
+     * 宁可返回 `null`（UI 就只显示十六进制），也不要端一坨乱码给用户。
+     */
+    fun decodeText(bytes: ByteArray): String? {
+        val trimmed = bytes.trimZeroBytes()
+        if (trimmed.isEmpty()) return null
+
+        val decoded = runCatching { String(trimmed, charset("GBK")) }.getOrNull() ?: return null
+        if (decoded.isEmpty()) return null
+        if (decoded.any { it.code < 0x20 || it == '\uFFFD' }) return null
+        return decoded.trim()
+    }
+
+    /** 去掉首尾的 0x00 填充（文件里空位都是零，留着只会把文本搞乱）。 */
+    private fun ByteArray.trimZeroBytes(): ByteArray {
+        var from = 0
+        var to = size
+        while (from < to && this[from] == 0.toByte()) from++
+        while (to > from && this[to - 1] == 0.toByte()) to--
+        return copyOfRange(from, to)
+    }
 
     // ------------------------------------------------------------------ TLV
 

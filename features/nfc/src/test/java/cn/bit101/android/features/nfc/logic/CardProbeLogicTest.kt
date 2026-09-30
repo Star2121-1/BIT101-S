@@ -305,6 +305,96 @@ class CardProbeLogicTest {
         )
     }
 
+    /**
+     * `6C xx` 的长度协商 —— 真卡实测栽过的那一次。
+     *
+     * 校园卡 `READ 文件 0015` 回 `6C1E`（这个文件只有 30 字节）。不按它说的重发，
+     * 文件里一个字节都拿不到，而我们还会以为「读不出来」。
+     */
+    @Test
+    fun `卡回 6C 时 Le 要按它说的换掉`() {
+        val r = CardProbeLogic.parseResponse(CardProbeLogic.parseHex("6C1E"))
+        assertEquals("6C1E", r.sw)
+        assertEquals(0x1E, r.correctLe!!)
+        assertFalse(r.success)
+        assertNull(r.swText) // 6C 是长度协商，不是错误码表里的那个
+
+        // 按它说的重发：只动最后一个字节
+        assertEquals(
+            "00 B0 81 00 1E",
+            CardProbeLogic.toHex(CardProbeLogic.withLe(CardProbeLogic.readBinary(sfi = 1), 0x1E)),
+        )
+        // 00 按规范代表 256，不是 0
+        assertEquals(256, CardProbeLogic.parseResponse(CardProbeLogic.parseHex("6C00")).correctLe!!)
+    }
+
+    /** ⚠️ 只许对读指令协商 Le —— 别的命令末尾那个字节根本就不是 Le。 */
+    @Test
+    fun `Le 协商不许碰非读指令`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            CardProbeLogic.withLe(CardProbeLogic.selectByFileId(0x0010), 30)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CardProbeLogic.withLe(CardProbeLogic.selectMasterFile(), 30)
+        }
+        // 读指令一律放行，且指令字节没被动过
+        val fixed = CardProbeLogic.withLe(CardProbeLogic.readRecordCurrentEf(1), 30)
+        assertEquals("00 B2 01 04 1E", CardProbeLogic.toHex(fixed))
+    }
+
+    @Test
+    fun `61 表示还要取一次且 0 代表 256`() {
+        val r = CardProbeLogic.parseResponse(CardProbeLogic.parseHex("6A5BF5E66110"))
+        assertEquals("6110", r.sw)
+        assertTrue(r.hasMore)
+        assertEquals("6A 5B F5 E6", CardProbeLogic.toHex(r.data))
+        assertEquals(0x10, CardProbeLogic.remainingOf("6110")!!)
+        assertEquals(256, CardProbeLogic.remainingOf("6100")!!)
+        assertNull(CardProbeLogic.remainingOf("9000"))
+        assertEquals("00 C0 00 00 10", CardProbeLogic.toHex(CardProbeLogic.getResponse(0x10)))
+        assertThrows(IllegalArgumentException::class.java) { CardProbeLogic.getResponse(0) }
+    }
+
+    /** 定长记录文件不吃 READ BINARY（真卡 0018 回 6981），要改走「当前文件的第几条记录」。 */
+    @Test
+    fun `记录文件走当前 EF 的 READ RECORD`() {
+        assertEquals("00 B2 01 04 00", CardProbeLogic.toHex(CardProbeLogic.readRecordCurrentEf(1)))
+        assertEquals("00 B2 03 04 00", CardProbeLogic.toHex(CardProbeLogic.readRecordCurrentEf(3)))
+        // 与按 SFI 的那条必须区分开：P2 高 3 位为 0 才是「当前文件」
+        assertNotEquals(
+            CardProbeLogic.toHex(CardProbeLogic.readRecordCurrentEf(1)),
+            CardProbeLogic.toHex(CardProbeLogic.readRecord(record = 1, sfi = 1)),
+        )
+        assertTrue(CardProbeLogic.isReadOnly(CardProbeLogic.readRecordCurrentEf(1)))
+        assertThrows(IllegalArgumentException::class.java) { CardProbeLogic.readRecordCurrentEf(0) }
+    }
+
+    /** `6981` / `6986` 的说明必须是「命令用错了」，不能写成「没这个文件」。 */
+    @Test
+    fun `文件在但命令不对的状态字要说清楚`() {
+        assertTrue(CardProbeLogic.statusText("6981")!!.contains("READ RECORD"))
+        assertTrue(CardProbeLogic.statusText("6986")!!.contains("目录"))
+    }
+
+    /** GBK 文本解码 —— 真卡 `0016` 文件里就是姓名，解不出来等于白读。 */
+    @Test
+    fun `GBK 文本能被认出来`() {
+        assertEquals("高天翔", CardProbeLogic.decodeText(CardProbeLogic.parseHex("0000B8DFCCECCFE80000")))
+        // ASCII 走同一条路（GBK 是 ASCII 超集）
+        assertEquals("BIT101", CardProbeLogic.decodeText("BIT101".toByteArray(Charsets.US_ASCII)))
+    }
+
+    @Test
+    fun `二进制乱码不许当成文本`() {
+        // 含控制字节：宁可给 null，也不要端一坨乱码给用户
+        assertNull(CardProbeLogic.decodeText(CardProbeLogic.parseHex("6F18 8410 D156".replace(" ", ""))))
+        // 全是零填充 ⇒ 没有内容
+        assertNull(CardProbeLogic.decodeText(ByteArray(16)))
+        assertNull(CardProbeLogic.decodeText(ByteArray(0)))
+        // 纯 GBK 高位字节但落在 GBK 空洞里 ⇒ 解出替换字符 ⇒ 判否
+        assertNull(CardProbeLogic.decodeText(CardProbeLogic.parseHex("FFFEFFFE")))
+    }
+
     /** FID 扫描：每条都带一个「选中了就读一段」的后续命令，且全部过只读闸门。 */
     @Test
     fun `FID 扫描带后续读且全只读`() {

@@ -74,7 +74,10 @@ fun NfcSettingPage(
     var busy by remember { mutableStateOf<NfcController.Busy>(NfcController.Busy.Idle) }
     var scan by remember { mutableStateOf<NfcScan?>(null) }
     var route by remember { mutableStateOf<String?>(null) }
-    var deepProbe by remember { mutableStateOf(false) }
+    // 深度扫描默认开：真卡实测它是**唯一**挖出卡内文件的那一轮
+    // （SELECT 0010~001B 命中 8 个文件，其中 0016 里就是姓名）。
+    // 关掉它，贴一次卡就只能看到「这个文件不存在」。
+    var deepProbe by remember { mutableStateOf(true) }
     var classicScan by remember { mutableStateOf(true) }
     var studentId by remember { mutableStateOf("") }
     var controller by remember { mutableStateOf<NfcController?>(null) }
@@ -252,10 +255,11 @@ private fun ReadCardSection(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(checked = deepProbe, onCheckedChange = onDeepProbeChange, enabled = capability == NfcCapability.Enabled)
             Column(Modifier.weight(1f)) {
-                Text("再扫一遍文件区（很慢，要贴住几秒）")
+                Text("扫文件区（慢，要贴住几秒；但这是唯一挖得到数据的一轮）")
                 Text(
-                    "CPU 卡才有用：挨个文件标识试 SELECT，命中了就读开头 32 字节。" +
-                        "共 300 多条命令，中途掉卡也保留已经拿到的部分。全部只读。",
+                    "CPU 卡才有用：挨个文件标识试 SELECT，命中了就沿文件往下读三段。" +
+                        "卡说「你 Le 写错了」（6Cxx）会按它说的重发；文件不吃 READ BINARY（6981）" +
+                        "会改读记录。共 400 条左右命令，中途掉卡也保留已经拿到的部分。全部只读。",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -275,8 +279,22 @@ private fun ReadResultCard(
     scan: NfcScan,
     onCopy: (String) -> Unit,
 ) {
+    // 深度扫描会有三四百条记录，默认只列有数据的。状态提在这里而不是 `let` 里面，
+    // 免得 `probe` 一会儿有一会儿没有时把 remember 的调用顺序打乱。
+    var showAllProbe by remember { mutableStateOf(false) }
+
     Card {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 复制按钮放**最上面**：一次深度扫描的结果有几百行，放末尾等于要人先滑到底
+            // 再往回找 —— 而「复制诊断文本」正是这个页面上最常用的那一个动作。
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { onCopy(dumpOf(scan)) }) { Text("复制诊断文本") }
+            }
+
             scan.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             scan.writeOutcome?.let { Text(it) }
 
@@ -347,16 +365,35 @@ private fun ReadResultCard(
 
             scan.probe?.let { lines ->
                 HorizontalDivider()
-                Text("只读探测结果：", style = MaterialTheme.typography.bodySmall)
-                lines.forEach { line ->
+                val hits = lines.filter { it.hasData }
+                Text(
+                    "只读探测：共 ${lines.size} 条命令，其中 ${hits.size} 条拿到了数据。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (hits.size < lines.size) {
+                    TextButton(onClick = { showAllProbe = !showAllProbe }) {
+                        Text(if (showAllProbe) "只看有数据的 ${hits.size} 条" else "展开全部 ${lines.size} 条")
+                    }
+                }
+                (if (showAllProbe) lines else hits).forEach { line ->
                     Text(line.label, style = MaterialTheme.typography.bodyMedium)
                     MonoText("APDU ${line.apdu}")
                     Text(
                         "→ ${line.sw.ifEmpty { "（没发出去）" }} ${line.swText ?: "未知状态字"}",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    line.note?.let {
+                        Text("（$it）", style = MaterialTheme.typography.bodySmall)
+                    }
                     if (!line.data.isNullOrBlank()) MonoText(line.data)
                     line.tlvs.forEach { MonoText("  $it") }
+                    line.text?.let { text ->
+                        Text(
+                            "文本：$text",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     line.studentIdHit?.let { hit ->
                         Text(
                             "★ 在这里找到了学号（$hit）",
@@ -366,8 +403,6 @@ private fun ReadResultCard(
                     }
                 }
             }
-
-            TextButton(onClick = { onCopy(dumpOf(scan)) }) { Text("复制诊断文本") }
         }
     }
 }
@@ -490,8 +525,10 @@ private fun dumpOf(scan: NfcScan): String = buildString {
         appendLine("只读探测:")
         lines.forEach { line ->
             appendLine("  [${line.label}] ${line.apdu} -> ${line.sw} ${line.swText ?: "未知状态字"}")
+            line.note?.let { appendLine("      过程: $it") }
             line.data?.takeIf { it.isNotBlank() }?.let { appendLine("      data: $it") }
             line.tlvs.forEach { appendLine("      tlv: $it") }
+            line.text?.let { appendLine("      文本: $it") }
             line.studentIdHit?.let { appendLine("      ★ 命中学号：$it") }
         }
     }
