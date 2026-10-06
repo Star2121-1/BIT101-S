@@ -266,6 +266,26 @@ internal object CardProbeLogic {
          * 而光看标签字符串是拿不到文件号的（真卡上 `0010` 就是这样，见 nfc-card-probe.md）。
          */
         val fid: Int? = null,
+        /**
+         * 这条命令是 [readBinary]（带 SFI 的那种读）时带上它读的是哪个 SFI。
+         *
+         * 用处与 [fid] 完全对称，但方向相反：当这条 `READ BINARY SFI=n` 回 `6981`
+         * （命令与文件结构不兼容）时，要改发的是**这个 SFI 的** `READ RECORD`，
+         * 而不是「当前已选中 EF」的那条 —— 发 `READ BINARY` 时压根没选中过任何文件，
+         * 「当前 EF」是谁完全说不清。真卡实测 `SFI=2` 与 `SFI=24` 都回 `6981`，
+         * 拿不到这个编号就只能瞎发。
+         */
+        val sfi: Int? = null,
+        /**
+         * [followUp] / [followUpMore] 是否**只在第一段真有内容时**才发。
+         *
+         * 为什么需要这个开关：SFI 扫描要挨个试 30 个短标识，其中大多数是空文件
+         * （全零）或不存在。对全零文件继续往下读三段，只是白等三轮传输时间，
+         * 而用户贴在手机上不动的那几秒是有限的。
+         * 但「前 32 字节是零」确实**不等于**「文件是空的」，所以这里不是不读，
+         * 而是「先看有没有东西，有才继续」。
+         */
+        val followUpIfData: Boolean = false,
     )
 
     /**
@@ -289,14 +309,48 @@ internal object CardProbeLogic {
     }
 
     /**
-     * 第二轮：挨个 SFI 试 `READ BINARY`。
+     * 第二轮：挨个 SFI 试 `READ BINARY`，命中的**接着往下读**。
      *
-     * ⚠️ 这是**探索性**的一轮 —— 未选过文件就去读，多数卡会回 `6A82`（文件没找到）。
-     * 之所以还留着：少数CPU 卡的 MF 下就有可执行读的 EF，且这条指令**确定不会写坏东西**
-     * （已过 [isReadOnly]），试错成本为零。
+     * ## ⚠️ 这一轮曾经被自己的编码 bug 废掉，别再小看它
+     *
+     * 上一版把 READ BINARY 的 P1 写成了 `(SFI << 3) | 0x04`（那是 READ RECORD 的 P2），
+     * 于是 30 条全是 `6A82`，我据此在文档里写下「这一轮没有价值，实测全找不到」——
+     * **那是错的结论**。把 P1 改成正确的 `0x80 | SFI` 之后，真卡上有 **12 个 SFI 有响应**：
+     *
+     * | SFI | 结果 |
+     * |---|---|
+     * | 2 / 24 | `6981` 定长记录文件（要改 `READ RECORD`）|
+     * | **4** | **`6982` 要认证 —— 有一扇门是锁着的** |
+     * | 5 / 6 / 7 | `9000` 有真实数据 |
+     * | 8 / 9 / 16~19 / 26 / 27 | `9000` 但全零（空文件）|
+     * | 21 / 22 | 与 FID `0015` / `0016` 内容一致（有效期、姓名）|
+     *
+     * ⇒ 教训：**「这条路走不通」和「我这条路写错了」在表现上一模一样**。
+     * 下结论之前先确认命令本身是对的（这次的判据是同一个文件走 FID 那条路能读到，
+     * 走 SFI 却读不到 ⇒ 可疑的是命令，不是卡）。
+     *
+     * ## 命中之后为什么还要往下读
+     *
+     * 一次只读 32 字节就收工，会把超过 32 字节的文件**截断成半截** ——
+     * 真卡 `SFI=7` 读回来正好是两段 16 字节的记录，看着像「就到这儿了」，
+     * 但那是巧合，不能拿巧合当长度依据。
+     *
+     * @param range 要试的 SFI 区间（规范取值 1~30）。
+     * @param length 每段读多少字节。
      */
     fun sfiScan(range: IntRange = 1..30, length: Int = 32): List<ProbeStep> =
-        range.map { ProbeStep("READ BINARY SFI=$it", readBinary(sfi = it, length = length)) }
+        range.map { sfi ->
+            ProbeStep(
+                label = "READ BINARY SFI=$sfi",
+                apdu = readBinary(sfi = sfi, length = length),
+                followUp = readBinary(sfi = sfi, offset = 0x20, length = length),
+                followUpLabel = "SFI=$sfi 第 2 段",
+                followUpMore = listOf(readBinary(sfi = sfi, offset = 0x40, length = length)),
+                sfi = sfi,
+                // 空文件（全零）就不必再读两段了，贴卡时间是有成本的。
+                followUpIfData = true,
+            )
+        }
 
     /**
      * 第三轮：挨个**文件标识（FID）**试 `SELECT`，命中了再接着读一段。
@@ -330,14 +384,21 @@ internal object CardProbeLogic {
         }
 
     /**
-     * 这个状态字是不是在说「**命令用错了，换个命令再试**」。
+     * 这个状态字是不是在说「**文件在，但这条命令用错了，换 READ RECORD 再试**」。
      *
      * 真卡实测的教训：`0018` 文件 SELECT 回 `9000`（文件在），紧接着 READ BINARY 回 `6981`
      * （命令与文件结构不兼容）—— 它是定长记录文件，要用 `READ RECORD` 才读得到。
-     * ⚠️ 判断依据必须是**读命令的结果**，不是 SELECT 的结果：SELECT 回的是 `9000`，
-     * 回退挂在它上面就永远不会触发（这个 bug 真发生过一次，白丢了一个文件）。
+     * 改发记录之后立刻读到了 23 字节的业务数据，所以这条回退是**有实在收益**的。
+     *
+     * ## ⚠️ 两个边界，都是实测撞出来的
+     *
+     * 1. **只认 `6981`，不认 `6986`**。`6986` 虽然也是「命令不对」，但它的含义是
+     *    「当前选中的是目录，不给你读」—— 对目录发 `READ RECORD` 同样是白费：
+     *    真卡 `0010` 上就这么白白发了 5 条，全回 `6986`。目录的正确处置是**进去**（见 [looksLikeDirectory]）。
+     * 2. **判断依据必须是读命令的结果**，不是 SELECT 的：SELECT 回 `9000`，
+     *    回退挂在它上面就永远不会触发（这个 bug 真发生过一次，整个文件被漏掉）。
      */
-    fun shouldTryRecords(sw: String): Boolean = sw == "6981" || sw == "6986"
+    fun shouldTryRecords(sw: String): Boolean = sw == "6981"
 
     /**
      * 这个状态字是不是在说「**选中的多半是个目录，不是文件**」。

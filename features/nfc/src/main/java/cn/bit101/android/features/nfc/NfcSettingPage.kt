@@ -255,11 +255,13 @@ private fun ReadCardSection(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(checked = deepProbe, onCheckedChange = onDeepProbeChange, enabled = capability == NfcCapability.Enabled)
             Column(Modifier.weight(1f)) {
-                Text("扫文件区（慢，要贴住几秒；但这是唯一挖得到数据的一轮）")
+                Text("扫文件区（慢，要贴住几秒；卡里的数据全是这一轮挖出来的）")
                 Text(
-                    "CPU 卡才有用：挨个文件标识试 SELECT，命中了就沿文件往下读三段。" +
-                        "卡说「你 Le 写错了」（6Cxx）会按它说的重发；文件不吃 READ BINARY（6981）" +
-                        "会改读记录。共 400 条左右命令，中途掉卡也保留已经拿到的部分。全部只读。",
+                    "CPU 卡才有用：先挨个短标识（SFI 1~30）读，再挨个文件标识试 SELECT。" +
+                        "命中就沿文件往下读三段。卡说「你 Le 写错了」（6Cxx，如 6C1E = 只要 30 字节）" +
+                        "会按它说的重发；文件不吃 READ BINARY（6981，记录文件）会改读记录；" +
+                        "选中的是目录（6986）会进去再扫一层。共 400 条左右只读命令，" +
+                        "中途掉卡也保留已经拿到的部分。",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -401,6 +403,15 @@ private fun ReadResultCard(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
+                    // 疑似 BCD 日期：卡里存时间就是这样的裸字节，不点出来没人认得。
+                    // ⚠️ 措辞带「疑似」—— 三字节凑一个合法时刻太容易，这是线索不是结论。
+                    line.dates.forEach { d ->
+                        Text(
+                            "疑似日期 $d",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
                 }
             }
         }
@@ -530,6 +541,7 @@ private fun dumpOf(scan: NfcScan): String = buildString {
             line.tlvs.forEach { appendLine("      tlv: $it") }
             line.text?.let { appendLine("      文本: $it") }
             line.studentIdHit?.let { appendLine("      ★ 命中学号：$it") }
+            line.dates.forEach { appendLine("      疑似日期: $it") }
         }
     }
     scan.error?.let { appendLine("错误: $it") }

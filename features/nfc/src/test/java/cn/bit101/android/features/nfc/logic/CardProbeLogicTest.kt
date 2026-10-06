@@ -276,6 +276,43 @@ class CardProbeLogicTest {
         assertEquals("READ BINARY SFI=30", steps.last().label)
     }
 
+    /**
+     * SFI 扫描的每条都必须**记住自己扫的是哪个 SFI**。
+     *
+     * 为什么这条要有测试：`READ BINARY SFI=n` 回 `6981`（记录文件）时要改发
+     * `READ RECORD`，而那时「当前 EF」根本不存在 —— 这条命令从没 SELECT 过任何文件。
+     * 不带 SFI 编号，发出去的记录命令就是在读**别人的**文件。
+     * 真卡上 `SFI=2` 与 `SFI=24` 两个记录文件都会因此拿不到。
+     */
+    @Test
+    fun `SFI 扫描的每条都带上了自己的 SFI 编号`() {
+        assertEquals(listOf(1, 2, 3), CardProbeLogic.sfiScan(1..3).map { it.sfi })
+        // 反过来也别串台：按 FID 扫的那几条不该被安上 SFI
+        assertTrue(CardProbeLogic.fidScan(0x0010..0x0012).all { it.sfi == null })
+    }
+
+    /**
+     * 命中的 SFI 要**沿文件往下读**，且只在第一段真有内容时才读。
+     *
+     * 「只在有内容时」的理由：30 个短标识里多数是空文件，对全零文件再读两段
+     * 纯粹是白等（用户贴在手机上的那几秒是有限的）。但「前 32 字节是零」
+     * 也确实**不等于**「文件是空的」，所以是「先看一眼」而不是「不读」。
+     */
+    @Test
+    fun `SFI 扫描命中后沿文件往下读 且只在真有数据时`() {
+        val step = CardProbeLogic.sfiScan(1..1).single()
+
+        assertTrue(step.followUpIfData)
+        assertEquals("SFI=1 第 2 段", step.followUpLabel)
+        // 第 2 段是同一 SFI 的 offset 0x20，第 3 段是 0x40 —— P1 仍是 0x80|SFI
+        assertEquals("00 B0 81 20 20", CardProbeLogic.toHex(step.followUp!!))
+        assertEquals(listOf("00 B0 81 40 20"), step.followUpMore.map { CardProbeLogic.toHex(it) })
+
+        // 续读的每一条也都要过只读闸门
+        assertTrue(CardProbeLogic.isReadOnly(step.followUp!!))
+        assertTrue(step.followUpMore.all { CardProbeLogic.isReadOnly(it) })
+    }
+
     /** 「不带 SFI」的 READ BINARY：P1/P2 是**偏移量的高/低字节**，不是 SFI。 */
     @Test
     fun `READ BINARY 不带 SFI 时 P1P2 是偏移量`() {
@@ -379,15 +416,17 @@ class CardProbeLogicTest {
     /**
      * 该不该改读记录 / 该不该进目录。
      *
-     * ⚠️ 这两条判据必须分开：`6981` 是**定长记录文件**（改 READ RECORD 就好），
+     * ⚠️ 这两条判据必须**互斥**：`6981` 是**定长记录文件**（改 READ RECORD 就好），
      * `6986` 是**目录**（要进去再扫一层）。混成一个就会出现「对目录发 READ RECORD」
-     * 这种白费力气的事。真卡 0018 回 6981、0010 回 6986，正好各占一边。
+     * 这种白费力气的事 —— 真卡 `0010`（目录）上就这么白发了 5 条，全回 `6986`。
+     * 真卡 `0018` 回 `6981`、`0010` 回 `6986`，正好各占一边。
      */
     @Test
     fun `记录文件与目录要用不同的判据`() {
         assertTrue(CardProbeLogic.shouldTryRecords("6981"))
-        assertTrue(CardProbeLogic.shouldTryRecords("6986"))
         assertTrue(CardProbeLogic.looksLikeDirectory("6986"))
+        // ⚠️ 下面两条是这次抓到的 bug 的回归线：6986 归目录，**不再**触发改读记录。
+        assertFalse(CardProbeLogic.shouldTryRecords("6986"))
         assertFalse(CardProbeLogic.looksLikeDirectory("6981"))
         // 正常/找不到文件都不该触发任何回退
         for (sw in listOf("9000", "6A82", "6B00", "6C1E", "6982")) {

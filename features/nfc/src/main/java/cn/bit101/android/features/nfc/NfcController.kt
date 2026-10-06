@@ -11,6 +11,7 @@ import android.nfc.tech.Ndef
 import android.nfc.tech.NdefFormatable
 import android.os.Handler
 import android.os.Looper
+import cn.bit101.android.features.nfc.logic.BcdScan
 import cn.bit101.android.features.nfc.logic.CardKind
 import cn.bit101.android.features.nfc.logic.ClassicProbeLogic
 import cn.bit101.android.features.nfc.logic.CardProbeLogic
@@ -179,13 +180,22 @@ internal class NfcController(
 
         val deep = if (description.supportsApdu && withSfiScan) {
             runCatching {
-                // FID 扫描排前面：真卡实测它是**唯一**能挖出文件的路径，
-                // 而 MF 下裸发 READ BINARY SFI=n 在实测里 30 条全是 6A82。
-                // 顺序还有一个用意 —— 目录（DF）是在 FID 扫描过程中认出来的，
-                // 最后才进目录里再扫一层。
+                // 深度轮的顺序是**真卡实测**定下来的，四步各有理由：
+                // ① 先 SELECT MF 把上下文钉死 —— 带 SFI 的 READ BINARY 是「相对当前 DF」的，
+                //    不先选一次主文件，扫出来的结果是上一次操作残留的上下文，不可复现。
+                // ② SFI 扫描（30 条，快）排最前：实测 1..30 里有 12 个有响应，
+                //    性价比最高 —— 含那个回 `6982`「要认证」的 SFI=4。
+                // ③ FID 扫描（255 条，慢）跟上：命中率低，但覆盖的是另一个命名空间，
+                //    真卡上的目录（DF）`0010` 就是它先认出来的。
+                // ④ 目录下钻放最后：DF 是在③里认出来的，认出来才有得进。
                 probeApdu(
                     tag,
-                    CardProbeLogic.fidScan() + CardProbeLogic.sfiScan(),
+                    listOf(
+                        CardProbeLogic.ProbeStep(
+                            "SELECT 主文件 3F00（深度轮起点）",
+                            CardProbeLogic.selectMasterFile(),
+                        ),
+                    ) + CardProbeLogic.sfiScan() + CardProbeLogic.fidScan(),
                     drilldown = true,
                 )
             }.getOrNull()
@@ -278,7 +288,13 @@ internal class NfcController(
                 val out = exchange(iso, step.label, step.apdu, sid)
                 rawLines += out
 
-                if (step.followUp != null && out.sw == "9000") {
+                // 「接着读」的触发条件：第一段成功，且（若这条声明了）确实读到了非零内容。
+                // 这个判断为什么存在：SFI 扫描要试 30 个短标识，其中多数是空文件或不存在，
+                // 对全零文件再往下读两段纯属白等。而「前 32 字节是零」确实不等于「文件是空的」，
+                // 所以不是不读，是「先看一眼有没有东西，有才继续」。
+                val hasPayload = out.bytes.any { it != 0.toByte() }
+                val proceed = out.sw == "9000" && (!step.followUpIfData || hasPayload)
+                if (step.followUp != null && proceed) {
                     // 「选中了就读一段」：只在选中成功时跟发，且**紧接着**发 ——
                     // 中间夹一次别的 SELECT，当前文件就换了，读到的就不是这个文件的东西。
                     val followLabel = step.followUpLabel ?: "「${step.label}」接着读"
@@ -286,24 +302,37 @@ internal class NfcController(
                     rawLines += r
 
                     when {
+                        // ⚠️ **目录这一支必须排在「改读记录」前面**。
+                        // `6986` 与 `6981` 都是「命令用错了」，但处置完全不同：
+                        // `6986` 是「你选中的是目录」，对它发 READ RECORD 一样白费 ——
+                        // 真卡 `0010` 上就这么白白发了 5 条，全回 6986。
+                        // 上一版把两种状态字混在一个判断里，正好踩中这个坑。
+                        CardProbeLogic.looksLikeDirectory(r.sw) -> {
+                            step.fid?.let { directorySuspects += it }
+                        }
+
                         // ⚠️ 回退的判断依据是**读命令的结果**，不是上面 SELECT 的。
                         // SELECT 回的是 9000，拿它判断的话这条回退永远不触发 ——
                         // 真卡 0018 就是被这么漏掉的（回 6981 的是 READ，不是 SELECT）。
                         CardProbeLogic.shouldTryRecords(r.sw) -> {
+                            // 按 SFI 读的就要按 SFI 改记录：READ BINARY 这条路上
+                            // 我们**从没选中过任何文件**，「当前 EF」是谁根本说不清。
+                            // 真卡 SFI=2 与 SFI=24 都回 6981，全靠这个编号才发得对。
+                            val sfi = step.sfi
+                            val recordApdu = { rec: Int ->
+                                if (sfi != null) CardProbeLogic.readRecord(record = rec, sfi = sfi)
+                                else CardProbeLogic.readRecordCurrentEf(rec)
+                            }
                             // 读到哪算哪：记录文件有几条事先不知道，
                             // 读不到下一条的卡会自己回错误，不会白读。
                             for (rec in 1..5) {
                                 rawLines += exchange(
                                     iso,
                                     "改读记录：$followLabel 记录 $rec",
-                                    CardProbeLogic.readRecordCurrentEf(rec),
+                                    recordApdu(rec),
                                     sid,
                                 )
                             }
-                        }
-
-                        CardProbeLogic.looksLikeDirectory(r.sw) -> {
-                            step.fid?.let { directorySuspects += it }
                         }
 
                         else -> {
@@ -419,6 +448,9 @@ internal class NfcController(
             text = CardProbeLogic.decodeText(bytes),
             studentIdHit = studentIdHit,
             tlvs = CardProbeLogic.parseTlvs(bytes).map(::tlvText),
+            // BCD 日期扫一遍：卡里的有效期与交易时间都是 BCD，
+            // 不点出来的话那串 `20 26 03 22 11 08 43` 没人会意识到是时间。
+            dates = BcdScan.scan(bytes).map { it.display },
         )
     }
 
@@ -750,6 +782,14 @@ internal data class ProbeLine(
     val studentIdHit: String? = null,
     /** 返回的 TLV 摊平后的 `标签=值`，如 `84=315041592E...`。人肉看十六进制太累。 */
     val tlvs: List<String> = emptyList(),
+    /**
+     * 这段返回里**疑似 BCD 日期**，已带偏移，如 `偏移 16：2026-03-22 11:08:43`。
+     *
+     * 卡里把日期存成 BCD 是常态，但人看十六进制看不出来 —— 真卡 `0018` 的记录里
+     * 就有一条 `20 26 03 22 11 08 43`。⚠️ 措辞必须留「疑似」：BCD 三字节凑出一个
+     * 合法时刻太容易，界面把它当**线索**展示，不能当结论。
+     */
+    val dates: List<String> = emptyList(),
 ) {
     /**
      * 这一条**真的拿到了东西**（不是只有状态字、也不是一整段零）。
