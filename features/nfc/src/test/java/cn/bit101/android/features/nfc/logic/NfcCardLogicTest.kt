@@ -2,6 +2,7 @@ package cn.bit101.android.features.nfc.logic
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -246,5 +247,73 @@ class NfcCardLogicTest {
         val value = NfcCardLogic.candidates(seven).first().value
         assertEquals(java.math.BigInteger(1, seven).toString(), value)
         assertTrue(value.length >= 16)
+    }
+
+    /**
+     * ★★ **学号就是这样找到的**（真卡第七次实测的原始字节，一字未改）。
+     *
+     * `0016`（姓名文件）第2 段，偏移 10 起：
+     * `31 31 06 32 30 32 34 31 33 04 35 35` ⇒ `11` + `06` + `202413` + `04` + `55`。
+     * **跳过两个非数字分隔符，拼起来正好是 `1120241355`。**
+     *
+     * 这条数据是整个 NFC 功能成立的关键：卡自己就报出了「这是谁」，
+     * 不需要「卡号 → 学号」那层只有一卡通中心才有的映射表。
+     *
+     * ⚠️ 六次贴卡都没找到它，就是因为**连续匹配对这段必然失败**（字节不连续）。
+     * ⇒ **「找不到学号」不等于「卡里没有学号」，也可能只是它被分隔了。**
+     */
+    @Test
+    fun `真卡上的学号被分隔符隔开 也能找到`() {
+        val data = CardProbeLogic.parseHex("0000000000000000000031310632303234313304353500")
+        val hit = StudentIdScan.find(data, "1120241355")
+
+        assertNotNull(hit)
+        // ⚠️ JUnit4 的 assertTrue **不接受消息参数**（那是 JUnit5 的写法），
+        // 想看失败详情就把实际值拼进断言表达式里。
+        assertTrue("应报分段形式，实际：$hit", hit!!.startsWith("分段形式"))
+        assertTrue("偏移应指到第一个数字，实际：$hit", hit.contains("偏移 10"))
+    }
+
+    /**
+     * 分段匹配**必须严于**连续匹配，否则 BCD 流水会被拼成假学号。
+     *
+     * `0018` 的交易记录就是反例：`20 26 03 22 11 08 43` 全是「类数字」字节，
+     * 若不校验「拼起来完全相等」，`260322110843` 这种碎片会被当学号报出来。
+     */
+    @Test
+    fun `分段匹配不会把二进制流水误报成学号`() {
+        // 真卡的交易记录字节
+        val record = CardProbeLogic.parseHex("0001000000000013880200000000000120260322110843")
+        assertNull(StudentIdScan.find(record, "1120241355"))
+
+        // 补零分隔也不行：0x00 是「没写过的空位」，不是分隔符
+        val padded = CardProbeLogic.parseHex("3131003100320000320003003000")
+        assertNull(StudentIdScan.find(padded, "1120241355"))
+    }
+
+    /**
+     * 分段匹配对**无关数据**必须保持沉默。
+     *
+     * 判据是「**所有分段拼起来 == 传入的学号**」。
+     * ⚠️ 所以更短的**前缀也会命中**（卡里 10 位、传 9 位 ⇒ 拼出来正好 9 位）——
+     * 这不是缺陷，真要防的是「位数/内容对不上」与「二进制流水被误拼」。
+     */
+    @Test
+    fun `分段匹配只认完全相等`() {
+        val data = CardProbeLogic.parseHex("31310632303234313304353500")
+        // 完全一致 —— 命中
+        assertNotNull(StudentIdScan.find(data, "1120241355"))
+        // ⚠️ 注意方向性：卡里那段是 `11`+`202413`+`55` = 10 位，
+        // 所以拿**更短**的 9 位（真值的**前缀**）去问**也会命中** ——
+        // 因为逐段拼出来的正好就是那 9 位。这**不是 bug**：
+        // 判据是「拼起来 == 传入的学号」，传 9 位就只该匹配 9 位。
+        // 防误报靠的是长度下界（≥6 位）+ 控制字符域判据 + 交易记录那组反例，
+        // 不是靠「前缀不算」——后者是做不到的，也不该追求。
+        // 多一位：卡里没有第 11 位，拼不出来
+        assertNull(StudentIdScan.find(data, "11202413550"))
+        // 内容不同：数字都对但顺序不同
+        assertNull(StudentIdScan.find(data, "551320241120"))
+        // 含非数字 —— 根本不是学号
+        assertNull(StudentIdScan.find(data, "11202413a5"))
     }
 }

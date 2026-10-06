@@ -115,6 +115,9 @@ internal data class CardNoCandidate(
  */
 internal object StudentIdScan {
 
+    private const val ASCII_ZERO = 0x30
+    private const val ASCII_NINE = 0x39
+
     /**
      * 学号在卡里可能的编码形式。
      *
@@ -142,12 +145,100 @@ internal object StudentIdScan {
      */
     fun find(data: ByteArray, studentId: String): String? {
         if (data.isEmpty()) return null
+        findContiguous(data, studentId)?.let { return it }
+        return findSegmented(data, studentId)
+    }
+
+    /** 连续字节的精确匹配（ASCII / BCD / BCD 反序）。 */
+    private fun findContiguous(data: ByteArray, studentId: String): String? {
         encodingsOf(studentId).forEach { (name, needle) ->
             val at = indexOf(data, needle)
             if (at >= 0) return "$name 形式，偏移 $at"
         }
         return null
     }
+
+    /**
+     * ⚠️⚠️ **分段匹配** —— 真卡实测（第七次）才找到学号，靠的就是这一条。
+     *
+     * `0016`（姓名文件）的第 2 段里，用户学号是这样摆的（偏移 10 起）：
+     *
+     * ```
+     * 31 31 06 32 30 32 34 31 33 04 35 35
+     *  '1''1' 06  '2''0''2''4''1''3' 04  '5''5'
+     * ```
+     *
+     * 即 `11` + **非数字分隔符** + `202413` + **非数字分隔符** + `55`，
+     * **跳过两个分隔符拼起来正好是 `1120241355`**（已逐字节核对，完全一致）。
+     *
+     * ## 为什么必须单独写这条路
+     *
+     * 连续匹配对上面这段**必然失败**：字节不连续。
+     * 而这条数据的价值极高 —— **它是整个 NFC 功能成立的关键**（见本文件顶部）：
+     * 卡自己就报出了「这是谁」，不需要「卡号 → 学号」那层只有一卡通中心才有的映射表。
+     * ⇒ **「找不到学号」不等于「卡里没有学号」，也可能只是它被分隔了。**
+     *
+     * ## 判据故意收紧
+     *
+     * 分隔符必须**恰好 1 字节**、非数字、且**不是常见填充值**，并且**所有分段拼起来
+     * 正好等于完整学号**。否则 `20 26 03 22 11 08 43` 这种 BCD流水会被切成
+     * `20`+`26`+`03`+… 拼出一串假学号。只认「拼起来完全相等」这一种，宁可漏也不误报。
+     */
+    private fun findSegmented(data: ByteArray, studentId: String): String? {
+        val digits = studentId.trim()
+        if (digits.length < 6 || digits.any { !it.isDigit() }) return null
+
+        // ⚠️ 段数上限 = **学号位数**，而不是拍一个常数。
+        // 这个上限兼两种职责：既是防误报（能切出比学号还多的段就不对），
+        // 又必须**足够大**才能装下真卡上那三段（`11` / `202413` / `55`）。
+        // 之前拍了个 `MAX_SEGMENTS = 6`，结果 `11`+`202413` 正好 6 段就停，
+        // **永远拼不成 10 位** —— 判据太紧会漏掉真东西，那比误报更糟。
+        val maxSegments = digits.length
+
+        for (i in data.indices) {
+            val parts = mutableListOf<String>()
+            var at = i
+            while (at < data.size && parts.size < maxSegments) {
+                val b = data[at].toInt() and 0xFF
+                if (b in ASCII_ZERO..ASCII_NINE) {
+                    parts += b.toChar().toString()
+                    at++
+                    continue
+                }
+                // 非数字：只有「正好夹在两段数字之间、且自己是 1 字节控制字符」才算分隔符
+                if (parts.isNotEmpty() && at + 1 < data.size &&
+                    data[at + 1].toInt() and 0xFF in ASCII_ZERO..ASCII_NINE &&
+                    isSeparator(b)
+                ) {
+                    at++
+                    continue
+                }
+                break
+            }
+            // 只有一段那是 findContiguous 的活，不必走这条路
+            if (parts.size < 2) continue
+            if (parts.joinToString("") == digits) {
+                return "分段形式（${parts.size} 段，被分隔符隔开），偏移 $i"
+            }
+        }
+        return null
+    }
+
+    /**
+     * 这个非数字字节**算不算**分隔符。
+     *
+     * ## 只认控制字符域（`0x01`~`0x1F`）
+     *
+     * 真卡上那两个分隔符是 `0x06` 与 `0x04`，都在控制字符域里。
+     * 而**放宽到「任何非数字」会立刻引入误报** ——
+     * `31 31 00 31 00 32 …`（数字被 `0x00` 反复隔开）就能拼出 `1120241355`，
+     * 卡里补零的位置到处都是，这么判必然出事。
+     *
+     * ⇒ 判据是「**恰好 1 字节的控制字符**」，不是「非数字」。
+     * 这样`0x00`（补零）、`0xFF`（补零）、`0x20`（空格）、`0x2D`（连字符）
+     * 全都被排除，而真卡那两个仍然认得出来。
+     */
+    private fun isSeparator(b: Int): Boolean = b in 0x01..0x1F
 
     /**
      * BCD：两位十进制压一个字节。奇数位**末尾补 0**（补在尾部而不是头部，
