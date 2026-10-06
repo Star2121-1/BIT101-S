@@ -208,16 +208,35 @@ internal object CardProbeLogic {
     /**
      * `READ BINARY`（**不带 SFI**）：`00 B0 <offset 高字节> <offset 低字节> <length>`。
      *
-     * 与 [readBinary] 的区别就一个地方：这里 P1 是**偏移量的高 8 位**（不是 `0x80 | SFI`）。
-     * 用途是「已经 SELECT 了某个文件，接着从里面读字节」——
-     * 也就是 [fidScan] 里「选中一个文件就读它一段」的那个搭配。
+     * 与 [readBinary] 的区别在 P1/P2 的含义：
+     * - 带 SFI（[readBinary]）：P1 = `0x80 | SFI`，**P2 才是偏移量**（单字节 0~255）。
+     * - 不带 SFI（本函数）：P1 = 偏移量的**高字节**，P2 = 偏移量的**低字节**。
+     *
+     * ⚠️⚠️ 两条路的偏移量编码**完全不同**，别互相套用。
+     * 这个坑真踩过：第五次实测里 `0006` 走 FID 路续读回 `6B00`（偏移超界），
+     * 而**同一个文件**走 `SFI=6` 路续读回 `9000`（读到了东西）。
+     * 同一份数据、两条路、不同结果 —— 原因就是当时本函数写成了
+     * `byteArrayOf(0x00, 0xB0, offset, 0x00, le)`，offset 全进了 P1、P2 恒为 0，
+     * 于是「读第 2 段」（本意 offset=32）实际发的是 offset=**0x2000 = 8192** ⇒ 必然 `6B00`。
+     *
+     * ⇒ 凡是本函数生成的续读命令，之前**全部无效**，而且失败方式很隐蔽：
+     * 回的是 `6B00`（偏移超界），看起来像「文件只有 32 字节」，
+     * 于是把「文件是空的」当成了结论 —— **与真卡同文件走 SFI 路能读出数据的事实矛盾**。
+     *
+     * @param offset 0~0x7FFF。规范上 16 位偏移够用；再大的文件应该换别的读法。
      */
     fun readBinaryPlain(offset: Int = 0, length: Int = 32): ByteArray {
-        require(offset in 0..0x7F) { "offset 必须在 0~127 之间，实际 $offset" }
+        require(offset in 0..0x7FFF) { "offset 必须在 0~32767 之间，实际 $offset" }
         require(length in 1..256) { "length 必须在 1~256 之间，实际 $length" }
         val le = if (length == 256) 0x00.toByte() else length.toByte()
 
-        return byteArrayOf(0x00, 0xB0.toByte(), offset.toByte(), 0x00, le)
+        return byteArrayOf(
+            0x00,
+            0xB0.toByte(),
+            ((offset shr 8) and 0xFF).toByte(),
+            (offset and 0xFF).toByte(),
+            le,
+        )
     }
 
     /**

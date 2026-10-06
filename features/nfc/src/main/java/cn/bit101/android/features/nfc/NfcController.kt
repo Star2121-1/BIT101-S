@@ -349,6 +349,33 @@ internal class NfcController(
         val out = exchange(iso, labelPrefix + step.label, step.apdu, sid)
         rawLines += out
 
+        // ⚠️⚠️ **主命令自己**回 6981 / 6986 时，必须在这里就处理 ——
+        // 不能等followUp。原因：「接着读」只在首段 9000 时才发
+        // （`proceed` 那个判断），而 `READ BINARY SFI=2` 回的正是 6981。
+        // 等于说：首段失败 ⇒ 提前 return ⇒ `shouldTryRecords(out.sw)` 那一支**永远够不着**。
+        //
+        // 这个 bug 有两种表现，都真卡实测撞出来的：
+        // ① `SFI=2` 回 6981（记录文件）却**一条回退命令都没发** ——
+        //    而同层`0002` 走 FID 路发了 5 条（虽然也失败，见下）。
+        // ② MF 下 `0018` 之所以能读到记录，纯粹是因为它的 `followUp` 存在、
+        //    SELECT 先回了 9000，才**侥幸**走到了回退那一支。
+        //    换句话说 `0018` 是运气好，不是设计对。
+        //
+        // ⇒ 教训：**回退的判断对象是「命令的结果」，而命令可能有好几条**
+        // （主命令、接着读、续读），**每一条的结果都要单独判一次**。
+        val mainLabel = labelPrefix + step.label
+        when {
+            CardProbeLogic.looksLikeDirectory(out.sw) -> {
+                step.fid?.let { directorySuspects += it }
+                return
+            }
+
+            CardProbeLogic.shouldTryRecords(out.sw) -> {
+                readRecords(iso, step, sid, rawLines, mainLabel)
+                return
+            }
+        }
+
         // 「接着读」的触发条件：第一段成功，且（若这条声明了）确实读到了非零内容。
         // 这个判断为什么存在：SFI 扫描要挨个试 30 个短标识，其中多数是空文件或不存在，
         // 对全零文件再往下读两段纯属白等。而「前 32 字节是零」确实不等于「文件是空的」，
@@ -373,28 +400,9 @@ internal class NfcController(
                 step.fid?.let { directorySuspects += it }
             }
 
-            // ⚠️ 回退的判断依据是**读命令的结果**，不是上面 SELECT 的。
-            // SELECT 回的是 9000，拿它判断的话这条回退永远不触发 ——
-            // 真卡 0018 就是被这么漏掉的（回 6981 的是 READ，不是 SELECT）。
+            // 同上：这条是 followUp 的结果，也要单独判一次。
             CardProbeLogic.shouldTryRecords(r.sw) -> {
-                // 按 SFI 读的就要按 SFI 改记录：READ BINARY 这条路上
-                // 我们**从没选中过任何文件**，「当前 EF」是谁根本说不清。
-                // 真卡 SFI=2 与 SFI=24 都回 6981，全靠这个编号才发得对。
-                val sfi = step.sfi
-                val recordApdu = { rec: Int ->
-                    if (sfi != null) CardProbeLogic.readRecord(record = rec, sfi = sfi)
-                    else CardProbeLogic.readRecordCurrentEf(rec)
-                }
-                // 读到哪算哪：记录文件有几条事先不知道，
-                // 读不到下一条的卡会自己回错误，不会白读。
-                for (rec in 1..5) {
-                    rawLines += exchange(
-                        iso,
-                        "改读记录：$followLabel 记录 $rec",
-                        recordApdu(rec),
-                        sid,
-                    )
-                }
+                readRecords(iso, step, sid, rawLines, followLabel)
             }
 
             else -> {
@@ -405,6 +413,60 @@ internal class NfcController(
                     r = exchange(iso, "$followLabel（续读第 ${index + 2} 段）", more, sid)
                     rawLines += r
                 }
+            }
+        }
+    }
+
+    /**
+     * 「这条不吃 READ BINARY，改读它的记录」—— 挨个记录号读，读到哪算哪。
+     *
+     * ## 按 SFI 还是按当前 EF，必须分清
+     *
+     * 真卡实测（第六次）：
+     * - MF 下 `0018`：先 SELECT 再 `READ BINARY`→`6981`，改发 `00 B2 01 04 00`（当前 EF）**读到了**。
+     * - 目录 `0010` 内 `0002`：同样改发 `00 B2 01 04 00`，五条**全回 6981**。
+     *
+     * 两条都「先 SELECT 过文件」，为什么一条通一条不通？**未证实** ——
+     * 可能是目录内那个文件需要按 SFI 寻址（`P2=(2<<3)|4=0x14`）而不是按当前 EF。
+     * ⇒ 所以这里对**两种寻址方式都试**：先按当前 EF，不成再按 SFI。
+     *   这不是乱发 —— [CardProbeLogic.isReadOnly] 放行 `B2`，读记录不改卡；
+     *   而「两种寻址都不通」本身也是有价值的信息（说明这个文件不吃记录式读）。
+     *
+     * @param baseLabel 触发回退的那条命令的标签，用于把记录行挂到它下面。
+     */
+    private fun readRecords(
+        iso: IsoDep,
+        step: CardProbeLogic.ProbeStep,
+        sid: String?,
+        rawLines: MutableList<RawLine>,
+        baseLabel: String,
+    ) {
+        val sfi = step.sfi
+        val bySfi = { rec: Int ->
+            if (sfi != null) CardProbeLogic.readRecord(record = rec, sfi = sfi)
+            else CardProbeLogic.readRecordCurrentEf(rec)
+        }
+
+        // 读到哪算哪：记录文件有几条事先不知道，
+        // 读不到下一条的卡会自己回错误，不会白读。
+        var anyByCurrentEf = false
+        for (rec in 1..5) {
+            val r = exchange(iso, "改读记录：$baseLabel 记录 $rec", bySfi(rec), sid)
+            rawLines += r
+            if (r.sw == "9000") anyByCurrentEf = true
+        }
+
+        // ⚠️ 按当前 EF 全部失败，而这条是带 SFI 读来的 ⇒ 再按 SFI 试一遍。
+        // 第六次实测：目录内 0002 的五条 `P2=0x04` 全回 6981，
+        // 而同一层SFI=2 至今没试过按 SFI 读记录（回退压根没触发过）。
+        if (!anyByCurrentEf && sfi != null) {
+            for (rec in 1..5) {
+                rawLines += exchange(
+                    iso,
+                    "改读记录（按 SFI=$sfi）：$baseLabel 记录 $rec",
+                    CardProbeLogic.readRecord(record = rec, sfi = sfi),
+                    sid,
+                )
             }
         }
     }

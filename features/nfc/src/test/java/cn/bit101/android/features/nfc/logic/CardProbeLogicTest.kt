@@ -335,6 +335,38 @@ class CardProbeLogicTest {
     }
 
     /**
+     * ⚠️⚠️ **主命令自己**回 `6981` 时，`SFI` 扫描的步骤必须带得上回退所需的一切。
+     *
+     * 第六次实测的 bug：`runStep` 里的回退判断原本**只挂在 followUp 之后**，
+     * 而 followUp 只在首段 `9000` 时才发。`READ BINARY SFI=2` 回的正是 `6981` ⇒
+     * 首段不成功 ⇒ 提前 return ⇒ `shouldTryRecords` **永远够不着**。
+     * 表现：dump 里 `SFI=2` 后面**一条回退命令都没有**。
+     *
+     * 这条测试守不住接线层的控制流（那要跑真机），但它守得住
+     * **「带 SFI 的步骤有没有把回退需要的信息带全」**——
+     * 接线层改成「先判主命令、再判 followUp」之后，两处都能拿到。
+     */
+    @Test
+    fun `SFI 步骤带齐回退所需的 SFI 编号`() {
+        val step = CardProbeLogic.sfiScan(1..2).first { it.sfi == 2 }
+        assertEquals(2, step.sfi)
+        // 回退要发READ RECORD，而 P2 必须按这个 SFI 编码成 (2<<3)|0x04 = 0x14。
+        // 少了 sfi 就只能发 P2=0x04（按当前 EF），实测那 5 条全回 6981。
+        assertEquals(
+            "00 B2 01 14 00",
+            CardProbeLogic.toHex(CardProbeLogic.readRecord(record = 1, sfi = step.sfi!!)),
+        )
+        // 两种寻址方式都在只读闸门内
+        assertTrue(CardProbeLogic.isReadOnly(CardProbeLogic.readRecord(record = 1, sfi = 2)))
+        assertTrue(CardProbeLogic.isReadOnly(CardProbeLogic.readRecordCurrentEf(1)))
+        // 两条命令确实不同 —— 混了就会读错文件
+        assertNotEquals(
+            CardProbeLogic.toHex(CardProbeLogic.readRecordCurrentEf(1)),
+            CardProbeLogic.toHex(CardProbeLogic.readRecord(record = 1, sfi = 2)),
+        )
+    }
+
+    /**
      * 目录内的 FID 扫描也要带够后续动作 —— 这一条是被真卡实测逼出来的。
      *
      * 第五次实测：目录下钻的代码**自己重写了一遍发命令的循环**，
@@ -359,13 +391,60 @@ class CardProbeLogicTest {
         assertFalse(step.followUpIfData)
     }
 
-    /** 「不带 SFI」的 READ BINARY：P1/P2 是**偏移量的高/低字节**，不是 SFI。 */
+    /**
+     * 「不带 SFI」的 READ BINARY：P1/P2 是**偏移量的高/低字节**，不是 SFI。
+     *
+     * ⚠️⚠️ 这条测试以前把**错的编码写成了期望值**（`offset=16` 期望 `00 B0 10 00 10`），
+     * 于是 bug 顺顺当当地过了全部测试。教训：**测试也得对着真卡实测核对** ——
+     * 一条自己都没验证过的期望值，等于给 bug 发了通行证。
+     *
+     * 真卡实证（第六次）：目录内`0006`
+     * - 走 FID 路续读（`00 B0 20 00 20`）⇒ **`6B00`** 偏移超界
+     * - 走 `SFI=6` 路续读（`00 B0 86 20 20`）⇒ **`9000`**，读到了东西
+     *
+     * 同一个文件、两条路、不同结果 ⇒ 只能是命令发错了。错的形态就是
+     * 「offset 全进了 P1、P2 恒为 0」—— 于是本意 offset=32 发成了 offset=0x2000=8192。
+     */
     @Test
     fun `READ BINARY 不带 SFI 时 P1P2 是偏移量`() {
         assertEquals("00 B0 00 00 20", CardProbeLogic.toHex(CardProbeLogic.readBinaryPlain()))
-        assertEquals("00 B0 10 00 10", CardProbeLogic.toHex(CardProbeLogic.readBinaryPlain(offset = 16, length = 16)))
+        // ✅ 正确的编码：P1=高字节、P2=低字节
+        assertEquals("00 B0 00 10 10", CardProbeLogic.toHex(CardProbeLogic.readBinaryPlain(offset = 16, length = 16)))
+        assertEquals("00 B0 00 20 20", CardProbeLogic.toHex(CardProbeLogic.readBinaryPlain(offset = 32, length = 32)))
+        assertEquals("00 B0 01 00 20", CardProbeLogic.toHex(CardProbeLogic.readBinaryPlain(offset = 256, length = 32)))
+        // ⚠️ 绝不能出现「offset 全进 P1、P2 恒为 0」—— 那会把 offset=32 发成 8192
+        assertFalse(
+            CardProbeLogic.toHex(CardProbeLogic.readBinaryPlain(offset = 32))
+                .startsWith("00 B0 20 00"),
+        )
         // 越界的偏移要早失败，别等到真卡上回 6B00 才发现
-        assertThrows(IllegalArgumentException::class.java) { CardProbeLogic.readBinaryPlain(offset = 128) }
+        assertThrows(IllegalArgumentException::class.java) { CardProbeLogic.readBinaryPlain(offset = 0x8000) }
+    }
+
+    /**
+     * 两条路的偏移量编码**完全不同**，必须分别断言 —— 这是第四次同型 bug 的来源。
+     *
+     * | | P1 | P2 |
+     * |---|---|---|
+     * | 带 SFI [readBinary] | `0x80 \| SFI` | **offset**（单字节） |
+     * | 不带 SFI [readBinaryPlain] | offset 高字节 | offset 低字节 |
+     *
+     * 真卡实证：`SFI=6` 读 offset 32 发的是 `00 B0 86 20 20`（P1 有SFI、P2 是 0x20），
+     * 而不是 `00 B0 00 20 20`。两者含义完全不同。
+     */
+    @Test
+    fun `带 SFI 与不带 SFI 的偏移量编码互不通用`() {
+        val offset = 32
+        val withSfi = CardProbeLogic.toHex(CardProbeLogic.readBinary(sfi = 6, offset = offset, length = 32))
+        val plain = CardProbeLogic.toHex(CardProbeLogic.readBinaryPlain(offset = offset, length = 32))
+
+        assertEquals("00 B0 86 20 20", withSfi)
+        assertEquals("00 B0 00 20 20", plain)
+        // P1 完全不同：一个带 SFI 位，一个不带
+        assertNotEquals(withSfi.substring(6, 8), plain.substring(6, 8))
+        // 但都过只读闸门
+        assertTrue(CardProbeLogic.isReadOnly(CardProbeLogic.readBinary(sfi = 6, offset = offset)))
+        assertTrue(CardProbeLogic.isReadOnly(CardProbeLogic.readBinaryPlain(offset = offset)))
     }
 
     /**
