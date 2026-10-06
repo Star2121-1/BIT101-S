@@ -50,6 +50,14 @@ internal class NfcController(
 ) {
 
     /**
+     * 目录下钻的**最大层数**。
+     *
+     * 递归必须有硬上限：卡要是把目录组织成环，没有上限就是无限循环，
+     * 而贴卡时用户看到的只会是「App 卡住了」。两层足够覆盖真卡实测的结构。
+     */
+    private val MAX_DRILL_DEPTH = 2
+
+    /**
      * 正在做的事 —— UI 靠它把「请把卡贴在手机背面」提示显示出来。
      * 这么做的原因：贴卡这件事本身没有任何进度回报，没有它用户不知道是没贴上还是卡死了。
      */
@@ -284,69 +292,7 @@ internal class NfcController(
 
         try {
             iso.connect()
-            steps.forEach { step ->
-                val out = exchange(iso, step.label, step.apdu, sid)
-                rawLines += out
-
-                // 「接着读」的触发条件：第一段成功，且（若这条声明了）确实读到了非零内容。
-                // 这个判断为什么存在：SFI 扫描要试 30 个短标识，其中多数是空文件或不存在，
-                // 对全零文件再往下读两段纯属白等。而「前 32 字节是零」确实不等于「文件是空的」，
-                // 所以不是不读，是「先看一眼有没有东西，有才继续」。
-                val hasPayload = out.bytes.any { it != 0.toByte() }
-                val proceed = out.sw == "9000" && (!step.followUpIfData || hasPayload)
-                if (step.followUp != null && proceed) {
-                    // 「选中了就读一段」：只在选中成功时跟发，且**紧接着**发 ——
-                    // 中间夹一次别的 SELECT，当前文件就换了，读到的就不是这个文件的东西。
-                    val followLabel = step.followUpLabel ?: "「${step.label}」接着读"
-                    var r = exchange(iso, followLabel, step.followUp, sid)
-                    rawLines += r
-
-                    when {
-                        // ⚠️ **目录这一支必须排在「改读记录」前面**。
-                        // `6986` 与 `6981` 都是「命令用错了」，但处置完全不同：
-                        // `6986` 是「你选中的是目录」，对它发 READ RECORD 一样白费 ——
-                        // 真卡 `0010` 上就这么白白发了 5 条，全回 6986。
-                        // 上一版把两种状态字混在一个判断里，正好踩中这个坑。
-                        CardProbeLogic.looksLikeDirectory(r.sw) -> {
-                            step.fid?.let { directorySuspects += it }
-                        }
-
-                        // ⚠️ 回退的判断依据是**读命令的结果**，不是上面 SELECT 的。
-                        // SELECT 回的是 9000，拿它判断的话这条回退永远不触发 ——
-                        // 真卡 0018 就是被这么漏掉的（回 6981 的是 READ，不是 SELECT）。
-                        CardProbeLogic.shouldTryRecords(r.sw) -> {
-                            // 按 SFI 读的就要按 SFI 改记录：READ BINARY 这条路上
-                            // 我们**从没选中过任何文件**，「当前 EF」是谁根本说不清。
-                            // 真卡 SFI=2 与 SFI=24 都回 6981，全靠这个编号才发得对。
-                            val sfi = step.sfi
-                            val recordApdu = { rec: Int ->
-                                if (sfi != null) CardProbeLogic.readRecord(record = rec, sfi = sfi)
-                                else CardProbeLogic.readRecordCurrentEf(rec)
-                            }
-                            // 读到哪算哪：记录文件有几条事先不知道，
-                            // 读不到下一条的卡会自己回错误，不会白读。
-                            for (rec in 1..5) {
-                                rawLines += exchange(
-                                    iso,
-                                    "改读记录：$followLabel 记录 $rec",
-                                    recordApdu(rec),
-                                    sid,
-                                )
-                            }
-                        }
-
-                        else -> {
-                            // 一路往下读：文件多长事先不知道，
-                            // 读了一段就断定「没有更多」是不成立的。
-                            step.followUpMore.forEachIndexed { index, more ->
-                                if (r.sw != "9000") return@forEachIndexed
-                                r = exchange(iso, "$followLabel（续读第 ${index + 2} 段）", more, sid)
-                                rawLines += r
-                            }
-                        }
-                    }
-                }
-            }
+            steps.forEach { runStep(iso, it, sid, rawLines, directorySuspects) }
 
             // 目录记录里若有 ADF 名（tag 4F = AID），直接跟着 SELECT 一次 ——
             // 用户贴一次卡不容易，能多挖一层就多挖一层。
@@ -372,6 +318,98 @@ internal class NfcController(
     }
 
     /**
+     * 发一条 [CardProbeLogic.ProbeStep]，并且把命中之后该做的事**都**做完。
+     *
+     * ## 为什么必须抽出来（第五次真卡实测）
+     *
+     * 原来这段逻辑写在 [probeApdu] 的 `steps.forEach` 里，而下钻目录的
+     * [drillIntoDirectories] **另写了一遍**发命令的循环 —— 于是它漏掉了两件事，
+     * 而且两件都在真卡上丢了数据：
+     *
+     * |漏掉的| 真卡上的后果 |
+     * |---|---|
+     * | `6981` → 改读 `READ RECORD` | 目录内 `0002`（= `SFI=2`）也是定长记录文件，回 `6981`，**记录一条没读到** |
+     * | 命中后连读第二/第三段 | 目录内 `SFI=7` 读回 32 字节就被当成读完了，**后面截断了** |
+     *
+     * ⚠️ 教训和上次那个 P1 编码 bug **是同一个**：
+     * 「主命令回了 9000」不等于「这个文件读完了」，而**抄一份逻辑就会漏掉其中的分支**。
+     * 同一套后续动作只能有一份实现 —— 谁需要就跟谁调，不要各自重写。
+     *
+     * @param labelPrefix 打在标签前面的前缀。目录下钻要标出「目录 0010 内 …」，
+     *   不然用户分不清哪条是哪层读出来的。
+     */
+    private fun runStep(
+        iso: IsoDep,
+        step: CardProbeLogic.ProbeStep,
+        sid: String?,
+        rawLines: MutableList<RawLine>,
+        directorySuspects: MutableList<Int>,
+        labelPrefix: String = "",
+    ) {
+        val out = exchange(iso, labelPrefix + step.label, step.apdu, sid)
+        rawLines += out
+
+        // 「接着读」的触发条件：第一段成功，且（若这条声明了）确实读到了非零内容。
+        // 这个判断为什么存在：SFI 扫描要挨个试 30 个短标识，其中多数是空文件或不存在，
+        // 对全零文件再往下读两段纯属白等。而「前 32 字节是零」确实不等于「文件是空的」，
+        // 所以不是不读，是「先看一眼有没有东西，有才继续」。
+        val hasPayload = out.bytes.any { it != 0.toByte() }
+        val proceed = out.sw == "9000" && (!step.followUpIfData || hasPayload)
+        val followUp = step.followUp
+        if (followUp == null || !proceed) return
+
+        // 「选中了就读一段」：只在选中成功时跟发，且**紧接着**发 ——
+        // 中间夹一次别的 SELECT，当前文件就换了，读到的就不是这个文件的东西。
+        val followLabel = labelPrefix + (step.followUpLabel ?: "「${step.label}」接着读")
+        var r = exchange(iso, followLabel, followUp, sid)
+        rawLines += r
+
+        when {
+            // ⚠️ **目录这一支必须排在「改读记录」前面**。
+            // `6986` 与 `6981` 都是「命令用错了」，但处置完全不同：
+            // `6986` 是「你选中的是目录」，对它发 READ RECORD 一样白费 ——
+            // 真卡 `0010` 上就这么白白发了 5 条，全回 6986。
+            CardProbeLogic.looksLikeDirectory(r.sw) -> {
+                step.fid?.let { directorySuspects += it }
+            }
+
+            // ⚠️ 回退的判断依据是**读命令的结果**，不是上面 SELECT 的。
+            // SELECT 回的是 9000，拿它判断的话这条回退永远不触发 ——
+            // 真卡 0018 就是被这么漏掉的（回 6981 的是 READ，不是 SELECT）。
+            CardProbeLogic.shouldTryRecords(r.sw) -> {
+                // 按 SFI 读的就要按 SFI 改记录：READ BINARY 这条路上
+                // 我们**从没选中过任何文件**，「当前 EF」是谁根本说不清。
+                // 真卡 SFI=2 与 SFI=24 都回 6981，全靠这个编号才发得对。
+                val sfi = step.sfi
+                val recordApdu = { rec: Int ->
+                    if (sfi != null) CardProbeLogic.readRecord(record = rec, sfi = sfi)
+                    else CardProbeLogic.readRecordCurrentEf(rec)
+                }
+                // 读到哪算哪：记录文件有几条事先不知道，
+                // 读不到下一条的卡会自己回错误，不会白读。
+                for (rec in 1..5) {
+                    rawLines += exchange(
+                        iso,
+                        "改读记录：$followLabel 记录 $rec",
+                        recordApdu(rec),
+                        sid,
+                    )
+                }
+            }
+
+            else -> {
+                // 一路往下读：文件多长事先不知道，
+                // 读了一段就断定「没有更多」是不成立的。
+                step.followUpMore.forEachIndexed { index, more ->
+                    if (r.sw != "9000") return@forEachIndexed
+                    r = exchange(iso, "$followLabel（续读第 ${index + 2} 段）", more, sid)
+                    rawLines += r
+                }
+            }
+        }
+    }
+
+    /**
      * 进目录（DF）里再扫一层。
      *
      * ## 为什么必须做
@@ -384,15 +422,23 @@ internal class NfcController(
      * ⚠️ 进去之后 `READ BINARY` 要改用 **SFI** 而不是 FID（EMV 的一贯做法），
      * 所以这里两种都试：先沿 SFI 扫（这是规范里的正路），再扫一小段 FID 兜底。
      *
-     * 成本：每个目录约 35 条只读命令。所以**最多进 2 个**目录 ——
+     * 成本：每个目录约 35 条只读命令。所以**每层最多进 2 个**目录 ——
      * 用户贴在手机上不动的那几秒是有限的，不能无节制地贪。
+     *
+     * @param depth 当前在第几层（顶层传 0）。**最多两层**：
+     *   实测真卡的目录里没有再冒出目录，但递归必须有硬上限 ——
+     *   卡要是故意造出环，没有上限就是无限循环，而贴卡时用户只会看到 App 卡死。
      */
     private fun drillIntoDirectories(
         iso: IsoDep,
         fids: List<Int>,
         sid: String?,
         rawLines: MutableList<RawLine>,
+        depth: Int = 0,
     ) {
+        // 两层封顶。宁可少挖一层，也不冒「贴卡时App 卡住」这个风险。
+        if (depth >= MAX_DRILL_DEPTH) return
+
         fids.take(2).forEach { fid ->
             val tag = "%04X".format(fid)
             rawLines += exchange(
@@ -402,23 +448,26 @@ internal class NfcController(
                 sid,
             )
 
+            // ⚠️ 目录内的两条扫描都交给 [runStep] —— 自己重写一遍发命令的循环，
+            // 就是第五次实测那两个 bug 的成因（漏了 6981 回退、漏了连读第二段）。
+            // 目录内挖到的目录也回填，让「目录套目录」也能继续往下走。
+            val nested = mutableListOf<Int>()
+
             // 目录内按 SFI 找文件：这才是规范里的正路。
             CardProbeLogic.sfiScan(1..20).forEach { step ->
-                rawLines += exchange(iso, "目录 $tag 内 ${step.label}", step.apdu, sid)
+                runStep(iso, step, sid, rawLines, nested, "目录 $tag 内 ")
             }
 
             // 有些卡在目录内也编号文件，兜一段低区。
             CardProbeLogic.fidScan(0x0001..0x000F).forEach { step ->
-                val o = exchange(iso, "目录 $tag 内 ${step.label}", step.apdu, sid)
-                rawLines += o
-                if (o.sw == "9000" && step.followUp != null) {
-                    rawLines += exchange(
-                        iso,
-                        "目录 $tag 内 ${step.followUpLabel}",
-                        step.followUp,
-                        sid,
-                    )
-                }
+                runStep(iso, step, sid, rawLines, nested, "目录 $tag 内 ")
+            }
+
+            // 目录里再认出目录就再进一层 —— 但**只进一层**：
+            // 递归下去既可能打转，贴卡的那几秒也撑不住。
+            val deeper = (nested.distinct() - fid).take(1)
+            if (deeper.isNotEmpty()) {
+                drillIntoDirectories(iso, deeper, sid, rawLines, depth + 1)
             }
         }
     }

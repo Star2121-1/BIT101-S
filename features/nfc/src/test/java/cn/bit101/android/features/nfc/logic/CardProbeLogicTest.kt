@@ -313,6 +313,52 @@ class CardProbeLogicTest {
         assertTrue(step.followUpMore.all { CardProbeLogic.isReadOnly(it) })
     }
 
+    /**
+     * ⚠️ 真卡实测（第五次）的教训：**`6981` 只在「记录文件」这一种情况下回**。
+     *
+     * `6986`（当前选中的是目录）看起来也是「命令不对」，但对它发 `READ RECORD`
+     * 是**纯浪费** —— 真卡目录 `0010` 上就这么白白发了 5 条，全回 `6986`。
+     * 目录的正确处置是「进去」（`looksLikeDirectory`），两条路必须分开。
+     */
+    @Test
+    fun `只有 6981 触发改读记录 6986 不触发`() {
+        assertTrue(CardProbeLogic.shouldTryRecords("6981"))
+        // 这两条曾经被混在一个判断里，结果目录被当成记录文件白读 5 次
+        assertFalse(CardProbeLogic.shouldTryRecords("6986"))
+        assertFalse(CardProbeLogic.shouldTryRecords("6A82"))
+        assertFalse(CardProbeLogic.shouldTryRecords("9000"))
+        assertFalse(CardProbeLogic.shouldTryRecords("6982"))
+
+        // 反过来，目录那一支只认6986
+        assertTrue(CardProbeLogic.looksLikeDirectory("6986"))
+        assertFalse(CardProbeLogic.looksLikeDirectory("6981"))
+    }
+
+    /**
+     * 目录内的 FID 扫描也要带够后续动作 —— 这一条是被真卡实测逼出来的。
+     *
+     * 第五次实测：目录下钻的代码**自己重写了一遍发命令的循环**，
+     * 于是漏掉了「`6981` → 改读记录」这条回退。真卡目录 `0010` 内的 `0002`
+     *（等价于 `SFI=2`）也是定长记录文件，回 `6981` —— 记录一条都没读到。
+     *
+     * 这条测试守不住「接线层有没有重写循环」（那要跑真机），
+     * 但它守得住**扫描步骤本身带没带 `followUp`**：
+     * 接线层一旦改成调`runStep`，命中后的连读与回退就自动都有了。
+     */
+    @Test
+    fun `FID 扫描的每一条都带 followUp 以便命中后接着读`() {
+        val step = CardProbeLogic.fidScan(0x0002..0x0002).single()
+
+        assertEquals(2, step.fid)
+        assertTrue(CardProbeLogic.isReadOnly(step.apdu))
+        // 选中之后要读的那一条必须在（这正是目录下钻漏掉的东西）
+        assertTrue(step.followUp != null)
+        assertTrue(CardProbeLogic.isReadOnly(step.followUp!!))
+        // fidScan 不设followUpIfData：FID 文件少，逐个读三段成本可接受，
+        // 空文件读到的全零不会造成误判。
+        assertFalse(step.followUpIfData)
+    }
+
     /** 「不带 SFI」的 READ BINARY：P1/P2 是**偏移量的高/低字节**，不是 SFI。 */
     @Test
     fun `READ BINARY 不带 SFI 时 P1P2 是偏移量`() {
