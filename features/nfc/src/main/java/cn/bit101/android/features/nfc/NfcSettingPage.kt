@@ -43,6 +43,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.nfc.logic.CardIdentityLogic
 import cn.bit101.android.features.nfc.logic.CardKind
 import cn.bit101.android.features.nfc.logic.NdefShortcutLogic
 
@@ -299,6 +300,10 @@ private fun ReadResultCard(
                 TextButton(onClick = { onCopy(dumpOf(scan)) }) { Text("复制诊断文本") }
             }
 
+            // 「这张卡是谁」放在结果最上面：学号和姓名原本各占几百行流水里的一行，
+            // 不提出来等于让人自己在「找不到这个文件」堆里翻找。
+            IdentityCard(scan)
+
             scan.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             scan.writeOutcome?.let { Text(it) }
 
@@ -477,6 +482,73 @@ private fun ShortcutSection(
 @Composable
 private fun SectionTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleMedium)
+}
+
+/**
+ * 「这张卡是谁」的摘要卡。
+ *
+ * ## ⚠️ 为什么缺哪一行就省哪一行、但卡片本身照常渲染
+ *
+ * 换个学校的卡、或者这张卡某个文件被清空，用户看到的应该是
+ * 「这张卡只认出了卡号」，而不是整块空白 —— 后者会被当成「什么都没读到」，
+ * 然后得出「这个功能不行」的结论。判定「有数据才渲染」在这儿会吞掉整段。
+ *
+ * ## ⚠️ 日期一律写「卡上日期」，不写「有效期」
+ *
+ * 真卡上同时有 `2028-08-30`（像有效期）与 `2026-03-22 11:08:43`（交易时间），
+ * 代码没有依据判断哪个是哪个 —— 挑最晚的那个只是猜测。
+ * 把猜测写成确定语气是最难被发现的一类错误，所以这里只列、不命名。
+ */
+@Composable
+private fun IdentityCard(scan: NfcScan) {
+    val identity = remember(scan.probe, scan.cardNoCandidates) {
+        CardIdentityLogic.summarize(
+            probeLines = scan.probe,
+            candidates = scan.cardNoCandidates,
+        )
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "这张卡",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+
+            identity.name?.let {
+                KeyValue("姓名", it)
+            }
+            identity.studentId?.let { sid ->
+                KeyValue("学号", sid)
+                identity.studentIdNote?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            identity.dates.forEach { date ->
+                KeyValue("卡上日期（疑似）", date)
+            }
+            identity.cardNo?.let {
+                KeyValue("卡号", it)
+                identity.cardNoNote?.let { note ->
+                    Text(note, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
+            // 三项全空时给一句实话，别让卡片看起来像渲染坏了
+            if (identity.name == null && identity.studentId == null && identity.cardNo == null) {
+                Text(
+                    "这张卡里没认出姓名 / 学号 / 卡号。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+    }
 }
 
 @Composable

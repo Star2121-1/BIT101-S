@@ -51,6 +51,9 @@ dependencies {
     implementation project(':features:login')
     implementation project(':features:map')
     implementation project(':features:message')
+    // NFC 贴纸快捷入口：MainActivity 要能调到 NfcShortcut（:features:setting 对它的
+    // 依赖是 implementation，不传递过来，所以这里必须自己声明）。
+    implementation project(':features:nfc')
     implementation project(':features:postedit')
     implementation project(':features:poster')
     implementation project(':features:report')

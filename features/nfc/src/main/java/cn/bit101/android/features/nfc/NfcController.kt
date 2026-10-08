@@ -12,6 +12,7 @@ import android.nfc.tech.NdefFormatable
 import android.os.Handler
 import android.os.Looper
 import cn.bit101.android.features.nfc.logic.BcdScan
+import cn.bit101.android.features.nfc.logic.CardIdentityLogic
 import cn.bit101.android.features.nfc.logic.CardKind
 import cn.bit101.android.features.nfc.logic.ClassicProbeLogic
 import cn.bit101.android.features.nfc.logic.CardProbeLogic
@@ -874,6 +875,12 @@ internal data class ClassicBlockLine(
     val studentIdHit: String?,
 )
 
+/**
+ * 一条探测流水。
+ *
+ * 实现 [CardIdentityLogic.ProbeLineLike] 的理由：汇总「这张卡是谁」时只需要
+ * 文本 / 学号命中 / 疑似日期这三样，交给那个窄接口即可，不必为了汇总而新造结构。
+ */
 internal data class ProbeLine(
     val label: String,
     val apdu: String,
@@ -888,9 +895,9 @@ internal data class ProbeLine(
      * 真卡实测的价值：`0016` 文件里存的是姓名，不加这一栏，
      * 用户和我们看到的就只是一串 `B8 DF CC EC CF E8`。
      */
-    val text: String? = null,
+    override val text: String? = null,
     /** 在这条返回里**找到了学号**（含编码形式与偏移）；没找到是 `null`。 */
-    val studentIdHit: String? = null,
+    override val studentIdHit: String? = null,
     /** 返回的 TLV 摊平后的 `标签=值`，如 `84=315041592E...`。人肉看十六进制太累。 */
     val tlvs: List<String> = emptyList(),
     /**
@@ -900,8 +907,8 @@ internal data class ProbeLine(
      * 就有一条 `20 26 03 22 11 08 43`。⚠️ 措辞必须留「疑似」：BCD 三字节凑出一个
      * 合法时刻太容易，界面把它当**线索**展示，不能当结论。
      */
-    val dates: List<String> = emptyList(),
-) {
+    override val dates: List<String> = emptyList(),
+) : CardIdentityLogic.ProbeLineLike {
     /**
      * 这一条**真的拿到了东西**（不是只有状态字、也不是一整段零）。
      *

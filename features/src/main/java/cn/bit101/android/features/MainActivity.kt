@@ -13,6 +13,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import cn.bit101.android.config.setting.base.ScheduleTabs
 import cn.bit101.android.config.setting.base.ThemeSettings
 import cn.bit101.android.features.common.GotoRequest
+import cn.bit101.android.features.nfc.NfcShortcut
 import cn.bit101.android.features.theme.BIT101Theme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.MainScope
@@ -78,18 +79,33 @@ class MainActivity : ComponentActivity() {
     /**
      * 把 Intent 里的跳转请求交给 [GotoRequest]。
      *
-     * 三个 extra 都可以单独出现：
-     * - `EXTRA_GOTO`：底栏页（必给的）
-     * - `EXTRA_TAB`：课表页里停在第几个 tab（组件点 DDL / 动态条目时给）
-     * - `EXTRA_FOCUS`：定位到哪一条（DDL uid / 动态 id）
+     * ## 两条来路
+     *
+     * 1. **桌面组件 / 通知**：带三个 extra（见下面）。
+     * 2. **NFC 贴纸**：不带任何 extra，目标写在 NDEF 记录里（`bit101://nfc/shortcut?to=…`）。
+     *
+     * ## ⚠️ 为什么贴纸只给 route、不给 tab / focus
+     *
+     * 贴纸是**用户自己写死**的一句话，里面没有「定位到哪一条 DDL」这种运行时信息 ——
+     * 那需要知道 uid，而 uid 在写贴纸的那一刻还不存在。
+     * 所以贴纸只能表达「落到某个底栏页」，正好是 [GotoRequest.request] 的单参数形态。
      */
     private fun handleGoto(intent: Intent?) {
-        val route = intent?.getStringExtra(EXTRA_GOTO) ?: return
-        val tab = intent.getIntExtra(EXTRA_TAB, TAB_NONE)
-            .takeIf { ScheduleTabs.isValid(it) }
-        val focus = intent.getStringExtra(EXTRA_FOCUS)?.takeIf { it.isNotBlank() }
+        val route = intent?.getStringExtra(EXTRA_GOTO)
 
-        GotoRequest.request(route, tab = tab, key = focus)
+        if (!route.isNullOrBlank()) {
+            val tab = intent.getIntExtra(EXTRA_TAB, TAB_NONE)
+                .takeIf { ScheduleTabs.isValid(it) }
+            val focus = intent.getStringExtra(EXTRA_FOCUS)?.takeIf { it.isNotBlank() }
+
+            GotoRequest.request(route, tab = tab, key = focus)
+            return
+        }
+
+        // 没有组件 extra ⇒ 试试是不是贴纸唤起的。
+        // routeOf 内部会校验白名单，不是我们的贴纸就返回 null，这里便什么都不做。
+        val fromTag = NfcShortcut.routeOf(intent)
+        if (fromTag != null) GotoRequest.request(fromTag)
     }
 
     companion object {

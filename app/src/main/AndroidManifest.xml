@@ -35,6 +35,22 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- NFC 贴纸快捷入口：贴纸里写着 bit101://nfc/shortcut?to=<某页>，
+                 碰一下就唤起 App 并跳过去。 -->
+            <!-- ⚠️ scheme/host/pathPrefix 三样都收紧：不写死的话，任何写着网址的贴纸
+                 都能唤起我们，然后因为解不出白名单内的 route 而「唤起了却没反应」，
+                 那种 bug 最难查。收紧之后别人的贴纸根本唤不起本 App。 -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data
+                    android:scheme="bit101"
+                    android:host="nfc"
+                    android:pathPrefix="/shortcut" />
+            </intent-filter>
         </activity>
     </application>
 
