@@ -36,8 +36,9 @@ internal object CardIdentityLogic {
      * 汇总出的一张「名片」。
      *
      * @param name 卡里读到的中文姓名（真卡在文件 `0016`，GBK）。
-     * @param studentId 命中的学号；没填学号去比对、或卡里没有，就是 `null`。
+     * @param studentId 学号**本身**；没填学号去比对、或卡里没有，就是 `null`。
      * @param studentIdNote 学号是**怎么**认出来的（含编码形式与偏移），给人核对用。
+     *   ⚠️ 它与 [studentId] 是两回事，别互相顶替。
      * @param dates 卡上所有疑似日期（**原样**，不做筛选、不命名）。
      * @param cardNo 最主要的那个卡号候选。
      * @param cardNoNote 其余候选的说明（真卡上有 6 种解读方式，不能只报一种）。
@@ -69,9 +70,16 @@ internal object CardIdentityLogic {
         val names = lines.mapNotNull { it.text?.trim()?.takeIf { s -> s.isNotBlank() } }
             .distinct()
 
-        // 学号：探测时已经比对过，这里只把「命中说明」带出来。
+        // 学号：探测时已经比对过，这里只把结果带出来。
+        //
+        // ⚠️ **学号只能是用户填的那个**。`studentIdHit` 是「怎么认出来的」说明文字
+        // （如「分段形式（3 段，2 个分隔符），偏移 10」），**不是学号本身**。
+        // 原写法 `expectedStudentId ?: it` 会在没填学号时把这句描述当学号返回 ——
+        // 字段名 `studentId` 承诺的是数字，报出来的却是一句话。
+        // 名片要把学号存进本机，存成说明文字就全错了：
+        // **报给人看 / 存下来的值，必须和它的字面含义对齐**。
         val hit = lines.firstOrNull { !it.studentIdHit.isNullOrBlank() }
-        val studentId = hit?.studentIdHit?.let { expectedStudentId ?: it }
+        val studentId = hit?.let { expectedStudentId }
 
         // 日期：全部照收，不排序、不挑最晚、不命名。
         val dates = lines.flatMap { it.dates }.distinct()

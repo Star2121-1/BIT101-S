@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,11 @@ import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.nfc.logic.CardIdentityLogic
 import cn.bit101.android.features.nfc.logic.CardKind
 import cn.bit101.android.features.nfc.logic.NdefShortcutLogic
+import cn.bit101.android.features.nfc.logic.SavedCardLogic
+import cn.bit101.android.features.nfc.logic.SavedCardLogic.SavedCard
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 设置里的「NFC」页。
@@ -80,8 +86,12 @@ fun NfcSettingPage(
     // 关掉它，贴一次卡就只能看到「这个文件不存在」。
     var deepProbe by remember { mutableStateOf(true) }
     var classicScan by remember { mutableStateOf(true) }
-    var studentId by remember { mutableStateOf("") }
+    // 学号输入框**从本机读回来**：填过一次就够了，不必每次开这个页面重填。
+    var studentId by remember { mutableStateOf(SavedCardStore.readStudentId(context)) }
     var controller by remember { mutableStateOf<NfcController?>(null) }
+
+    // 「我的校园卡」名片：贴一次卡之后留在设置页顶部，下次打开直接看，不用再贴。
+    var savedCard by remember { mutableStateOf(SavedCardStore.read(context)) }
 
     DisposableEffect(activity, capability) {
         if (activity == null || capability == NfcCapability.Unsupported) {
@@ -118,6 +128,31 @@ fun NfcSettingPage(
         onDispose { }
     }
 
+    // 每读到一次卡，就把认出来的身份并进「我的校园卡」。
+    //
+    // ⚠️ 只在**名片非空**时才落盘：把一张什么都没认出来的空名片写进去，
+    // 「没读过卡」和「读过但什么都没认出来」就变成同一种状态了 ——
+    // 而这两句提示对用户来说是不一样的话（后者说明卡贴上了、只是认不出）。
+    LaunchedEffect(scan) {
+        val result = scan ?: return@LaunchedEffect
+        val identity = CardIdentityLogic.summarize(
+            probeLines = result.probe,
+            candidates = result.cardNoCandidates,
+            expectedStudentId = studentId.trim().takeIf { it.isNotEmpty() },
+        )
+        val fresh = SavedCardLogic.SavedCard(
+            name = identity.name,
+            studentId = identity.studentId,
+            cardNo = identity.cardNo,
+            uid = result.uidHex.takeIf { it.isNotBlank() },
+        )
+        if (SavedCardLogic.isBlank(fresh)) return@LaunchedEffect
+
+        val merged = SavedCardLogic.merge(savedCard, fresh, System.currentTimeMillis())
+        SavedCardStore.save(context, merged)
+        savedCard = merged
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -126,6 +161,14 @@ fun NfcSettingPage(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         CapabilityCard(capability = capability, context = context)
+
+        MyCardSection(
+            card = savedCard,
+            onForget = {
+                SavedCardStore.clear(context)
+                savedCard = null
+            },
+        )
 
         // ⚠️ 这里**不做** `if (capability != Unsupported)`：哪怕本机不支持，读卡区块也照渲染。
         // 「有数据才渲染」这条纪律是这个项目踩过三次换来的 —— 把区块藏起来的话，
@@ -137,7 +180,11 @@ fun NfcSettingPage(
             deepProbe = deepProbe,
             classicScan = classicScan,
             studentId = studentId,
-            onStudentIdChange = { studentId = it },
+            onStudentIdChange = {
+                studentId = it
+                // 填过的学号留在本机：下次打开这个页面自动回填，不必重填一遍
+                SavedCardStore.saveStudentId(context, it)
+            },
             onDeepProbeChange = { deepProbe = it },
             onClassicScanChange = { classicScan = it },
             onCopy = { mainController.copyText(clipboard, it) },
@@ -186,6 +233,70 @@ private fun CapabilityCard(
         }
     }
 }
+
+// ------------------------------------------------------------ 我的校园卡
+
+/**
+ * 设置页顶部的「我的校园卡」—— 贴一次卡认出的身份，留在这里以后直接看。
+ *
+ * ## 为什么必须留下来
+ *
+ * 读一次卡要贴住手机好几秒，还得开着「扫文件区」那一轮。不留的话，
+ * 每次想看自己的学号都得重新贴 —— 那只能算演示，不算能用。
+ *
+ * ## ⚠️ 空态**必须**渲染
+ *
+ * 这条纪律在本项目踩过三次（违约卡 / 列表空态 / 研讨间）：没有数据就把区块藏起来，
+ * 用户根本不知道有这个功能。所以没存过卡时这里显示的是「怎么才能有」，
+ * 不是一块空白 —— 空白会被当成页面没加载出来。
+ */
+@Composable
+private fun MyCardSection(
+    card: SavedCard?,
+    onForget: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionTitle("我的校园卡")
+
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ),
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (card == null) {
+                    Text(
+                        "还没有存下任何卡。贴一次校园卡，认出来的姓名与学号会留在这里，" +
+                            "以后打开就能直接看，不用再贴。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    card.name?.let { KeyValue("姓名", it) }
+                    card.studentId?.let { KeyValue("学号", it) }
+                    card.cardNo?.let { KeyValue("卡号", it) }
+                    if (card.savedAt > 0L) {
+                        Text(
+                            "更新于 ${timeText(card.savedAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onForget) { Text("忘掉这张卡") }
+                    }
+                }
+            }
+        }
+
+        Text(
+            "只存在这台手机里，不会上传；点「忘掉这张卡」就删掉。" +
+                "换一张卡贴上来会**整张替换**，不会把两张卡的信息拼在一起。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+private fun timeText(millis: Long): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(millis))
 
 // ------------------------------------------------------------ 校园卡读取
 

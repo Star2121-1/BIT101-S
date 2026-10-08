@@ -113,6 +113,25 @@ class CardIdentityLogicTest {
         assertEquals("高天翔", id.name)
     }
 
+    /**
+     * ⚠️ `studentId` **只能是学号数字**，不能是「怎么认出来的」说明文字。
+     *
+     * 原写法是 `expectedStudentId ?: it` —— 没填学号时这个字段会变成
+     * 「分段形式（3 段，2 个分隔符），偏移 10」这样一句描述。
+     * 而「我的校园卡」要把这个字段**存进本机**，存成一句描述就全错了：
+     * 报给人看 / 存下来的值，必须和它的字面含义对齐。
+     */
+    @Test
+    fun `没填学号时 学号字段就是 null 而不是命中说明`() {
+        val id = CardIdentityLogic.summarize(
+            probeLines = listOf(line(hit = "分段形式（3 段，2 个分隔符），偏移 10")),
+            candidates = cards,
+        )
+
+        assertNull(id.studentId)
+        assertEquals("分段形式（3 段，2 个分隔符），偏移 10", id.studentIdNote)
+    }
+
     /** 卡号有多种解读时要说明，不能只报一种让人误以为那就是卡面号。 */
     @Test
     fun `卡号有多种解读要注明`() {
