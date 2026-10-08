@@ -193,32 +193,44 @@ internal object StudentIdScan {
         // 又必须**足够大**才能装下真卡上那三段（`11` / `202413` / `55`）。
         // 之前拍了个 `MAX_SEGMENTS = 6`，结果 `11`+`202413` 正好 6 段就停，
         // **永远拼不成 10 位** —— 判据太紧会漏掉真东西，那比误报更糟。
+        //
+        // ⚠️ 这里数的是**段数**，而每段是若干个数字字符拼起来的。
+        // 之前每个数字字符都单独进 `parts`，于是 10 位学号被报成「10 段」——
+        // 命中是对的，但文案里那个段数是错的（真卡上是 3 段）。
         val maxSegments = digits.length
 
         for (i in data.indices) {
             val parts = mutableListOf<String>()
+            var current = StringBuilder()
+            var separators = 0
             var at = i
             while (at < data.size && parts.size < maxSegments) {
                 val b = data[at].toInt() and 0xFF
                 if (b in ASCII_ZERO..ASCII_NINE) {
-                    parts += b.toChar().toString()
+                    current.append(b.toChar())
                     at++
                     continue
                 }
                 // 非数字：只有「正好夹在两段数字之间、且自己是 1 字节控制字符」才算分隔符
-                if (parts.isNotEmpty() && at + 1 < data.size &&
+                if (current.isNotEmpty() && at + 1 < data.size &&
                     data[at + 1].toInt() and 0xFF in ASCII_ZERO..ASCII_NINE &&
                     isSeparator(b)
                 ) {
+                    parts += current.toString()
+                    current = StringBuilder()
+                    separators++
                     at++
                     continue
                 }
                 break
             }
+            if (current.isNotEmpty()) parts += current.toString()
+
             // 只有一段那是 findContiguous 的活，不必走这条路
             if (parts.size < 2) continue
             if (parts.joinToString("") == digits) {
-                return "分段形式（${parts.size} 段，被分隔符隔开），偏移 $i"
+                val suffix = if (separators == 1) "1 个分隔符" else "$separators 个分隔符"
+                return "分段形式（${parts.size} 段，$suffix），偏移 $i"
             }
         }
         return null

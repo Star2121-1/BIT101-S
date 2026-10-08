@@ -268,10 +268,16 @@ class NfcCardLogicTest {
         val hit = StudentIdScan.find(data, "1120241355")
 
         assertNotNull(hit)
-        // ⚠️ JUnit4 的 assertTrue **不接受消息参数**（那是 JUnit5 的写法），
-        // 想看失败详情就把实际值拼进断言表达式里。
+        // ⚠️ JUnit4 的 `assertTrue` 是 `(String 消息, Boolean 条件)` —— 消息**在前**，
+        // 这跟 JUnit5 的 `(条件, 消息)` 正好相反，写反了编译不过。
         assertTrue("应报分段形式，实际：$hit", hit!!.startsWith("分段形式"))
         assertTrue("偏移应指到第一个数字，实际：$hit", hit.contains("偏移 10"))
+        // ⚠️ 段数报的是**段**，不是数字字符个数。
+        // 真卡上是 `11` | `202413` | `55` 三段，被 0x06 / 0x04 两个分隔符隔开。
+        // 曾经把每个数字字符单独算一段，于是报成「10 段」—— 命中没错，措辞是错的，
+        // 而错误的数字会让人以为自己的判断出了偏差。
+        assertTrue("应是 3 段，实际：$hit", hit.contains("3 段"))
+        assertTrue("应是 2 个分隔符，实际：$hit", hit.contains("2 个分隔符"))
     }
 
     /**
