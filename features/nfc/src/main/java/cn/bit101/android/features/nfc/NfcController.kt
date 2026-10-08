@@ -377,14 +377,15 @@ internal class NfcController(
             }
         }
 
-        // 「接着读」的触发条件：第一段成功，且（若这条声明了）确实读到了非零内容。
-        // 这个判断为什么存在：SFI 扫描要挨个试 30 个短标识，其中多数是空文件或不存在，
-        // 对全零文件再往下读两段纯属白等。而「前 32 字节是零」确实不等于「文件是空的」，
-        // 所以不是不读，是「先看一眼有没有东西，有才继续」。
-        val hasPayload = out.bytes.any { it != 0.toByte() }
-        val proceed = out.sw == "9000" && (!step.followUpIfData || hasPayload)
+        // 「接着读」的触发条件**只有一条**：第一段成功。
+        //
+        // ⚠️ 这里原先还挂着「首段全零就不再往下读」（由 `ProbeStep.followUpIfData` 带来，
+        // 而那个开关只有 SFI 那一轮设了）。第十次实测把它删了：
+        // 目录内 `0008` 与 `SFI=8` 是**同一个文件**，却因为开关只在一边生效，
+        // 读出 48 / 32 两种长度。而「首段是零」从来不等于「后面没有」——
+        // `0016` 的姓名在第 1 段、学号在第 2 段。
         val followUp = step.followUp
-        if (followUp == null || !proceed) return
+        if (followUp == null || out.sw != "9000") return
 
         // 「选中了就读一段」：只在选中成功时跟发，且**紧接着**发 ——
         // 中间夹一次别的 SELECT，当前文件就换了，读到的就不是这个文件的东西。
@@ -421,17 +422,23 @@ internal class NfcController(
     /**
      * 「这条不吃 READ BINARY，改读它的记录」—— 挨个记录号读，读到哪算哪。
      *
-     * ## 按 SFI 还是按当前 EF，必须分清
+     * ## 按 SFI 还是按当前 EF：取决于这条命令**自己是怎么来的**，只有一种正确解
      *
-     * 真卡实测（第六次）：
-     * - MF 下 `0018`：先 SELECT 再 `READ BINARY`→`6981`，改发 `00 B2 01 04 00`（当前 EF）**读到了**。
-     * - 目录 `0010` 内 `0002`：同样改发 `00 B2 01 04 00`，五条**全回 6981**。
+     * - **带 `sfi` 的步骤**（[CardProbeLogic.sfiScan] 来的）：发 `READ BINARY` 时压根
+     *   没 SELECT 过任何文件，「当前 EF」是谁说不清 ⇒ 必须按 SFI 寻址
+     *   （[CardProbeLogic.readRecord]，`P2 = (SFI << 3) | 0x04`）。真卡 `SFI=2` 走这条。
+     * - **不带 `sfi` 的步骤**（[CardProbeLogic.fidScan] 来的，刚 SELECT 过文件）：
+     *   按当前 EF 寻址（[CardProbeLogic.readRecordCurrentEf]）。真卡 `0018` 就是这么读通的。
      *
-     * 两条都「先 SELECT 过文件」，为什么一条通一条不通？**未证实** ——
-     * 可能是目录内那个文件需要按 SFI 寻址（`P2=(2<<3)|4=0x14`）而不是按当前 EF。
-     * ⇒ 所以这里对**两种寻址方式都试**：先按当前 EF，不成再按 SFI。
-     *   这不是乱发 —— [CardProbeLogic.isReadOnly] 放行 `B2`，读记录不改卡；
-     *   而「两种寻址都不通」本身也是有价值的信息（说明这个文件不吃记录式读）。
+     * ## ⚠️ 为什么不再「两种都试一遍」（第十次实测）
+     *
+     * 上一版在发完一轮失败后，还会再补发一轮。但那个补发的条件写的是 `sfi != null`，
+     * 而第一轮**对带 SFI 的步骤本来就是按 SFI 发的** —— 于是补发出去的 5 条与第一轮
+     * **逐字节相同**；反过来，不带 SFI 的步骤因为 `sfi == null`，补发分支**永远进不去**。
+     *
+     * ⇒ 那个补发在任何情况下都产生不了新信息，只是把真卡 `SFI=2` 的回退变成 10 条重复记录
+     * （dump 里那两组标题不同、APDU 完全一样的行就是它）。
+     * 判断对象与现象不是同一个东西 —— 这个毛病在本文件里已经是第三次发作了。
      *
      * @param baseLabel 触发回退的那条命令的标签，用于把记录行挂到它下面。
      */
@@ -450,25 +457,8 @@ internal class NfcController(
 
         // 读到哪算哪：记录文件有几条事先不知道，
         // 读不到下一条的卡会自己回错误，不会白读。
-        var anyByCurrentEf = false
         for (rec in 1..5) {
-            val r = exchange(iso, "改读记录：$baseLabel 记录 $rec", bySfi(rec), sid)
-            rawLines += r
-            if (r.sw == "9000") anyByCurrentEf = true
-        }
-
-        // ⚠️ 按当前 EF 全部失败，而这条是带 SFI 读来的 ⇒ 再按 SFI 试一遍。
-        // 第六次实测：目录内 0002 的五条 `P2=0x04` 全回 6981，
-        // 而同一层SFI=2 至今没试过按 SFI 读记录（回退压根没触发过）。
-        if (!anyByCurrentEf && sfi != null) {
-            for (rec in 1..5) {
-                rawLines += exchange(
-                    iso,
-                    "改读记录（按 SFI=$sfi）：$baseLabel 记录 $rec",
-                    CardProbeLogic.readRecord(record = rec, sfi = sfi),
-                    sid,
-                )
-            }
+            rawLines += exchange(iso, "改读记录：$baseLabel 记录 $rec", bySfi(rec), sid)
         }
     }
 

@@ -292,17 +292,18 @@ class CardProbeLogicTest {
     }
 
     /**
-     * 命中的 SFI 要**沿文件往下读**，且只在第一段真有内容时才读。
+     * 命中的 SFI 要**沿文件往下读** —— 而且**不因首段全零就停下**。
      *
-     * 「只在有内容时」的理由：30 个短标识里多数是空文件，对全零文件再读两段
-     * 纯粹是白等（用户贴在手机上的那几秒是有限的）。但「前 32 字节是零」
-     * 也确实**不等于**「文件是空的」，所以是「先看一眼」而不是「不读」。
+     * ⚠️ 这一条在第十次实测被改过：原先 `sfiScan` 带了个「首段全零就不再往下读」
+     * 的开关，而 `fidScan` 没有 ⇒ 目录内 `0008` 与 `SFI=8` 是**同一个文件**，
+     * 却走 FID 路读出 48 字节、走 SFI 路只有 32 字节。
+     * 当时还有一条 `assertTrue(step.followUpIfData)` 把这个不一致**钉成了期望值** ——
+     * 与「把错编码写成期望值」是同一类错误：测试在替 bug 背书。
      */
     @Test
-    fun `SFI 扫描命中后沿文件往下读 且只在真有数据时`() {
+    fun `SFI 扫描命中后沿文件往下读`() {
         val step = CardProbeLogic.sfiScan(1..1).single()
 
-        assertTrue(step.followUpIfData)
         assertEquals("SFI=1 第 2 段", step.followUpLabel)
         // 第 2 段是同一 SFI 的 offset 0x20，第 3 段是 0x40 —— P1 仍是 0x80|SFI
         assertEquals("00 B0 81 20 20", CardProbeLogic.toHex(step.followUp!!))
@@ -311,6 +312,27 @@ class CardProbeLogicTest {
         // 续读的每一条也都要过只读闸门
         assertTrue(CardProbeLogic.isReadOnly(step.followUp!!))
         assertTrue(step.followUpMore.all { CardProbeLogic.isReadOnly(it) })
+    }
+
+    /**
+     * **两条路必须对同一个文件读到同样的深度** —— 第十次实测就栽在它们不一致上。
+     *
+     * 真卡上目录内的 `0008` 与 `SFI=8` 是同一份数据的两种编号方式
+     * （实测 `0005`/`0006`/`0007` 与 `SFI=5/6/7` 内容完全一致）。
+     * 一边读到 offset 0x40、另一边停在 0x20，诊断页就会出现两份互相打架的说法。
+     *
+     * 这条守的不是「各读几段」这个数字，而是**两边最后一跳落在同一处**。
+     */
+    @Test
+    fun `SFI 路与 FID 路的续读深度一致`() {
+        val bySfi = CardProbeLogic.sfiScan(1..1).single()
+        val byFid = CardProbeLogic.fidScan(0x0001..0x0001).single()
+
+        assertEquals("00 B0 81 40 20", CardProbeLogic.toHex(bySfi.followUpMore.last()))
+        assertEquals("00 B0 00 40 20", CardProbeLogic.toHex(byFid.followUpMore.last()))
+        // 两边都不能退化成「读一段就收工」
+        assertTrue(bySfi.followUpMore.isNotEmpty())
+        assertTrue(byFid.followUpMore.isNotEmpty())
     }
 
     /**
@@ -386,9 +408,6 @@ class CardProbeLogicTest {
         // 选中之后要读的那一条必须在（这正是目录下钻漏掉的东西）
         assertTrue(step.followUp != null)
         assertTrue(CardProbeLogic.isReadOnly(step.followUp!!))
-        // fidScan 不设followUpIfData：FID 文件少，逐个读三段成本可接受，
-        // 空文件读到的全零不会造成误判。
-        assertFalse(step.followUpIfData)
     }
 
     /**
