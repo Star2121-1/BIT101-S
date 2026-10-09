@@ -539,6 +539,10 @@ internal class NfcController(
         val bytes: ByteArray,
         val note: String?,
         val studentIdHit: String?,
+        /** 没填学号时**猜**出来的学号（纯数字）；填过学号就恒为 `null`（见 [exchange]）。 */
+        val guessedStudentId: String?,
+        /** 上面那个猜值是怎么来的（形式 + 偏移），给人核对用。 */
+        val guessedStudentIdNote: String?,
     ) {
         fun toLine(): ProbeLine = ProbeLine(
             label = label,
@@ -549,6 +553,8 @@ internal class NfcController(
             note = note,
             text = CardProbeLogic.decodeText(bytes),
             studentIdHit = studentIdHit,
+            guessedStudentId = guessedStudentId,
+            guessedStudentIdNote = guessedStudentIdNote,
             tlvs = CardProbeLogic.parseTlvs(bytes).map(::tlvText),
             // BCD 日期扫一遍：卡里的有效期与交易时间都是 BCD，
             // 不点出来的话那串 `20 26 03 22 11 08 43` 没人会意识到是时间。
@@ -709,6 +715,14 @@ internal class NfcController(
             result = send(iso, current)
         }
 
+        // 两条发现途径，**同一时刻只走一条**：
+        // - 用户填了学号 ⇒ 只报「核对过的命中」，不去猜。
+        //   既省一次扫描，也避免同一条数据上并排出现「学号 X」与「疑似学号 Y」——
+        //   用户已经知道自己的学号了，再给一个猜的只会让人怀疑哪个才作数。
+        // - 没填学号 ⇒ 猜。这正是「不填也能读出学号」那条路。
+        val hit = studentId?.let { StudentIdScan.find(result.data, it) }
+        val guess = if (studentId == null) StudentIdScan.guess(result.data) else null
+
         return RawLine(
             label = label,
             apdu = CardProbeLogic.toHex(current),
@@ -716,7 +730,9 @@ internal class NfcController(
             swText = result.swText,
             bytes = result.data,
             note = note,
-            studentIdHit = studentId?.let { StudentIdScan.find(result.data, it) },
+            studentIdHit = hit,
+            guessedStudentId = guess?.value,
+            guessedStudentIdNote = guess?.note,
         )
     }
 
@@ -888,6 +904,15 @@ internal data class ProbeLine(
     override val text: String? = null,
     /** 在这条返回里**找到了学号**（含编码形式与偏移）；没找到是 `null`。 */
     override val studentIdHit: String? = null,
+    /**
+     * **没填学号**时猜出来的学号（含形式与偏移，如 `1120241355（分段形式…）`）。
+     *
+     * ⚠️ 它永远是**疑似**：判据是格式假设（长度 + 入学年份），不是卡里的事实。
+     * 与 [studentIdHit] 不会同时出现 —— 填过学号就只报核对结果（见 `exchange`）。
+     */
+    override val guessedStudentId: String? = null,
+    /** [guessedStudentId] 是怎么来的（形式 + 偏移）。 */
+    override val guessedStudentIdNote: String? = null,
     /** 返回的 TLV 摊平后的 `标签=值`，如 `84=315041592E...`。人肉看十六进制太累。 */
     val tlvs: List<String> = emptyList(),
     /**
@@ -908,6 +933,7 @@ internal data class ProbeLine(
      */
     val hasData: Boolean
         get() = studentIdHit != null ||
+            guessedStudentId != null ||
             text != null ||
             (data?.split(" ")?.any { it != "00" && it.isNotEmpty() } == true)
 }

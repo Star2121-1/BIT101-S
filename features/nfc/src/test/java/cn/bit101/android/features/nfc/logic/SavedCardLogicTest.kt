@@ -18,12 +18,14 @@ class SavedCardLogicTest {
     private fun card(
         name: String? = "高天翔",
         sid: String? = "1120241355",
+        confirmed: Boolean = true,
         cardNo: String? = "7775F07B",
         uid: String? = "7775F07B",
         at: Long = 1000L,
     ) = SavedCardLogic.SavedCard(
         name = name,
         studentId = sid,
+        sidConfirmed = confirmed,
         cardNo = cardNo,
         uid = uid,
         savedAt = at,
@@ -149,8 +151,78 @@ class SavedCardLogicTest {
     @Test
     fun `isBlank 只看四个展示字段`() {
         assertTrue(SavedCardLogic.isBlank(null))
-        assertTrue(SavedCardLogic.isBlank(SavedCardLogic.SavedCard(null, null, null, null)))
+        assertTrue(
+            SavedCardLogic.isBlank(
+                SavedCardLogic.SavedCard(name = null, studentId = null, cardNo = null, uid = null)
+            )
+        )
         // 只剩 UID 也算有内容：至少知道「认出过这一张卡」
-        assertFalse(SavedCardLogic.isBlank(SavedCardLogic.SavedCard(null, null, null, "7775F07B")))
+        assertFalse(
+            SavedCardLogic.isBlank(
+                SavedCardLogic.SavedCard(name = null, studentId = null, cardNo = null, uid = "7775F07B")
+            )
+        )
+    }
+
+    /**
+     * ⚠️ **猜出来的学号不许顶掉核对过的那个**。
+     *
+     * 用户上次填了学号、真命中了（确认），这次没填、只有猜测 ——
+     * 若让猜测覆盖上去，名片上的学号就从「确认」悄悄降级成「疑似」，
+     * 而用户完全看不出来发生了什么。
+     */
+    @Test
+    fun `疑似学号不覆盖已核对的学号`() {
+        val old = card(sid = "1120241355", confirmed = true)
+        val fresh = SavedCardLogic.SavedCard(
+            name = null,
+            studentId = "1120241399",
+            sidConfirmed = false,
+            cardNo = null,
+            uid = "7775F07B",
+        )
+
+        val merged = SavedCardLogic.merge(old, fresh, now = 600)
+
+        assertEquals("1120241355", merged.studentId)
+        assertTrue(merged.sidConfirmed)
+    }
+
+    /** 反过来：用户这次真的核对上了，就该把猜测升格成确认。 */
+    @Test
+    fun `核对的学号可以覆盖之前的疑似`() {
+        val old = card(sid = "1120241355", confirmed = false)
+        val fresh = card(sid = "1120241355", confirmed = true)
+
+        val merged = SavedCardLogic.merge(old, fresh, now = 700)
+
+        assertEquals("1120241355", merged.studentId)
+        assertTrue(merged.sidConfirmed)
+    }
+
+    /**
+     * 「内容相同」**不看保存时间**。
+     *
+     * 这条守的是写盘次数：页面上的核对是「输入框一变就重算」，
+     * 若把 `savedAt` 也算进内容比较，每敲一个字符都会得出「变了」并写一次盘。
+     */
+    @Test
+    fun `sameContent 忽略保存时间 但看得出内容差异`() {
+        assertTrue(SavedCardLogic.sameContent(card(at = 100), card(at = 999)))
+        assertFalse(SavedCardLogic.sameContent(card(), card(name = "李四")))
+        // 「是否核对过」也算内容：它决定了界面上写「学号」还是「疑似学号」
+        assertFalse(SavedCardLogic.sameContent(card(confirmed = true), card(confirmed = false)))
+        assertFalse(SavedCardLogic.sameContent(card(), null))
+        assertTrue(SavedCardLogic.sameContent(null, null))
+    }
+
+    /** 「核对了哪个」这个事实也要能存下来、读回来。 */
+    @Test
+    fun `是否核对过会一起存下来`() {
+        val suspicious = card(confirmed = false)
+        val back = SavedCardLogic.decode(SavedCardLogic.encode(suspicious))
+
+        assertEquals(suspicious, back)
+        assertFalse(back!!.sidConfirmed)
     }
 }

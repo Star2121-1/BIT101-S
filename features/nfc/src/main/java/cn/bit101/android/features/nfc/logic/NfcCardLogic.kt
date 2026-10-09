@@ -193,48 +193,177 @@ internal object StudentIdScan {
         // 又必须**足够大**才能装下真卡上那三段（`11` / `202413` / `55`）。
         // 之前拍了个 `MAX_SEGMENTS = 6`，结果 `11`+`202413` 正好 6 段就停，
         // **永远拼不成 10 位** —— 判据太紧会漏掉真东西，那比误报更糟。
-        //
-        // ⚠️ 这里数的是**段数**，而每段是若干个数字字符拼起来的。
-        // 之前每个数字字符都单独进 `parts`，于是 10 位学号被报成「10 段」——
-        // 命中是对的，但文案里那个段数是错的（真卡上是 3 段）。
         val maxSegments = digits.length
 
         for (i in data.indices) {
-            val parts = mutableListOf<String>()
-            var current = StringBuilder()
-            var separators = 0
-            var at = i
-            while (at < data.size && parts.size < maxSegments) {
-                val b = data[at].toInt() and 0xFF
-                if (b in ASCII_ZERO..ASCII_NINE) {
-                    current.append(b.toChar())
-                    at++
-                    continue
-                }
-                // 非数字：只有「正好夹在两段数字之间、且自己是 1 字节控制字符」才算分隔符
-                if (current.isNotEmpty() && at + 1 < data.size &&
-                    data[at + 1].toInt() and 0xFF in ASCII_ZERO..ASCII_NINE &&
-                    isSeparator(b)
-                ) {
-                    parts += current.toString()
-                    current = StringBuilder()
-                    separators++
-                    at++
-                    continue
-                }
-                break
-            }
-            if (current.isNotEmpty()) parts += current.toString()
-
+            val seg = segmentationAt(data, i, maxSegments) ?: continue
             // 只有一段那是 findContiguous 的活，不必走这条路
-            if (parts.size < 2) continue
-            if (parts.joinToString("") == digits) {
-                val suffix = if (separators == 1) "1 个分隔符" else "$separators 个分隔符"
-                return "分段形式（${parts.size} 段，$suffix），偏移 $i"
+            if (seg.parts.size < 2) continue
+            if (seg.parts.joinToString("") == digits) {
+                return "分段形式（${seg.parts.size} 段，${seg.separatorText}），偏移 $i"
             }
         }
         return null
     }
+
+    /**
+     * 一次「按数字段切分」的结果。
+     *
+     * @param parts 切出来的数字段（每段是若干个数字字符）。
+     *   ⚠️ 这里数的是**段数**，不是数字字符数 ——
+     *   早先每个数字字符都单独进 `parts`，于是 10 位学号被报成「10 段」，
+     *   命中是对的、文案里那个段数是错的（真卡上是 3 段）。
+     * @param separators 用掉了几个分隔符。
+     */
+    private data class Segmentation(val parts: List<String>, val separators: Int) {
+        val separatorText: String
+            get() = if (separators == 1) "1 个分隔符" else "$separators 个分隔符"
+    }
+
+    /**
+     * 从 [from] 处按「数字段 + 单字节控制字符分隔」切一段出来。
+     *
+     * ⚠️ **这是唯一一份切分实现**：[findSegmented]（有学号时核对）与
+     * [guessSegmented]（没学号时猜）都走它。抄成两份的代价在本模块已经付过好几次 ——
+     * 两条本该一致的路会各自漂移，而表现只是「结果对不上」，很难定位。
+     *
+     * @return 没切出任何数字段时返回 `null`（调用方据此判断该起点无意义）。
+     */
+    private fun segmentationAt(data: ByteArray, from: Int, maxSegments: Int): Segmentation? {
+        val parts = mutableListOf<String>()
+        var current = StringBuilder()
+        var separators = 0
+        var at = from
+
+        while (at < data.size && parts.size < maxSegments) {
+            val b = data[at].toInt() and 0xFF
+            if (b in ASCII_ZERO..ASCII_NINE) {
+                current.append(b.toChar())
+                at++
+                continue
+            }
+            // 非数字：只有「正好夹在两段数字之间、且自己是 1 字节控制字符」才算分隔符
+            if (current.isNotEmpty() && at + 1 < data.size &&
+                data[at + 1].toInt() and 0xFF in ASCII_ZERO..ASCII_NINE &&
+                isSeparator(b)
+            ) {
+                parts += current.toString()
+                current = StringBuilder()
+                separators++
+                at++
+                continue
+            }
+            break
+        }
+        if (current.isNotEmpty()) parts += current.toString()
+
+        return if (parts.isEmpty()) null else Segmentation(parts, separators)
+    }
+
+    // ------------------------------------------------------- 不填学号也能认
+
+    /**
+     * 猜出来的学号。
+     *
+     * @param value 学号数字串本身。
+     * @param note 它是**怎么**认出来的（形式 + 偏移），给人核对用。
+     */
+    data class Guess(val value: String, val note: String)
+
+    /**
+     * 学号长度区间。北理工是 10 位；放宽到 8~12 是为了不把别届 / 别的学制漏掉，
+     * 多出来的误报由 [looksLikeStudentId] 的年份判据兜着。
+     */
+    private const val MIN_LEN = 8
+    private const val MAX_LEN = 12
+
+    /** 「入学年份」的合理窗口。 */
+    private const val MIN_YEAR = 2000
+    private const val MAX_YEAR = 2039
+
+    /**
+     * 不拿学号，**直接从卡里认** —— 用户不填学号也能知道这张卡是谁的。
+     *
+     * ## 为什么做得到
+     *
+     * 学号不是随机数：北理工的 `1120241355` 里，第 3~6 位就是**入学年份** `2024`。
+     * 于是「一串 8~12 位数字、首位非 0、靠前位置含一个 2000~2039 的四位数」
+     * 就足以把学号从一堆二进制里挑出来，不必预先知道它是多少。
+     *
+     * ## ⚠️ 所以它只能叫「疑似」
+     *
+     * 上面那条是**格式假设**，不是卡里的既成事实：换一所学校、
+     * 或学校改了学号规则，它就不成立。猜错一个学号的后果不小 ——
+     * 用户会拿它当真。⇒ 界面与存下来的名片都必须标「疑似 / 未核对」，
+     * 只有用户拿它跑过一次 [find]（真命中）之后才算确认。
+     *
+     * ## ⚠️ 为什么**不**猜 BCD 形式（权衡后的放弃，不是没想到）
+     *
+     * BCD 里**任何一个字节**都可能被读成两位十进制（`0x11` → `11`），
+     * 于是一段随机二进制能滑出几十个「看着像学号」的 10 位串；年份窗口也压不住
+     * （粗估每个文件零点几个误报，三十个文件就是好几个假学号）。
+     * 真卡存的是 **ASCII**（`31 31 06 32 …`），所以先只做实测过的形式。
+     * 将来真遇到 BCD 的卡再加 —— 那时有反例可验，比现在凭想当然加一条稳。
+     *
+     * @return 认出来的学号；认不出返回 `null`（**不猜一个凑数**）。
+     */
+    fun guess(data: ByteArray): Guess? {
+        if (data.isEmpty()) return null
+        // 分段优先：真卡就是分段形式，而且它比「碰巧连着一串数字」更不像噪声。
+        return guessSegmented(data) ?: guessContiguous(data)
+    }
+
+    private fun guessSegmented(data: ByteArray): Guess? {
+        for (i in data.indices) {
+            val seg = segmentationAt(data, i, MAX_LEN) ?: continue
+            if (seg.parts.size < 2) continue
+            val digits = seg.parts.joinToString("")
+            if (!looksLikeStudentId(digits)) continue
+            return Guess(digits, "分段形式（${seg.parts.size} 段，${seg.separatorText}），偏移 $i")
+        }
+        return null
+    }
+
+    /** 连续 ASCII 数字串。要求**整段**落在长度区间内 —— 截半段去猜，比不猜更糟。 */
+    private fun guessContiguous(data: ByteArray): Guess? {
+        var i = 0
+        while (i < data.size) {
+            if (!isAsciiDigit(data[i])) {
+                i++
+                continue
+            }
+            var j = i
+            while (j < data.size && isAsciiDigit(data[j])) j++
+            val length = j - i
+            if (length in MIN_LEN..MAX_LEN) {
+                val digits = String(data, i, length, Charsets.US_ASCII)
+                if (looksLikeStudentId(digits)) return Guess(digits, "连续 ASCII 数字，偏移 $i")
+            }
+            i = j
+        }
+        return null
+    }
+
+    /**
+     * 这串数字像不像学号。两条判据都要满足：
+     *
+     * ① 长度 8~12、**首位不是 0** —— 学号不以 0 开头，而卡里补零的位置到处都是；
+     * ② 靠前的某个连续四位落在 2000~2039（入学年份）。位置取 0~5：
+     *    既装得下实测的 `1120241355`（第 3 位起），也容得下「年份打头」的写法。
+     */
+    private fun looksLikeStudentId(digits: String): Boolean {
+        if (digits.length !in MIN_LEN..MAX_LEN) return false
+        if (digits.first() == '0') return false
+
+        val lastStart = minOf(5, digits.length - 4)
+        for (i in 0..lastStart) {
+            val year = digits.substring(i, i + 4).toIntOrNull() ?: continue
+            if (year in MIN_YEAR..MAX_YEAR) return true
+        }
+        return false
+    }
+
+    private fun isAsciiDigit(b: Byte): Boolean = (b.toInt() and 0xFF) in ASCII_ZERO..ASCII_NINE
 
     /**
      * 这个非数字字节**算不算**分隔符。

@@ -30,6 +30,7 @@ internal object SavedCardLogic {
 
     const val KEY_NAME = "card_name"
     const val KEY_STUDENT_ID = "card_student_id"
+    const val KEY_SID_CONFIRMED = "card_sid_confirmed"
     const val KEY_CARD_NO = "card_card_no"
     const val KEY_UID = "card_uid"
     const val KEY_SAVED_AT = "card_saved_at"
@@ -44,6 +45,17 @@ internal object SavedCardLogic {
     data class SavedCard(
         val name: String?,
         val studentId: String?,
+        /**
+         * [studentId] 是不是**核对过**的。
+         *
+         * `false` = 只是从卡上猜出来的（见 `StudentIdScan.guess`），
+         * 界面必须标「疑似」；`true` = 用户填的学号在卡里真命中了。
+         *
+         * ⚠️ 这两种成色必须分开存：只存一个字符串的话，名片上「学号 1120241355」
+         * 到底是核对过的还是猜的，用户和我们事后都说不清。
+         * 而按猜错的值去办事，责任就落到我们头上了。
+         */
+        val sidConfirmed: Boolean = false,
         val cardNo: String?,
         val uid: String?,
         val savedAt: Long = 0L,
@@ -77,10 +89,19 @@ internal object SavedCardLogic {
             else -> 0L
         }
 
+        val sidConfirmed = when (val value = raw[KEY_SID_CONFIRMED]) {
+            is Boolean -> value
+            is String -> value.toBooleanStrictOrNull() ?: false
+            else -> false
+        }
+
         if (name == null && studentId == null && cardNo == null && uid == null) return null
         return SavedCard(
             name = name,
             studentId = studentId,
+            // 老版本（没有这个键）存下来的学号，一律按「疑似」处理 —— 那时根本没有
+            // 「是否核对过」这个概念，往宽松处猜（当成确认）会把猜测冒充成事实。
+            sidConfirmed = sidConfirmed && studentId != null,
             cardNo = cardNo,
             uid = uid,
             savedAt = savedAt,
@@ -96,6 +117,8 @@ internal object SavedCardLogic {
     fun encode(card: SavedCard): Map<String, String> = buildMap {
         card.name?.let { put(KEY_NAME, it) }
         card.studentId?.let { put(KEY_STUDENT_ID, it) }
+        // 只在**有学号**时写这个标记：没有学号却标着「已核对」是一种自相矛盾的状态
+        if (card.studentId != null) put(KEY_SID_CONFIRMED, card.sidConfirmed.toString())
         card.cardNo?.let { put(KEY_CARD_NO, it) }
         card.uid?.let { put(KEY_UID, it) }
         put(KEY_SAVED_AT, card.savedAt.toString())
@@ -114,15 +137,42 @@ internal object SavedCardLogic {
         val sameCard = old == null || old.uid == null || fresh.uid == null || old.uid == fresh.uid
         if (!sameCard) return fresh.copy(savedAt = now)
 
+        // 学号有两种成色，「确认过的」赢：
+        // - 新值是核对过的那就用新的（用户刚比对过，以最新为准）；
+        // - 旧值是核对过的、新值只是猜的 ⇒ **保留旧的**，别让一句猜测顶掉确认值；
+        // - 都不是核对过的 ⇒ 有就用。
+        val (studentId, sidConfirmed) = when {
+            fresh.studentId != null && fresh.sidConfirmed -> fresh.studentId to true
+            old?.studentId != null && old.sidConfirmed -> old.studentId to true
+            fresh.studentId != null -> fresh.studentId to false
+            old?.studentId != null -> old.studentId to false
+            else -> null to false
+        }
+
         return SavedCard(
             // 新值有才覆盖：这次没认出姓名，不该把上次认出的清掉
             name = fresh.name ?: old?.name,
-            studentId = fresh.studentId ?: old?.studentId,
+            studentId = studentId,
+            sidConfirmed = sidConfirmed,
             cardNo = fresh.cardNo ?: old?.cardNo,
             uid = fresh.uid ?: old?.uid,
             savedAt = now,
         )
     }
+
+    /**
+     * 两张名片的**内容**是否相同。
+     *
+     * ⚠️ 刻意**不比较** [SavedCard.savedAt]：那是「什么时候写的」，不是内容。
+     * 拿它一起比的话，每次重算都会得出「变了」，于是输入框每敲一个字符就往盘上写一次 ——
+     * 白白写盘，而且名片上那句「更新于」也跟着乱跳。
+     */
+    fun sameContent(a: SavedCard?, b: SavedCard?): Boolean =
+        a?.name == b?.name &&
+            a?.studentId == b?.studentId &&
+            a?.sidConfirmed == b?.sidConfirmed &&
+            a?.cardNo == b?.cardNo &&
+            a?.uid == b?.uid
 
     private fun textOf(value: Any?): String? = (value as? String)?.takeIf { it.isNotBlank() }
 }

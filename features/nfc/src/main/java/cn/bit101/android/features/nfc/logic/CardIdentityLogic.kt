@@ -47,6 +47,15 @@ internal object CardIdentityLogic {
         val name: String?,
         val studentId: String?,
         val studentIdNote: String?,
+        /**
+         * **没填学号**时从卡里猜出来的学号（**纯数字**，可直接拿去填输入框）。
+         *
+         * ⚠️ 与 [studentId] **互斥**：有核对结果就绝不列疑似值 ——
+         * 两个学号并排显示，用户没法判断该信哪个（而实际上多半是同一个）。
+         */
+        val guessedStudentId: String?,
+        /** [guessedStudentId] 是怎么认出来的（形式 + 偏移）；界面必须标「疑似」。 */
+        val guessedStudentIdNote: String?,
         val dates: List<String>,
         val cardNo: String?,
         val cardNoNote: String?,
@@ -81,6 +90,15 @@ internal object CardIdentityLogic {
         val hit = lines.firstOrNull { !it.studentIdHit.isNullOrBlank() }
         val studentId = hit?.let { expectedStudentId }
 
+        // 疑似学号：**没填学号**时探测层猜出来的那个（见 `StudentIdScan.guess`）。
+        // 有核对结果时一律不取 —— 条目上同时挂着「学号」与「疑似学号」，
+        // 用户没法判断该信哪个（而实际上这两个指的多半是同一个）。
+        val guessedLine = if (studentId == null) {
+            lines.firstOrNull { !it.guessedStudentId.isNullOrBlank() }
+        } else {
+            null
+        }
+
         // 日期：全部照收，不排序、不挑最晚、不命名。
         val dates = lines.flatMap { it.dates }.distinct()
 
@@ -95,6 +113,8 @@ internal object CardIdentityLogic {
             name = names.firstOrNull(),
             studentId = studentId,
             studentIdNote = hit?.studentIdHit,
+            guessedStudentId = guessedLine?.guessedStudentId,
+            guessedStudentIdNote = guessedLine?.guessedStudentIdNote,
             dates = dates,
             cardNo = cardNo?.value,
             cardNoNote = cardNoNote?.let { "$it；主候选是「${cardNo?.label}」" } ?: cardNo?.label,
@@ -110,7 +130,16 @@ internal object CardIdentityLogic {
      */
     interface ProbeLineLike {
         val text: String?
+
+        /** 与用户填的学号**核对**上了（含说明）。 */
         val studentIdHit: String?
+
+        /** 没填学号时**猜**出来的学号（纯数字）。与 [studentIdHit] 互斥。 */
+        val guessedStudentId: String?
+
+        /** 上面那个猜值是怎么来的（形式 + 偏移）。 */
+        val guessedStudentIdNote: String?
+
         val dates: List<String>
     }
 }

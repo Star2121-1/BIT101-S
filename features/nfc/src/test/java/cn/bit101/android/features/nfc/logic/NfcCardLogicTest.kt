@@ -322,4 +322,67 @@ class NfcCardLogicTest {
         // 含非数字 —— 根本不是学号
         assertNull(StudentIdScan.find(data, "11202413a5"))
     }
+
+    // ------------------------------------------- 不填学号也要能认（无先验）
+
+    /**
+     * ★ 同一个真卡字节，**不用先告诉程序学号是多少**也要认出来。
+     *
+     * 凭什么认得出：学号不是随机数 —— 北理工的 `1120241355` 里第 3~6 位就是
+     * **入学年份** `2024`。于是「8~12 位数字、首位非 0、靠前含一个 2000~2039 的四位数」
+     * 就足以把它从一堆二进制里挑出来。
+     */
+    @Test
+    fun `不填学号也能从真卡字节里认出学号`() {
+        val data = CardProbeLogic.parseHex("0000000000000000000031310632303234313304353500")
+
+        val guess = StudentIdScan.guess(data)
+
+        assertNotNull(guess)
+        assertEquals("1120241355", guess!!.value)
+        assertTrue("应报分段形式，实际：${guess.note}", guess.note.startsWith("分段形式"))
+        assertTrue("偏移应指到第一个数字，实际：${guess.note}", guess.note.contains("偏移 10"))
+    }
+
+    /** 有的系统把学号直接当文本存，那就是一串连续的 ASCII 数字。 */
+    @Test
+    fun `连续 ASCII 数字串也能认出学号`() {
+        val data = CardProbeLogic.parseHex("0000313132303234313335350000")
+
+        val guess = StudentIdScan.guess(data)
+
+        assertEquals("1120241355", guess!!.value)
+        // 两个前导 0x00 之后才是那 10 个数字字符 ⇒ 偏移 2
+        assertTrue("偏移应为 2，实际：${guess.note}", guess.note.contains("偏移 2"))
+    }
+
+    /**
+     * ⚠️ 这条比「能猜出来」更要紧：**猜学号绝不能在无关数据上乱报**。
+     *
+     * 两个真卡上的反例：
+     * - `0018` 的交易记录 `20 26 03 22 11 08 43` —— 全是「类数字」字节，
+     *   若判据只看「像数字」，`260322110843` 会被当成学号报给用户；
+     * - 全零文件：卡里到处都是，一猜一大片。
+     */
+    @Test
+    fun `猜学号不会把无关字节误报成学号`() {
+        val record = CardProbeLogic.parseHex("0001000000000013880200000000000120260322110843")
+        assertNull(StudentIdScan.guess(record))
+
+        assertNull(StudentIdScan.guess(ByteArray(32)))
+
+        // 补零区里孤零零一个数字字符，凑不出段
+        assertNull(StudentIdScan.guess(CardProbeLogic.parseHex("00000031000000000000000000000000")))
+    }
+
+    /** 长度与首位这两条判据各自都要守住。 */
+    @Test
+    fun `数字串不像学号时一律不猜`() {
+        // 首位是 0：学号不以 0 开头，而补零区到处都是
+        assertNull(StudentIdScan.guess("01120241355".toByteArray(Charsets.US_ASCII)))
+        // 太短（下界是 8 位）
+        assertNull(StudentIdScan.guess("202413".toByteArray(Charsets.US_ASCII)))
+        // 长度合规、但没有像入学年份的四位数
+        assertNull(StudentIdScan.guess("9988776655".toByteArray(Charsets.US_ASCII)))
+    }
 }

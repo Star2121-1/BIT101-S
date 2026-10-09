@@ -17,10 +17,14 @@ class CardIdentityLogicTest {
     private fun line(
         text: String? = null,
         hit: String? = null,
+        guess: String? = null,
+        guessNote: String? = null,
         dates: List<String> = emptyList(),
     ) = object : CardIdentityLogic.ProbeLineLike {
         override val text = text
         override val studentIdHit = hit
+        override val guessedStudentId = guess
+        override val guessedStudentIdNote = guessNote
         override val dates = dates
     }
 
@@ -130,6 +134,45 @@ class CardIdentityLogicTest {
 
         assertNull(id.studentId)
         assertEquals("分段形式（3 段，2 个分隔符），偏移 10", id.studentIdNote)
+    }
+
+    /**
+     * 不填学号时，卡里猜出来的那个要报出来 —— 这就是「不填也能读」那条路。
+     */
+    @Test
+    fun `没填学号时给出疑似学号`() {
+        val id = CardIdentityLogic.summarize(
+            probeLines = listOf(
+                line(guess = "1120241355", guessNote = "分段形式（3 段，2 个分隔符），偏移 10"),
+            ),
+            candidates = cards,
+            expectedStudentId = null,
+        )
+
+        assertEquals("1120241355", id.guessedStudentId)
+        assertTrue(id.guessedStudentIdNote!!.contains("偏移 10"))
+        assertNull(id.studentId)
+    }
+
+    /**
+     * ⚠️ **核对过的学号与疑似学号不能同时出现**。
+     *
+     * 两个学号并排摆着，用户没法判断该信哪个（实际上它俩多半是同一个）。
+     * 有核对结果时，疑似那条要整个让位。
+     */
+    @Test
+    fun `有核对结果时不再列疑似学号`() {
+        val id = CardIdentityLogic.summarize(
+            probeLines = listOf(
+                line(hit = "ASCII 形式，偏移 4"),
+                line(guess = "1120241355", guessNote = "分段形式，偏移 10"),
+            ),
+            candidates = cards,
+            expectedStudentId = "1120241355",
+        )
+
+        assertEquals("1120241355", id.studentId)
+        assertNull(id.guessedStudentId)
     }
 
     /** 卡号有多种解读时要说明，不能只报一种让人误以为那就是卡面号。 */

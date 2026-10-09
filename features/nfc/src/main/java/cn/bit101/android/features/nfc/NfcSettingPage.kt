@@ -128,12 +128,15 @@ fun NfcSettingPage(
         onDispose { }
     }
 
-    // 每读到一次卡，就把认出来的身份并进「我的校园卡」。
+    // 把认出来的身份并进「我的校园卡」。
+    //
+    // ⚠️ key 里有 `studentId`：用户**填了学号的那一刻**就该拿手上这份扫描结果重新核对，
+    // 而不是非要他再贴一次卡。那份字节还在内存里，核对是纯本地计算。
     //
     // ⚠️ 只在**名片非空**时才落盘：把一张什么都没认出来的空名片写进去，
-    // 「没读过卡」和「读过但什么都没认出来」就变成同一种状态了 ——
-    // 而这两句提示对用户来说是不一样的话（后者说明卡贴上了、只是认不出）。
-    LaunchedEffect(scan) {
+    // 「没读过卡」与「读过但什么都没认出来」就变成同一种状态了 ——
+    // 而这两句对用户是不一样的话（后者说明卡贴上了、只是认不出）。
+    LaunchedEffect(scan, studentId) {
         val result = scan ?: return@LaunchedEffect
         val identity = CardIdentityLogic.summarize(
             probeLines = result.probe,
@@ -142,13 +145,19 @@ fun NfcSettingPage(
         )
         val fresh = SavedCardLogic.SavedCard(
             name = identity.name,
-            studentId = identity.studentId,
+            // 猜出来的也算「这张卡的学号」，但成色不同 —— 见下一行。
+            studentId = identity.studentId ?: identity.guessedStudentId,
+            // 只有用户填的学号在卡里真命中过，才算核对过。
+            sidConfirmed = identity.studentId != null,
             cardNo = identity.cardNo,
             uid = result.uidHex.takeIf { it.isNotBlank() },
         )
         if (SavedCardLogic.isBlank(fresh)) return@LaunchedEffect
 
         val merged = SavedCardLogic.merge(savedCard, fresh, System.currentTimeMillis())
+        // 内容没变就不写盘 —— 输入框每敲一个字符都会重跑这段
+        if (SavedCardLogic.sameContent(merged, savedCard)) return@LaunchedEffect
+
         SavedCardStore.save(context, merged)
         savedCard = merged
     }
@@ -272,7 +281,14 @@ private fun MyCardSection(
                     )
                 } else {
                     card.name?.let { KeyValue("姓名", it) }
-                    card.studentId?.let { KeyValue("学号", it) }
+                    card.studentId?.let { sid ->
+                        KeyValue(if (card.sidConfirmed) "学号" else "疑似学号", sid)
+                        Text(
+                            if (card.sidConfirmed) "你在卡里核对过"
+                            else "按「长度 + 含入学年份」从卡上认出来的，还没核对过",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                     card.cardNo?.let { KeyValue("卡号", it) }
                     if (card.savedAt > 0L) {
                         Text(
@@ -385,7 +401,12 @@ private fun ReadCardSection(
         if (s == null) {
             Text("还没有读到卡。", style = MaterialTheme.typography.bodySmall)
         } else {
-            ReadResultCard(scan = s, onCopy = onCopy)
+            ReadResultCard(
+                scan = s,
+                onCopy = onCopy,
+                onUseStudentId = onStudentIdChange,
+                expectedStudentId = studentId,
+            )
         }
     }
 }
@@ -394,6 +415,16 @@ private fun ReadCardSection(
 private fun ReadResultCard(
     scan: NfcScan,
     onCopy: (String) -> Unit,
+    onUseStudentId: (String) -> Unit,
+    /**
+     * 用户填的学号。
+     *
+     * ⚠️ 必须传进来：`summarize` 只会把**用户填的那个**当成学号返回
+     * （卡里那句 `studentIdHit` 是「怎么认出来的」说明文字，不是学号）。
+     * 漏了这个参数，身份卡就会在「明明核对了」的情况下显示不出学号 ——
+     * 这正好是改语义时差点带出来的回归。
+     */
+    expectedStudentId: String,
 ) {
     // 深度扫描会有三四百条记录，默认只列有数据的。状态提在这里而不是 `let` 里面，
     // 免得 `probe` 一会儿有一会儿没有时把 remember 的调用顺序打乱。
@@ -413,7 +444,11 @@ private fun ReadResultCard(
 
             // 「这张卡是谁」放在结果最上面：学号和姓名原本各占几百行流水里的一行，
             // 不提出来等于让人自己在「找不到这个文件」堆里翻找。
-            IdentityCard(scan)
+            IdentityCard(
+                scan = scan,
+                onUseStudentId = onUseStudentId,
+                expectedStudentId = expectedStudentId,
+            )
 
             scan.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             scan.writeOutcome?.let { Text(it) }
@@ -521,6 +556,17 @@ private fun ReadResultCard(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
+                    // 没填学号时的那条发现途径（见 StudentIdScan.guess）
+                    line.guessedStudentId?.let { guess ->
+                        Text(
+                            "疑似学号 $guess",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        line.guessedStudentIdNote?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                     // 疑似 BCD 日期：卡里存时间就是这样的裸字节，不点出来没人认得。
                     // ⚠️ 措辞带「疑似」—— 三字节凑一个合法时刻太容易，这是线索不是结论。
                     line.dates.forEach { d ->
@@ -611,11 +657,18 @@ private fun SectionTitle(text: String) {
  * 把猜测写成确定语气是最难被发现的一类错误，所以这里只列、不命名。
  */
 @Composable
-private fun IdentityCard(scan: NfcScan) {
-    val identity = remember(scan.probe, scan.cardNoCandidates) {
+private fun IdentityCard(
+    scan: NfcScan,
+    onUseStudentId: (String) -> Unit,
+    expectedStudentId: String,
+) {
+    // ⚠️ `expectedStudentId` 必须进 key：用户改了学号、重新贴卡命中之后，
+    // 这张卡要跟着重算，否则它会一直停在「没有学号」的旧结论上。
+    val identity = remember(scan.probe, scan.cardNoCandidates, expectedStudentId) {
         CardIdentityLogic.summarize(
             probeLines = scan.probe,
             candidates = scan.cardNoCandidates,
+            expectedStudentId = expectedStudentId.trim().takeIf { it.isNotEmpty() },
         )
     }
 
@@ -640,6 +693,24 @@ private fun IdentityCard(scan: NfcScan) {
                     Text(it, style = MaterialTheme.typography.bodySmall)
                 }
             }
+            // 没填学号时，卡里的学号照样认得出来 —— 靠的是「长度 + 含入学年份」这个格式判据。
+            // ⚠️ 但它只是**疑似**：判据是假设，不是卡里的事实，所以标题写「疑似学号」、
+            // 下面把判据也摆出来，并且给一个「就是它」的入口 ——
+            // 用户认下来之后，下次贴卡就是核对命中（那时才升格成确认）。
+            identity.guessedStudentId?.let { guess ->
+                KeyValue("疑似学号", guess)
+                identity.guessedStudentIdNote?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+                Text(
+                    "这是按「学号长度 + 含一个入学年份」猜的，没跟你的学号核对过。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { onUseStudentId(guess) }) {
+                    Text("就用它作为我的学号")
+                }
+            }
+
             identity.dates.forEach { date ->
                 KeyValue("卡上日期（疑似）", date)
             }
@@ -651,7 +722,9 @@ private fun IdentityCard(scan: NfcScan) {
             }
 
             // 三项全空时给一句实话，别让卡片看起来像渲染坏了
-            if (identity.name == null && identity.studentId == null && identity.cardNo == null) {
+            if (identity.name == null && identity.studentId == null &&
+                identity.guessedStudentId == null && identity.cardNo == null
+            ) {
                 Text(
                     "这张卡里没认出姓名 / 学号 / 卡号。",
                     style = MaterialTheme.typography.bodySmall,
@@ -726,6 +799,7 @@ private fun dumpOf(scan: NfcScan): String = buildString {
             line.tlvs.forEach { appendLine("      tlv: $it") }
             line.text?.let { appendLine("      文本: $it") }
             line.studentIdHit?.let { appendLine("      ★ 命中学号：$it") }
+            line.guessedStudentId?.let { appendLine("      疑似学号：$it（${line.guessedStudentIdNote}）") }
             line.dates.forEach { appendLine("      疑似日期: $it") }
         }
     }
