@@ -63,6 +63,13 @@ import java.util.Locale
  * 用户根本不知道有这个功能存在。所以这里即便是「本设备不支持 NFC」的机器，
  * 三个区块照样显示，只是把**为什么用不了**说清楚。
  *
+ * ## ⚠️ 界面文案里不许写 Markdown
+ *
+ * Compose 的 `Text` **不解析** Markdown —— 文案里写 `**加粗**`，用户看到的就是
+ * 原样的两个星号。这条真机上已经中过一次（「换一张卡贴上来会**整张替换**」），
+ * 而在拿到用户截图之前完全看不出来：文案本身「没错」，错的是它被原样显示了。
+ * 要强调就换措辞（用「」或改说法），别指望粗体语法。
+ *
  * ## 入口来自何处
  *
  * 由 `features:setting` 的 `SettingScreen` 以 `"nfc"` 路由挂进来。
@@ -289,7 +296,9 @@ private fun MyCardSection(
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                    card.cardNo?.let { KeyValue("卡号", it) }
+                    // ⚠️ 标「候选」：UID → 卡面印刷号 的换算规则各校自定，
+                    // 这个值是从 UID 推出来的、未必等于卡上印的那串数字。
+                    card.cardNo?.let { KeyValue("卡号（候选）", it) }
                     if (card.savedAt > 0L) {
                         Text(
                             "更新于 ${timeText(card.savedAt)}",
@@ -305,7 +314,7 @@ private fun MyCardSection(
 
         Text(
             "只存在这台手机里，不会上传；点「忘掉这张卡」就删掉。" +
-                "换一张卡贴上来会**整张替换**，不会把两张卡的信息拼在一起。",
+                "换一张卡贴上来会整张替换，不会把两张卡的信息拼在一起。",
             style = MaterialTheme.typography.bodySmall,
         )
     }
@@ -359,7 +368,7 @@ private fun ReadCardSection(
         Text(
             "填了学号之后，每一条探测返回都会拿它去比，四种形式都试：" +
                 "BCD（两位十进制压一个字节）、ASCII、反序 BCD，" +
-                "以及**分段形式** —— 北理工校园卡上的学号被两个控制字节（0x06 / 0x04）" +
+                "以及分段形式 —— 北理工校园卡上的学号被两个控制字节（0x06 / 0x04）" +
                 "分成三段存放，只有按分段拼才认得出来。命中就标出来。" +
                 "学号只在手机上比对，不发到任何地方。",
             style = MaterialTheme.typography.bodySmall,
@@ -459,7 +468,7 @@ private fun ReadResultCard(
             if (scan.classicCompat) {
                 Text(
                     "双界面卡：同时提供 ISO 14443-4 通道与 MIFARE Classic 兼容层。" +
-                        "正因为有前一条，下面的 APDU 探测才跑得起来；也因为有后一条，这张卡**不能写入**。",
+                        "正因为有前一条，下面的 APDU 探测才跑得起来；也因为有后一条，这张卡不能写入。",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
