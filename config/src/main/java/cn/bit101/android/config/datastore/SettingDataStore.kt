@@ -164,6 +164,12 @@ internal class SettingDataStore @Inject constructor(
     private val NOTIFY_EXAM_LEAD_MINUTES = longPreferencesKey("notify_exam_lead_minutes")
     val notifyExamLeadMinutes = PreferencesDataStoreItem(NOTIFY_EXAM_LEAD_MINUTES, 60, preferences.SETTING_DATASTORE)
 
+    // 教学安排调整（补课）提醒：固定「补课日前一天 20:00」，因此**不需要提前量设置**。
+    // 默认开 —— 缺课是真实损失（点名、进度落下），而且这是「课表变了」，
+    // 按平时的课表出门会走错。只报补课、不报放假（放假是连续的，连发一周是打扰）。
+    private val NOTIFY_ADJUSTMENT_ENABLED = booleanPreferencesKey("notify_adjustment_enabled")
+    val notifyAdjustmentEnabled = PreferencesDataStoreItem(NOTIFY_ADJUSTMENT_ENABLED, true, preferences.SETTING_DATASTORE)
+
     // 空教室检索设置
     // 当前校区名
     private val FREE_CLASSROOM_CURRENT_CAMPUS_NAME = stringPreferencesKey("free_classroom_campus_name")

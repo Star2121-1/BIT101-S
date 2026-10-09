@@ -1,6 +1,8 @@
 package cn.bit101.android.features.schedule.course
 
 import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.data.school.dateLabelCn
+import cn.bit101.android.data.school.weekdayCn
 import java.time.LocalDate
 
 /**
@@ -76,7 +78,7 @@ internal object CourseScheduleAdjustmentLogic {
     /** 列头角标文案；`null` = 不显示。 */
     fun badgeText(plan: DayPlan?): String? = when (plan) {
         DayPlan.NoClass -> "放假"
-        is DayPlan.MakeUp -> "按周" + WEEKDAY_CN[plan.targetWeekday - 1]
+        is DayPlan.MakeUp -> "按周" + weekdayCn(plan.targetWeekday)
         null -> null
     }
 
@@ -85,18 +87,13 @@ internal object CourseScheduleAdjustmentLogic {
      *
      * ⚠️ 放假那句说的是「**不上课**」而不是「无教学安排」：放假列的课程现在是**照常显示**
      * 的（灰调），所以那天的课上不上，用户需要一个明确的答案。
+     *
+     * ⚠️ 日期与星期几的文案走 data 层的 [dateLabelCn] / [weekdayCn] ——
+     * 补课提醒（features:notify）用的是**同一份**，**别在这里就地拼字符串**
+     * （「周四」vs「周4」这种漂移，两边的单测各锁各的，谁也不会红）。
      */
     fun describe(date: LocalDate, plan: DayPlan): String = when (plan) {
-        DayPlan.NoClass -> "%d/%d（%s）放假，当天的课不上".format(
-            date.monthValue, date.dayOfMonth, weekLabel(date)
-        )
-        is DayPlan.MakeUp -> "%d/%d（%s）按周%s课表上课".format(
-            date.monthValue, date.dayOfMonth, weekLabel(date),
-            WEEKDAY_CN[plan.targetWeekday - 1],
-        )
+        DayPlan.NoClass -> "${dateLabelCn(date)}放假，当天的课不上"
+        is DayPlan.MakeUp -> "${dateLabelCn(date)}按周${weekdayCn(plan.targetWeekday)}课表上课"
     }
-
-    private fun weekLabel(date: LocalDate): String = "周" + WEEKDAY_CN[date.dayOfWeek.value - 1]
-
-    private val WEEKDAY_CN = charArrayOf('一', '二', '三', '四', '五', '六', '日')
 }

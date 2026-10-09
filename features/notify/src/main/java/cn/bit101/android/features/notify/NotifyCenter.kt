@@ -76,6 +76,14 @@ internal object NotifyCenter {
      */
     private const val CHANNEL_LIB_DUE = "lib_due_reminder"
 
+    /**
+     * 教学安排调整（补课）提醒。
+     *
+     * ⚠️ 给 HIGH：**缺课是真实损失**（点名、进度落下）。而且这条说的是「课表变了」——
+     * 用户按平时的课表出门就会走错，必须在锁屏就能看见。
+     */
+    private const val CHANNEL_ADJUSTMENT = "adjustment_reminder"
+
     /** 点击通知打开 App 的入口（与组件共用同一套 `bit101_goto` 约定）。 */
     private const val MAIN_ACTIVITY_CLASS = "cn.bit101.android.features.MainActivity"
     private const val EXTRA_GOTO = "bit101_goto"
@@ -123,6 +131,7 @@ internal object NotifyCenter {
         ensureChannel(manager, CHANNEL_NETFLOW, "校园网流量", NotificationManager.IMPORTANCE_DEFAULT, "本月流量接近 / 超过 300 GB 限速阈值时提醒（每周期至多两条）")
         ensureChannel(manager, CHANNEL_SEAT_VIOLATION, "座位违约", NotificationManager.IMPORTANCE_HIGH, "预约未签到被记违约时提醒，并显示累计次数（累计 5 次暂停预约 7 天）")
         ensureChannel(manager, CHANNEL_LIB_DUE, "图书馆借阅", NotificationManager.IMPORTANCE_DEFAULT, "借阅图书临近应还日或已逾期时提醒（通知里不含书名）")
+        ensureChannel(manager, CHANNEL_ADJUSTMENT, "课表调整", NotificationManager.IMPORTANCE_HIGH, "学校调休补课时提醒（如「明天按周四课表上课」）")
     }
 
     /**
@@ -195,10 +204,12 @@ internal object NotifyCenter {
             ReminderKind.DDL -> CHANNEL_DDL
             ReminderKind.SEAT_SIGN_IN -> CHANNEL_SEAT
             ReminderKind.EXAM -> CHANNEL_EXAM
+            ReminderKind.ADJUSTMENT -> CHANNEL_ADJUSTMENT
         }
 
-        // DDL / 座位签到 / 考试都值得「弹出来」：DDL 交不上去要扣分，
-        // 座位错过会记违约（累计 5 次暂停 7 天），考试只有一次机会
+        // DDL / 座位签到 / 考试 / 课表调整都值得「弹出来」：DDL 交不上去要扣分，
+        // 座位错过会记违约（累计 5 次暂停 7 天），考试只有一次机会，
+        // 课表调整则是「按平时的课表出门会走错」
         val urgent = reminder.kind != ReminderKind.CLASS
 
         val notification = NotificationCompat.Builder(context, channel)

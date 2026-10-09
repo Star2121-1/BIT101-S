@@ -10,6 +10,10 @@ import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.database.entity.ExamScheduleEntity
 import cn.bit101.android.data.database.entity.startAt
+import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.data.school.TeachingAdjustmentEntry
+import cn.bit101.android.data.school.dateLabelCn
+import cn.bit101.android.data.school.weekdayCn
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -42,6 +46,18 @@ enum class ReminderKind {
      * 通知要给 HIGH 并且**带上座位号** —— 上课迟到还能进教室，考试迟到就得联系老师。
      */
     EXAM,
+
+    /**
+     * 教学安排调整（**补课**）：补课日**前一天 20:00**。
+     *
+     * ⚠️ 单独成类（而不是并进上课提醒）：这条说的是「**课表本身变了**」——
+     * 用户按平时的课表出门就会走错、甚至整天缺课。它比「快上课了」更早、
+     * 也更需要看进去，所以文案与时机都不一样。
+     *
+     * ⚠️ **只报补课、不报放假**（2026-10-09 与用户定）：缺课是真实损失；
+     * 放假只是「不用去」，而且假期是连续的（国庆 7 天会连发一周）—— 那是打扰，不是提醒。
+     */
+    ADJUSTMENT,
 }
 
 /**
@@ -102,6 +118,13 @@ data class NotifyPolicy(
     val seatSignInLeadMinutes: Long = 15,
     /** 考试提醒。考试只有一次机会，默认开。 */
     val examEnabled: Boolean = true,
+    /**
+     * 教学安排调整（补课）提醒。
+     *
+     * 默认开 —— **缺课是真实损失**（点名、进度落下），而且这条是「课表变了」，
+     * 按平时的课表出门就会走错。
+     */
+    val adjustmentEnabled: Boolean = true,
     /** 考试前一天提醒（固定提前 24 小时）。 */
     val examDayEnabled: Boolean = true,
     /**
@@ -145,6 +168,7 @@ object NotifyLogic {
         sentKeys: Set<String> = emptySet(),
         seatSignIns: List<SeatReminderInput> = emptyList(),
         exams: List<ExamScheduleEntity> = emptyList(),
+        adjustments: List<TeachingAdjustmentEntry> = emptyList(),
     ): List<Reminder> {
         val until = now.plusDays(policy.horizonDays)
         val out = mutableListOf<Reminder>()
@@ -160,6 +184,9 @@ object NotifyLogic {
         }
         if (policy.examEnabled) {
             out += examReminders(exams, now, until, policy, sentKeys)
+        }
+        if (policy.adjustmentEnabled) {
+            out += adjustmentReminders(adjustments, now, until, sentKeys)
         }
 
         // 按时刻排序：便于人工核对，也让「最近的一条」一目了然
@@ -461,6 +488,97 @@ object NotifyLogic {
      * ⚠️ 提前量进键（与上课 / 座位提醒同一口径）：用户改了提前量，应按新策略再提醒一次。
      */
     fun examLeadWindow(leadMinutes: Long): String = "lead$leadMinutes"
+
+    // ------------------------------------------------------------ 教学安排调整（补课）提醒
+
+    /**
+     * 补课提醒的钟点 —— **补课日的前一天 20:00**。
+     *
+     * ⚠️ 写死钟点（而不是「提前 N 小时」）是刻意的：20:00 是睡前，用户看到能安排
+     * 第二天（带哪本书、要不要早起）。固定钟点还顺手省掉了「提前量进键」那套复杂度
+     * —— 键里只剩一个日期，学校改安排也不会被误判成「新提醒」而重复打扰。
+     */
+    private val ADJUSTMENT_AT: LocalTime = LocalTime.of(20, 0)
+
+    /**
+     * 补课日提醒：**只报 `MakeUp`，不报放假**（理由见 [ReminderKind.ADJUSTMENT]）。
+     *
+     * ⚠️ **过时不补发**（与考试同向、与座位签到反向）：补课当天才弹「按周四上课」
+     * 是句废话 —— 人都该出门了。用户需要的是**前一天晚上**知道这件事。
+     */
+    private fun adjustmentReminders(
+        adjustments: List<TeachingAdjustmentEntry>,
+        now: LocalDateTime,
+        until: LocalDateTime,
+        sentKeys: Set<String>,
+    ): List<Reminder> {
+        val out = mutableListOf<Reminder>()
+
+        adjustments.asSequence()
+            .filter { it.plan is DayPlan.MakeUp }
+            .forEach { entry ->
+                val target = (entry.plan as DayPlan.MakeUp).targetWeekday
+                val at = entry.date.minusDays(1).atTime(ADJUSTMENT_AT)
+                if (at.isBefore(now) || at.isAfter(until)) return@forEach
+
+                val key = adjustmentKey(entry)
+                if (key in sentKeys) return@forEach
+
+                val title = adjustmentTitleAtFireTime(entry.date, target, now) ?: return@forEach
+                out += Reminder(
+                    key = key,
+                    kind = ReminderKind.ADJUSTMENT,
+                    at = at,
+                    title = title,
+                    text = adjustmentText(entry.date, target),
+                    route = PageShowOnNav.Schedule.toPageData().value,
+                )
+            }
+        return out
+    }
+
+    /**
+     * 补课提醒的标题：**按到点时的实际日期重算**（排期时是「明天」，到点可能已跨天）。
+     *
+     * ⚠️ **补课日已过返回 null = 不发**。与上课提醒同一口径：标题是**相对时间**，
+     * 而 WorkManager 会被 Doze / 省电策略大幅延后（实机迟到过 2 小时 23 分钟）——
+     * 沿用排期时写死的「明天」就会说假话。
+     *
+     * ⚠️ 星期几一律写「周X」（`按周**四**课表上课`），与 [adjustmentText] 的正文、
+     * 课表列头角标 `CourseScheduleAdjustmentLogic.badgeText` 同一口径。
+     * 少写一个「周」字单看无害，但三处并列时就成了两种说法。
+     */
+    fun adjustmentTitleAtFireTime(
+        date: LocalDate,
+        targetWeekday: Int,
+        now: LocalDateTime,
+    ): String? {
+        val wd = weekdayCn(targetWeekday)
+        return when {
+            now.toLocalDate().isBefore(date) -> "明天按周${wd}课表上课"
+            now.toLocalDate() == date -> "今天按周${wd}课表上课"
+            else -> null
+        }
+    }
+
+    /**
+     * 通知正文，如 `10/10（周六）按周四课表上课`。
+     *
+     * ⚠️ 写**绝对日期**（与上课 / DDL / 考试同一原则）：通知可能晚到，
+     * 绝对日期永远是对的，相对时间会变成假话。
+     */
+    fun adjustmentText(date: LocalDate, targetWeekday: Int): String =
+        "${dateLabelCn(date)}按周${weekdayCn(targetWeekday)}课表上课"
+
+    /**
+     * 补课提醒的去重键：`adjustment:{日期}`。
+     *
+     * ⚠️ **刻意不带时刻、不带课名**：
+     * - 不带时刻 —— 学校微调补课日（罕见但可能）时键不变 ⇒ 不会重复打扰（考试键同款教训）
+     * - 不带课名/备注 —— 键里一旦有自由文本，`dateOfKey` 那种「按格式认」的解析就没法做
+     *   （备注带一个半角冒号就会整段错位，把该发的提醒静默丢掉）
+     */
+    fun adjustmentKey(entry: TeachingAdjustmentEntry): String = "adjustment:${entry.date}"
 
     /**
      * 从去重键里取回**日期段**。

@@ -272,3 +272,24 @@ object TeachingAdjustmentLogic {
         '五' to 5, '六' to 6, '日' to 7, '天' to 7,
     )
 }
+
+// ------------------------------------------------------------ 给人看的日期文案
+//
+// ⚠️ 这几个**只有这一份**（2026-10-09 抽出来）：课表角标（features:schedule）与
+// 补课提醒（features:notify）都要把「星期几 / 日期」写成人话，而**提醒模块不能用
+// 课表模块的那份**（依赖方向：notify 不依赖 schedule）。抄两遍的结果我们现在就能看到：
+// 一处写「周四」、另一处写「周4」，用户读到的就是两个东西 —— 而这类字符串
+// 单测各锁各的，谁也不会红。
+
+/** 星期几的中文单字（1=一 … 7=日）。越界返回 `?`（不崩、也不猜）。 */
+fun weekdayCn(weekday: Int): String = WEEKDAY_CN.getOrNull(weekday - 1) ?: "?"
+
+/**
+ * 「10/10（周六）」这类给人看的日期标签。
+ *
+ * 课表列头角标、提示条、补课提醒正文**共用同一格式** —— 改格式只改这里。
+ */
+fun dateLabelCn(date: LocalDate): String =
+    "%d/%d（周%s）".format(date.monthValue, date.dayOfMonth, weekdayCn(date.dayOfWeek.value))
+
+private val WEEKDAY_CN = listOf("一", "二", "三", "四", "五", "六", "日")

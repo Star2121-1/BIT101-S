@@ -8,6 +8,8 @@ import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.database.entity.ExamScheduleEntity
+import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.data.school.TeachingAdjustmentEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -979,5 +981,187 @@ class NotifyLogicTest {
             val key = NotifyLogic.courseKey(course(), monday, lead)
             assertEquals(lead, NotifyLogic.trailingLeadMinutes(key))
         }
+    }
+
+    // ------------------------------------------------------------ 课表调整（补课）提醒
+
+    /** 2026-10-10 是周六，那天按周四课表上课 —— 与学校《国庆教学安排调整》原文一致。 */
+    private val makeUpDate: LocalDate = LocalDate.of(2026, 10, 10)
+
+    private fun adjustment(
+        date: LocalDate = makeUpDate,
+        plan: DayPlan = DayPlan.MakeUp(targetWeekday = 4),
+        note: String = "按 10月10日（周六）课表上课",
+    ) = TeachingAdjustmentEntry(
+        date = date,
+        plan = plan,
+        note = note,
+        sourceTitle = "关于2026年国庆节教学安排调整的通知",
+        sourceUrl = "https://jxzx.bit.edu.cn/jxyx/kctz/x.htm",
+    )
+
+    /**
+     * 补课提醒排在**补课日前一天 20:00** —— 睡前能看到，够安排第二天。
+     *
+     * ⚠️ 固定钟点（而不是「提前 N 小时」）是有意的：20:00 是用户真正在刷手机的时刻。
+     */
+    @Test
+    fun `补课提醒排在补课日前一天 20 点`() {
+        val now = LocalDateTime.of(2026, 10, 8, 12, 0)
+        val list = NotifyLogic.plan(
+            courses = emptyList(),
+            ddls = emptyList(),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+            adjustments = listOf(adjustment()),
+        )
+
+        assertEquals(1, list.size)
+        val r = list.single()
+        assertEquals(ReminderKind.ADJUSTMENT, r.kind)
+        assertEquals(LocalDateTime.of(2026, 10, 9, 20, 0), r.at)
+        assertEquals("明天按周四课表上课", r.title)
+        // 正文写**绝对日期**：通知可能晚到，"相对时间"会变成假话
+        assertEquals("10/10（周六）按周四课表上课", r.text)
+        assertEquals(PageShowOnNav.Schedule.toPageData().value, r.route)
+    }
+
+    /**
+     * ⚠️ **只提醒补课、不提醒放假**（2026-10-09 与用户定）。
+     *
+     * 缺课是真实损失；放假只是「不用去」，而且假期连续（国庆 7 天会连发一周）——
+     * 那是打扰，不是提醒。
+     */
+    @Test
+    fun `放假不提醒`() {
+        val now = LocalDateTime.of(2026, 10, 1, 9, 0)
+        val list = NotifyLogic.plan(
+            courses = emptyList(),
+            ddls = emptyList(),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+            adjustments = listOf(
+                adjustment(date = LocalDate.of(2026, 10, 2), plan = DayPlan.NoClass, note = "补休·无教学安排"),
+                adjustment(date = LocalDate.of(2026, 10, 3), plan = DayPlan.NoClass, note = "国庆假期"),
+            ),
+        )
+        assertTrue(list.isEmpty())
+    }
+
+    /** 关掉开关就一条都不排（与其它提醒同一口径：设置要马上生效）。 */
+    @Test
+    fun `关掉补课提醒开关就不排`() {
+        val now = LocalDateTime.of(2026, 10, 8, 12, 0)
+        val list = NotifyLogic.plan(
+            courses = emptyList(),
+            ddls = emptyList(),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+            policy = NotifyPolicy(adjustmentEnabled = false),
+            adjustments = listOf(adjustment()),
+        )
+        assertTrue(list.isEmpty())
+    }
+
+    /**
+     * ⚠️ **过时不补发**（与考试同向、与座位签到反向）：补课当天才弹「按周四上课」
+     * 是句废话 —— 人都该出门了。用户需要的是**前一天晚上**知道。
+     */
+    @Test
+    fun `过了补课日不补发`() {
+        val date = LocalDate.of(2026, 10, 10)
+        // 前一天：说「明天」
+        assertEquals(
+            "明天按周四课表上课",
+            NotifyLogic.adjustmentTitleAtFireTime(date, 4, LocalDateTime.of(2026, 10, 9, 20, 0)),
+        )
+        // 当天：标题要说实话（WorkManager 被 Doze 拖过零点时就是这种情况）
+        assertEquals(
+            "今天按周四课表上课",
+            NotifyLogic.adjustmentTitleAtFireTime(date, 4, LocalDateTime.of(2026, 10, 10, 0, 30)),
+        )
+        // 已经过了那一天：别发
+        assertNull(NotifyLogic.adjustmentTitleAtFireTime(date, 4, LocalDateTime.of(2026, 10, 11, 9, 0)))
+    }
+
+    /**
+     * ⚠️ 排期时「明天」，到点可能已经跨天 —— 所以标题必须**按到点的实际日期重算**。
+     *
+     * 这正是「正文写绝对时间」那条原则**没覆盖到的地方：正文是绝对的，标题不是**。
+     */
+    @Test
+    fun `补课标题按到点时的实际日期重算`() {
+        val date = LocalDate.of(2026, 10, 10)
+        val at = LocalDateTime.of(2026, 10, 9, 20, 0)
+        val late = LocalDateTime.of(2026, 10, 10, 7, 30)   // Doze 拖了 11.5 小时
+
+        assertEquals("明天按周四课表上课", NotifyLogic.adjustmentTitleAtFireTime(date, 4, at))
+        assertEquals("今天按周四课表上课", NotifyLogic.adjustmentTitleAtFireTime(date, 4, late))
+    }
+
+    /**
+     * 键里**只有日期**：不带时刻（学校微调补课日时键不变 ⇒ 不重复打扰）、
+     * 不带课名/备注（自由文本带一个半角冒号就会让「按格式认日期」整段错位）。
+     */
+    @Test
+    fun `补课键只有日期且能往返取回`() {
+        val key = NotifyLogic.adjustmentKey(adjustment())
+        assertEquals("adjustment:2026-10-10", key)
+        assertEquals(makeUpDate, NotifyLogic.dateOfKey(key))
+
+        // 备注里带半角冒号也不该影响取日期（键里根本没有备注）
+        val weird = NotifyLogic.adjustmentKey(adjustment(note = "调休: 按周四上课"))
+        assertEquals(makeUpDate, NotifyLogic.dateOfKey(weird))
+    }
+
+    /** 已发过的键不再排（同一补课日只打扰一次）。 */
+    @Test
+    fun `已发过的补课提醒不再排`() {
+        val now = LocalDateTime.of(2026, 10, 8, 12, 0)
+        val list = NotifyLogic.plan(
+            courses = emptyList(),
+            ddls = emptyList(),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+            sentKeys = setOf(NotifyLogic.adjustmentKey(adjustment())),
+            adjustments = listOf(adjustment()),
+        )
+        assertTrue(list.isEmpty())
+    }
+
+    /** 超出排期窗口（7 天）的补课先不排，等下次重排时再进窗口。 */
+    @Test
+    fun `太远的补课这轮不排`() {
+        val now = LocalDateTime.of(2026, 10, 1, 12, 0)
+        val list = NotifyLogic.plan(
+            courses = emptyList(),
+            ddls = emptyList(),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+            adjustments = listOf(adjustment(date = LocalDate.of(2026, 10, 20))),
+        )
+        assertTrue(list.isEmpty())
+    }
+
+    /**
+     * ⚠️⚠️ **标题与正文里的「周X」必须是同一种写法**。
+     *
+     * 这是「两边该一致却各自有断言」的典型：标题曾写「明天按**四**课表上课」、
+     * 正文写「按**周四**课表上课」，两个断言各锁各的、谁也不会红 ——
+     * 但用户在同一条通知里读到的是两种说法（这正是写这条测试时抓出来的 bug）。
+     * 课表列头角标 `badgeText` 用的是同一份 [weekdayCn]，三处一起对齐。
+     */
+    @Test
+    fun `补课标题与正文的星期几写法一致`() {
+        val title = NotifyLogic
+            .adjustmentTitleAtFireTime(makeUpDate, 4, LocalDateTime.of(2026, 10, 9, 20, 0))!!
+        val text = NotifyLogic.adjustmentText(makeUpDate, 4)
+        assertTrue("标题里应出现「按周四」，实际：$title", title.contains("按周四"))
+        assertTrue("正文里应出现「按周四」，实际：$text", text.contains("按周四"))
     }
 }

@@ -83,8 +83,10 @@ internal fun SettingIndexPage(
         ),
         SettingItemData.IndexCard(
             title = "提醒设置",
-            // 提醒已经有 6 类，写死具体名字会立刻过时（这里曾经只写「上课与作业截止提醒」）
-            subTitle = "上课 / 作业 / 座位 / 考试 / 出分 / 网费",
+            // ⚠️ 别再往上加名字了。这条副标题已经因为「写死具体提醒」过时两次
+            // （先是「上课与作业截止提醒」，后是 6 类全列）。第 7 类（课表调整）加进来时
+            // 索性改成不枚举的写法 —— 枚举的价值只是扫一眼，改一次漏一次。
+            subTitle = "各类到点提醒的开关与提前时间",
             icon = Icons.Outlined.NotificationsNone,
             onClick = { navController.navigate("notify") },
         ),

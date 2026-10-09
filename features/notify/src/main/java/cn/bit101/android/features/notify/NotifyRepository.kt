@@ -5,6 +5,8 @@ import cn.bit101.android.config.setting.base.FALLBACK_TIME_TABLE
 import cn.bit101.android.config.setting.base.NotifySettings
 import cn.bit101.android.data.repo.base.CoursesRepo
 import cn.bit101.android.data.repo.base.DDLScheduleRepo
+import cn.bit101.android.data.repo.base.TeachingAdjustmentRepo
+import cn.bit101.android.data.school.DayPlan
 import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -31,6 +33,14 @@ class NotifyRepository @Inject constructor(
      * notify 模块的代码并不依赖座位模块 —— 依赖方向依然是 `seat → notify`。
      */
     private val seatReminderSource: SeatReminderSource,
+    /**
+     * 教学安排调整（放假 / 调休 / 补课）。
+     *
+     * ⚠️ 它的实现**静默降级**（取不到就退回缓存、再不行返回 null），所以这里可以放心直接调；
+     * 但返回 null 意味着「不知道有没有调整」—— [adjustmentRefreshed] 据此**选择不发**
+     * （宁可漏一次，也不要按可能过期的安排发错）。
+     */
+    private val teachingAdjustmentRepo: TeachingAdjustmentRepo,
 ) {
 
     /**
@@ -63,6 +73,13 @@ class NotifyRepository @Inject constructor(
         } else {
             emptyList()
         }
+        // 教学调整走它自己的缓存（12h TTL）+ 静默降级；取不到就按「没有调整」处理
+        // —— 课表页那条提示条同时也会缺失，两边口径一致
+        val adjustments = if (policy.adjustmentEnabled) {
+            runCatching { teachingAdjustmentRepo.load() }.getOrNull()?.entries.orEmpty()
+        } else {
+            emptyList()
+        }
 
         return NotifyLogic.plan(
             courses = courses,
@@ -74,6 +91,7 @@ class NotifyRepository @Inject constructor(
             sentKeys = NotifySentStore.read(),
             seatSignIns = seatSignIns,
             exams = exams,
+            adjustments = adjustments,
         )
     }
 
@@ -97,6 +115,7 @@ class NotifyRepository @Inject constructor(
             ReminderKind.DDL -> if (ddlStillValid(reminder, now)) reminder else null
             ReminderKind.SEAT_SIGN_IN -> seatRefreshed(reminder, now)
             ReminderKind.EXAM -> examRefreshed(reminder, now)
+            ReminderKind.ADJUSTMENT -> adjustmentRefreshed(reminder, now)
         }
     }
 
@@ -189,6 +208,30 @@ class NotifyRepository @Inject constructor(
         return reminder.copy(title = NotifyLogic.examTitle(left))
     }
 
+    /**
+     * 补课是否仍然成立：**那天仍是 `MakeUp`**，且**还没到那天**。
+     *
+     * ⚠️ 与考试同向：补课当天才弹「按周四上课」是句废话（人都该出门了）⇒ 过时不发。
+     * 标题也按**到点时的实际日期**重算（「明天」→「今天」）—— 排期到执行之间
+     * WorkManager 可能被 Doze 延后，沿用排期时的「明天」就会说假话。
+     *
+     * ⚠️ 取不到教学调整数据时**不发**（而不是按缓存发）：学校可能已经改了安排，
+     * 而我们手上没有权威信息。宁可漏一次，也不要让用户按错的课表出门。
+     * （这与课表页「取不到就静默降级」不是一回事：那边降级的是**展示**，
+     * 这边降级会变成**主动发出的一条错通知**。）
+     */
+    private suspend fun adjustmentRefreshed(reminder: Reminder, now: LocalDateTime): Reminder? {
+        val date = NotifyLogic.dateOfKey(reminder.key) ?: return null
+
+        val adjustments = runCatching { teachingAdjustmentRepo.load() }.getOrNull() ?: return null
+        val plan = adjustments.entries.firstOrNull { it.date == date }?.plan
+        if (plan !is DayPlan.MakeUp) return null
+
+        val title = NotifyLogic.adjustmentTitleAtFireTime(date, plan.targetWeekday, now)
+            ?: return null
+        return reminder.copy(title = title)
+    }
+
     /** 读设置组装策略；设置读取失败时**返回 null**（宁可这次不排，也不要按错误策略发）。 */
     private suspend fun policyOrNull(): NotifyPolicy? = runCatching {
         if (!notifySettings.enabled.get()) null
@@ -203,6 +246,7 @@ class NotifyRepository @Inject constructor(
             examEnabled = notifySettings.examEnabled.get(),
             examDayEnabled = notifySettings.examDayEnabled.get(),
             examLeadMinutes = notifySettings.examLeadMinutes.get(),
+            adjustmentEnabled = notifySettings.adjustmentEnabled.get(),
         )
     }.getOrNull()
 

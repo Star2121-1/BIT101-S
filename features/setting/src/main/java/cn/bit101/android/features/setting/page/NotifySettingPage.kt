@@ -34,9 +34,12 @@ import cn.bit101.android.features.setting.viewmodel.NotifySettingViewModel
 /**
  * 提醒设置页。
  *
- * 四组：总开关 / 上课提醒 / 作业截止提醒 / 座位签到提醒，
+ * 按提醒类别分组：总开关 / 上课 / 作业截止 / 座位签到 / 考试 / 课表调整 / 出分，
  * 外加一条**系统通知权限状态** —— 设置里全开着但系统权限被拒的话，
  * 什么都不会弹，必须在这里说清楚。
+ *
+ * ⚠️ 这里**不再逐条列举分组**（之前写「四组」就已经和实际对不上了）：
+ * 加了新提醒就看代码，别信注释里的数字。
  */
 @Composable
 private fun NotifySettingPageContent(
@@ -51,6 +54,7 @@ private fun NotifySettingPageContent(
     examEnabled: Boolean,
     examDayEnabled: Boolean,
     examLead: Long,
+    adjustmentEnabled: Boolean,
     scoreEnabled: Boolean,
     scoreStatus: String?,
     checking: Boolean,
@@ -64,6 +68,7 @@ private fun NotifySettingPageContent(
     onToggleSeat: (Boolean) -> Unit,
     onToggleExam: (Boolean) -> Unit,
     onToggleExamDay: (Boolean) -> Unit,
+    onToggleAdjustment: (Boolean) -> Unit,
     onToggleScore: (Boolean) -> Unit,
     onCheckScore: () -> Unit,
     onOpenLeadDialog: () -> Unit,
@@ -176,6 +181,20 @@ private fun NotifySettingPageContent(
         )
 
         SettingsGroup(
+            title = "课表调整提醒",
+            subTitle = "学校调休补课时，课表会「某一天按另一天的课表上课」——按平时的课表出门就会走错",
+            visible = enabled,
+            items = listOf(
+                SettingItemData.Switch(
+                    title = "补课提醒",
+                    subTitle = "补课日前一天 20:00 提醒。只提醒补课，不提醒放假",
+                    checked = adjustmentEnabled,
+                    onClick = onToggleAdjustment,
+                ),
+            ),
+        )
+
+        SettingsGroup(
             title = "出分提醒",
             subTitle = "有新课出分时通知你。⚠️ 通知里只有课名，不含分数",
             visible = enabled,
@@ -280,6 +299,7 @@ internal fun NotifySettingPage() {
     val examEnabled by vm.examEnabled.flow.collectAsState(initial = true)
     val examDayEnabled by vm.examDayEnabled.flow.collectAsState(initial = true)
     val examLead by vm.examLeadMinutes.flow.collectAsState(initial = 60L)
+    val adjustmentEnabled by vm.adjustmentEnabled.flow.collectAsState(initial = true)
     val scoreEnabled by vm.scoreEnabled.flow.collectAsState(initial = true)
     val scoreStatus by vm.scoreStatus.collectAsState()
     val checking by vm.checkingScore.collectAsState()
@@ -300,6 +320,7 @@ internal fun NotifySettingPage() {
         examEnabled = examEnabled,
         examDayEnabled = examDayEnabled,
         examLead = examLead,
+        adjustmentEnabled = adjustmentEnabled,
         scoreEnabled = scoreEnabled,
         scoreStatus = scoreStatus,
         checking = checking,
@@ -313,6 +334,7 @@ internal fun NotifySettingPage() {
         onToggleSeat = vm::setSeatEnabled,
         onToggleExam = vm::setExamEnabled,
         onToggleExamDay = vm::setExamDayEnabled,
+        onToggleAdjustment = vm::setAdjustmentEnabled,
         onToggleScore = { vm.setScoreEnabled(it); vm.refreshScoreStatus() },
         onCheckScore = vm::checkScoreNow,
         onOpenLeadDialog = { showLeadDialog = true },

@@ -85,6 +85,7 @@ internal class NotifySettingViewModel @Inject constructor(
     val examEnabled = notifySettings.examEnabled
     val examDayEnabled = notifySettings.examDayEnabled
     val examLeadMinutes = notifySettings.examLeadMinutes
+    val adjustmentEnabled = notifySettings.adjustmentEnabled
 
     /** 上课提前量的可选项（分钟）——不给自由输入，免得填出「提前 3 天」这种怪值。 */
     val leadOptions = listOf(5L, 10L, 15L, 20L, 30L)
@@ -128,6 +129,14 @@ internal class NotifySettingViewModel @Inject constructor(
     fun setExamDayEnabled(value: Boolean) = write { notifySettings.examDayEnabled.set(value) }
 
     fun setExamLeadMinutes(minutes: Long) = write { notifySettings.examLeadMinutes.set(minutes) }
+
+    /**
+     * 课表调整（补课）提醒开关。
+     *
+     * 没有配套的 `setAdjustmentLeadMinutes` —— 时机固定「补课日前一天 20:00」，
+     * 不提供提前量（见 [cn.bit101.android.config.setting.base.NotifySettings.adjustmentEnabled]）。
+     */
+    fun setAdjustmentEnabled(value: Boolean) = write { notifySettings.adjustmentEnabled.set(value) }
 
     /**
      * 写设置 + 立即重排。
