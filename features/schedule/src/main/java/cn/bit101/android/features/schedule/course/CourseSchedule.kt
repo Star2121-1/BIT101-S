@@ -358,9 +358,9 @@ private fun AdjustmentBanner(
     val affected = columns.mapNotNull { c -> c.plan?.let { c.date to it } }
     if (affected.isEmpty()) return
 
-    val text = affected.joinToString("；") { (date, plan) ->
-        CourseScheduleAdjustmentLogic.describe(date, plan)
-    }
+    // ⚠️ 走 summarize 而不是逐日 describe：连续放假要合并成一段
+    //    （「10/5~10/8 放假，当天的课不上」，而不是同一句话重复四遍）
+    val text = CourseScheduleAdjustmentLogic.summarize(affected).joinToString("；")
     val sourceUrl = affected.firstNotNullOfOrNull { (date, _) ->
         entries.firstOrNull { it.date == date }?.sourceUrl
     }

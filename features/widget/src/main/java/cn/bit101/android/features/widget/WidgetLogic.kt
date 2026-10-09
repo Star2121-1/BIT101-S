@@ -13,6 +13,8 @@ import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.ddl.DdlSource
+import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.data.school.weekdayCn
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -197,6 +199,8 @@ data class DayChoice(
     val date: LocalDate,
     val isTomorrow: Boolean,
     val blocks: List<DayBlock>,
+    /** 那天的教学安排覆盖；`null` = 正常，按星期几的循环模板走。 */
+    val plan: DayPlan? = null,
 )
 
 /**
@@ -298,14 +302,27 @@ object WidgetLogic {
         date: LocalDate,
         firstDay: LocalDate?,
         table: TimeTable,
+        plan: DayPlan?,
     ): List<DayBlock> {
         val week = weekOf(firstDay, date)
-        val weekday = date.dayOfWeek.value
-        val thatDay = courses
-            .filter { it.weekday == weekday }
-            .filter { week <= 0 || weeksContains(it.weeks, week) }
-            .sortedBy { it.start_section }
-        return buildDayBlocks(thatDay, table)
+
+        // ⚠️ 教学安排调整（放假 / 补课）**必须在这里生效**，否则组件与 App 内课表页
+        //    说的是两回事：10/10（周六）按周四课表上课，组件却显示「今天没课」——
+        //    用户会拿它当出门依据，这比不显示更糟。
+        val thatDay = when (plan) {
+            // 放假：那天的课不作数 ⇒ 交给 buildDayBlocks 给出「全天空闲」，
+            //      上面那行说明会写清是「放假」而不是「本来就没事」
+            DayPlan.NoClass -> emptyList()
+            // 补课：装的是**被指定那天**的课表，不是这天自己的
+            is DayPlan.MakeUp -> courses.filter { it.weekday == plan.targetWeekday }
+            null -> courses.filter { it.weekday == date.dayOfWeek.value }
+        }
+
+        return buildDayBlocks(
+            thatDay.filter { week <= 0 || weeksContains(it.weeks, week) }
+                .sortedBy { it.start_section },
+            table,
+        )
     }
 
     /** 「现在」是否已经晚于[blocks]里最后一个区块的结束时刻。 */
@@ -329,14 +346,38 @@ object WidgetLogic {
         now: LocalTime?,
         firstDay: LocalDate?,
         table: TimeTable = FALLBACK_TIME_TABLE,
+        planOf: (LocalDate) -> DayPlan? = { null },
     ): DayChoice {
-        val todayBlocks = blocksOf(courses, today, firstDay, table)
+        val todayBlocks = blocksOf(courses, today, firstDay, table, planOf(today))
         val tomorrow = today.plusDays(1)
 
         if (now != null && isAfterAll(todayBlocks, now, table)) {
-            return DayChoice(tomorrow, isTomorrow = true, blocksOf(courses, tomorrow, firstDay, table))
+            return DayChoice(
+                date = tomorrow,
+                isTomorrow = true,
+                blocks = blocksOf(courses, tomorrow, firstDay, table, planOf(tomorrow)),
+                plan = planOf(tomorrow),
+            )
         }
-        return DayChoice(today, isTomorrow = false, todayBlocks)
+        return DayChoice(
+            date = today,
+            isTomorrow = false,
+            blocks = todayBlocks,
+            plan = planOf(today),
+        )
+    }
+
+    /**
+     * 教学安排调整在组件上的**一行说明**；没覆盖返回 null（那就不占位置）。
+     *
+     * ⚠️ 措辞与课表页、补课提醒**同向**（放假 / 按周X课表上课），但字符串是各自生成的：
+     * 组件要的是**短句**（页头一行 + 页尾后缀），课表页提示条要的是带日期的完整句。
+     * 同一个「周X」必须走 [weekdayCn] —— 那是全 App 唯一一份中文星期。
+     */
+    fun adjustmentNote(plan: DayPlan?): String? = when (plan) {
+        DayPlan.NoClass -> "放假"
+        is DayPlan.MakeUp -> "按周${weekdayCn(plan.targetWeekday)}课表上课"
+        null -> null
     }
 
     /**
@@ -415,6 +456,12 @@ object WidgetLogic {
         seatLoggedIn: Boolean = true,
         activities: List<EclassActivityLogic.EclassActivity> = emptyList(),
         eclassLoggedIn: Boolean = true,
+        /**
+         * 教学安排调整（放假 / 补课）。`null` = 这天正常。
+         *
+         * ⚠️ 由调用方给 —— [WidgetLogic] 不该知道它是从哪来的（本地缓存 / 网络 / 单测造的）。
+         */
+        planOf: (LocalDate) -> DayPlan? = { null },
     ): WidgetData = WidgetData(
         pages = listOf(
             coursePage(
@@ -424,6 +471,7 @@ object WidgetLogic {
                 firstDay = firstDay,
                 timeTable = timeTable,
                 loggedIn = bit101LoggedIn,
+                planOf = planOf,
             ),
             // ⚠️ DDL 页**不看登录态**（见 ddlPage 的说明）：它的数据来自本地库
             ddlPage(ddls, now),
@@ -513,6 +561,7 @@ object WidgetLogic {
         firstDay: LocalDate?,
         timeTable: TimeTable = FALLBACK_TIME_TABLE,
         loggedIn: Boolean = true,
+        planOf: (LocalDate) -> DayPlan? = { null },
     ): WidgetPage {
         if (!loggedIn) {
             return WidgetPage(
@@ -523,7 +572,7 @@ object WidgetLogic {
             )
         }
 
-        val choice = pickDay(courses, today, now?.toLocalTime(), firstDay, timeTable)
+        val choice = pickDay(courses, today, now?.toLocalTime(), firstDay, timeTable, planOf)
 
         // 高亮只标「今天」：显示明天时，没有哪一节是"正在上/马上上"
         val focus = if (!choice.isTomorrow && now != null) {
@@ -552,18 +601,27 @@ object WidgetLogic {
             }
         }
 
+        // 调休说明（放假 / 按周X课表）：**同时**放在列表第一行和页尾后缀。
+        // 页尾本来就写「今天 · 10月10日 周六」，「按周四课表」接在后面最顺；
+        // 但页尾字小，所以列表顶部再给一行 —— 两处**同一个 note**，不会各说各的。
+        val note = adjustmentNote(choice.plan)
+        val lined = if (note == null) items else listOf(headerLine(note)) + items
+
+        val footer = dayFooter(today, choice.date, weekOf(firstDay, choice.date))
+
         return WidgetPage(
             kind = PageKind.COURSE,
             title = PageKind.COURSE.label,
-            items = items,
-            emptyText = "今日无课",
-            footer = dayFooter(today, choice.date, weekOf(firstDay, choice.date)),
+            items = lined,
+            emptyText = if (choice.plan == DayPlan.NoClass) "放假" else "今日无课",
+            footer = if (note == null) footer else "$footer · $note",
+            // 顶部多了一行，滚动位置要跟着下移一位
             scrollTo = scrollIndexOf(
                 blocks = choice.blocks,
                 now = now?.toLocalTime(),
                 table = timeTable,
                 isTomorrow = choice.isTomorrow,
-            ),
+            ) + if (note == null) 0 else 1,
         )
     }
 

@@ -7,6 +7,7 @@ import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.eclass.EclassActivityLogic
+import cn.bit101.android.data.school.DayPlan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -932,5 +933,97 @@ class WidgetLogicTest {
     @Test
     fun `动态页没有内容时空态是暂无动态`() {
         assertEquals("暂无动态", WidgetLogic.activityPage(emptyList(), now).emptyText)
+    }
+
+    // ------------------------------------------------------------ 教学安排调整（放假 / 补课）
+
+    /** 2026-10-10 是周六，学校要求按**周四**课表上课（真实那次调休）。 */
+    private val makeUpSaturday: LocalDate = LocalDate.of(2026, 10, 10)
+
+    /**
+     * ⚠️ **补课日必须装「被指定那天」的课表**（用户 2026-10-09 提出「组件和调休同步」）。
+     *
+     * 以前组件只按「当天星期几」取课 ⇒ 10/10（周六）显示「今日无课」，
+     * 而实际要按周四的课去上。用户拿组件当出门依据 —— **这比不显示更糟**。
+     */
+    @Test
+    fun `补课日装的是被指定那天的课表`() {
+        val courses = listOf(
+            course(name = "操作系统", weekday = 4, start = 3, end = 4),       // 周四的课
+            course(name = "周六自己的课", weekday = 6, start = 5, end = 6),   // 周六本来没这门
+        )
+        val page = WidgetLogic.coursePage(
+            courses = courses,
+            today = makeUpSaturday,
+            now = null,
+            firstDay = null,          // 周次未知 ⇒ 不按周过滤，只看星期几
+            planOf = { date -> if (date == makeUpSaturday) DayPlan.MakeUp(4) else null },
+        )
+        assertEquals(listOf("操作系统"), page.courses().map { it.main })
+    }
+
+    /**
+     * 补课的提示**同时**出现在列表首行与页尾后缀。
+     *
+     * ⚠️ 两处用的是**同一个 note**（`adjustmentNote`），不会各说各的 ——
+     * 页尾字小，所以列表顶部再给一行。
+     */
+    @Test
+    fun `补课日首行与页尾都写明按周几的课表`() {
+        val page = WidgetLogic.coursePage(
+            courses = listOf(course(name = "操作系统", weekday = 4, start = 3, end = 4)),
+            today = makeUpSaturday,
+            now = null,
+            firstDay = null,
+            planOf = { date -> if (date == makeUpSaturday) DayPlan.MakeUp(4) else null },
+        )
+        assertEquals("按周四课表上课", page.items.first().main)
+        assertTrue("页尾也要写清楚：${page.footer}", page.footer!!.endsWith(" · 按周四课表上课"))
+    }
+
+    /** 放假：那天的课**不作数** ⇒ 没有课程行，并且写明是「放假」而不是「本来就没事」。 */
+    @Test
+    fun `放假的日子不显示那天的课`() {
+        val monday = LocalDate.of(2026, 10, 5)
+        val page = WidgetLogic.coursePage(
+            courses = listOf(course(name = "操作系统", weekday = 1, start = 3, end = 4)),
+            today = monday,
+            now = null,
+            firstDay = null,
+            planOf = { date -> if (date == monday) DayPlan.NoClass else null },
+        )
+        assertTrue("放假不该有课程行：${page.courses()}", page.courses().isEmpty())
+        assertEquals("放假", page.items.first().main)
+        assertTrue("页尾也要写清楚：${page.footer}", page.footer!!.endsWith(" · 放假"))
+        assertEquals("放假", page.emptyText)
+    }
+
+    /** 没覆盖时一切照旧：**不**多出行也**不**改页尾（默认 planOf 就是没有调整）。 */
+    @Test
+    fun `没有调休时组件页照旧`() {
+        val page = WidgetLogic.coursePage(
+            courses = listOf(course(name = "操作系统", weekday = 6, start = 3, end = 4)),
+            today = makeUpSaturday,
+            now = null,
+            firstDay = null,
+        )
+        assertEquals(listOf("操作系统"), page.courses().map { it.main })
+        assertFalse("没有调整时不该多出说明行", page.items.any { it.header })
+        assertFalse("页尾不该有调休后缀：${page.footer}", page.footer!!.contains("放假"))
+    }
+
+    /** 晚上自动切到明天时，明天是补课日也要生效（否则第二天早起看到的是错的）。 */
+    @Test
+    fun `切到明天时调休照样生效`() {
+        val friday = LocalDate.of(2026, 10, 9)   // 今晚过了最后一节 → 切到 10/10（补课日）
+        val page = WidgetLogic.coursePage(
+            courses = listOf(course(name = "操作系统", weekday = 4, start = 3, end = 4)),
+            today = friday,
+            now = friday.atTime(22, 0),
+            firstDay = null,
+            planOf = { date -> if (date == makeUpSaturday) DayPlan.MakeUp(4) else null },
+        )
+        assertTrue("应该已经切到明天：${page.footer}", page.footer!!.startsWith("明天"))
+        assertEquals(listOf("操作系统"), page.courses().map { it.main })
     }
 }

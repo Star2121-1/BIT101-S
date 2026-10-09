@@ -4,6 +4,7 @@ import cn.bit101.android.data.school.DayPlan
 import cn.bit101.android.data.school.dateLabelCn
 import cn.bit101.android.data.school.weekdayCn
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 
 /**
  * 一周里的一列（一天）：那天是几号、要显示哪些日程、有没有教学安排覆盖。
@@ -92,8 +93,60 @@ internal object CourseScheduleAdjustmentLogic {
      * 补课提醒（features:notify）用的是**同一份**，**别在这里就地拼字符串**
      * （「周四」vs「周4」这种漂移，两边的单测各锁各的，谁也不会红）。
      */
-    fun describe(date: LocalDate, plan: DayPlan): String = when (plan) {
-        DayPlan.NoClass -> "${dateLabelCn(date)}放假，当天的课不上"
-        is DayPlan.MakeUp -> "${dateLabelCn(date)}按周${weekdayCn(plan.targetWeekday)}课表上课"
+    fun describe(date: LocalDate, plan: DayPlan): String = describe(date, date, plan)
+
+    /**
+     * 一段（可能跨好几天）的说明。
+     *
+     * ⚠️ **连续放假必须合并成一段**（用户 2026-10-09 提出）：国庆那种连着放 8 天，
+     * 逐日列出来就是「10/5（周一）放假，当天的课不上；10/6（周二）放假…」**同一句话重复八遍**，
+     * 占满整行反而读不进去。合并后是「10/5~10/8 放假，当天的课不上」。
+     *
+     * ⚠️ **只有一天时仍然带星期几**：那天就一条，多写「（周六）」不占地方还有用；
+     * 成段之后带星期几会变成「10/5（周一）~10/8（周四）」这种又长又没必要的写法。
+     */
+    fun describe(from: LocalDate, to: LocalDate, plan: DayPlan): String {
+        // ⚠️ 区间后面补一个空格：`10/5~10/8 放假` —— 数字直接贴汉字会糊成一坨
+        //    （本项目一贯的做法，如「提前 15 分钟」「10 分钟后上课」）。
+        //    单天结尾是全角括号「（周六）」，本来就与汉字贴着，**不**加空格。
+        val span = if (from == to) dateLabelCn(from) else "${shortDate(from)}~${shortDate(to)} "
+        return when (plan) {
+            DayPlan.NoClass -> "${span}放假，当天的课不上"
+            is DayPlan.MakeUp -> "${span}按周${weekdayCn(plan.targetWeekday)}课表上课"
+        }
+    }
+
+    /** 「10/5」这种只写月日的短日期（**只用于区间**，带星期几会太长）。 */
+    private fun shortDate(date: LocalDate): String = "${date.monthValue}/${date.dayOfMonth}"
+
+    /**
+     * 把「当周受影响的那些天」压成**几段**人话；连续的同种安排合并成一段。
+     *
+     * ⚠️ 能合并必须**同时**满足两条（缺一不可）：
+     * 1. **日期连续**（正好差 1 天）—— 隔着一天的假不是一段假
+     * 2. **同一种安排** —— 放假后面接补课不能合并；两天都补课、
+     *    但**补的不是同一个星期几**，也不能合并（那是两件不同的事）
+     */
+    fun summarize(affected: List<Pair<LocalDate, DayPlan>>): List<String> {
+        if (affected.isEmpty()) return emptyList()
+        val sorted = affected.sortedBy { it.first }
+
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < sorted.size) {
+            val (from, plan) = sorted[i]
+            var to = from
+            var j = i + 1
+            while (j < sorted.size) {
+                val (next, nextPlan) = sorted[j]
+                if (ChronoUnit.DAYS.between(to, next) != 1L) break
+                if (nextPlan != plan) break
+                to = next
+                j++
+            }
+            out += describe(from, to, plan)
+            i = j
+        }
+        return out
     }
 }

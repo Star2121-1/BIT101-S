@@ -8,10 +8,15 @@ import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.repo.base.CoursesRepo
 import cn.bit101.android.data.repo.base.DDLScheduleRepo
 import cn.bit101.android.data.repo.base.EclassRepo
+import cn.bit101.android.data.repo.base.TeachingAdjustmentRepo
+import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.data.school.TeachingAdjustmentEntry
+import cn.bit101.android.data.school.TeachingAdjustmentStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
@@ -42,6 +47,13 @@ class WidgetRepository @Inject constructor(
     private val seatLoginStatus: SeatLoginStatus,
     /** 延河课堂的动态（第四页）。未登录时取不到，会走该页的登录引导。 */
     private val eclassRepo: EclassRepo,
+    /**
+     * 教学安排调整（放假 / 补课）。
+     *
+     * ⚠️ **只在显式刷新时用**（见 [adjustmentEntries]）—— 组件重绘不打网络，
+     * 平时走 [TeachingAdjustmentStore] 的本机缓存。
+     */
+    private val teachingAdjustmentRepo: TeachingAdjustmentRepo,
 ) {
 
     /** 动态页的数据：列表 + 「是不是登录着」（前者非空时后者必然为真）。 */
@@ -96,6 +108,13 @@ class WidgetRepository @Inject constructor(
 
         val eclass = eclassData(fresh = forceEclass)
 
+        // 教学安排调整：放假 ⇒ 那天没课；补课 ⇒ 装的是被指定那天的课表。
+        // ⚠️ 组件与 App 内课表页必须说同一句话 —— 否则用户拿组件当出门依据会缺课。
+        val adjustments = adjustmentEntries(fresh = forceEclass)
+        val planOf: (LocalDate) -> DayPlan? = { date ->
+            adjustments.firstOrNull { it.date == date }?.plan
+        }
+
         // 登录态（与 App 内对应页面的门禁同一来源）。
         // ⚠️ 读取失败时按「已登录」处理（fail-open）：显示可能过期的数据，
         //    也好过把一个明明登录着的用户挡在「未登录」提示外面。
@@ -115,7 +134,25 @@ class WidgetRepository @Inject constructor(
             seatLoggedIn = seatLoggedIn,
             activities = eclass.activities,
             eclassLoggedIn = eclass.loggedIn,
+            planOf = planOf,
         )
+    }
+
+    /**
+     * 教学安排调整（放假 / 补课）。
+     *
+     * ⚠️ **组件重绘不打网络**（与「动态」同一原则）：非显式刷新时只读
+     * [TeachingAdjustmentStore] 的本机缓存 —— 那份缓存和课表页那条提示条是同源的，
+     * 由 App 启动 / 课表页 / 提醒排期顺带刷新。
+     * 只有**真的要最新**（用户点刷新键、周期任务）才走 [TeachingAdjustmentRepo]，
+     * 取不到就退回缓存（宁可略旧，也不要组件突然「不知道有调休」）。
+     */
+    private suspend fun adjustmentEntries(fresh: Boolean): List<TeachingAdjustmentEntry> {
+        if (!fresh) return TeachingAdjustmentStore.read(context)?.entries.orEmpty()
+
+        return runCatching { teachingAdjustmentRepo.load(forceRefresh = true) }
+            .getOrNull()?.entries
+            ?: TeachingAdjustmentStore.read(context)?.entries.orEmpty()
     }
 
     /**

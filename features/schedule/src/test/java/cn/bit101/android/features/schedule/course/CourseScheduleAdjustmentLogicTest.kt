@@ -180,4 +180,79 @@ class CourseScheduleAdjustmentLogicTest {
             CourseScheduleAdjustmentLogic.describe(LocalDate.of(2026, 10, 1), DayPlan.NoClass),
         )
     }
+
+    // ------------------------------------------------------------ 提示条：合并成段
+
+    private fun days(range: IntRange, plan: DayPlan): List<Pair<LocalDate, DayPlan>> =
+        range.map { LocalDate.of(2026, 10, it) to plan }
+
+    /**
+     * ⚠️ **连续放假必须合并成一段**（用户 2026-10-09 提出「把放假的放在一起说」）。
+     *
+     * 真实场景就是国庆 10/5~10/8 连着放 4 天。逐日列出来是**同一句话重复四遍**，
+     * 占满整行反而读不进去 —— 提示条只有一行高。
+     */
+    @Test
+    fun `连续放假合并成一段`() {
+        assertEquals(
+            listOf("10/5~10/8 放假，当天的课不上"),
+            CourseScheduleAdjustmentLogic.summarize(days(5..8, DayPlan.NoClass)),
+        )
+    }
+
+    /** 真实那次调休的完整形态：放假成一段、补课单独一条（补课带星期几）。 */
+    @Test
+    fun `放假成段，补课单独一条`() {
+        val affected = days(5..8, DayPlan.NoClass) +
+            (LocalDate.of(2026, 10, 10) to DayPlan.MakeUp(4))
+
+        assertEquals(
+            listOf("10/5~10/8 放假，当天的课不上", "10/10（周六）按周四课表上课"),
+            CourseScheduleAdjustmentLogic.summarize(affected),
+        )
+    }
+
+    /** 隔着一天的假是**两段**假，不能合并（合并了就等于说中间那天也放假）。 */
+    @Test
+    fun `隔开的放假不合并`() {
+        val affected: List<Pair<LocalDate, DayPlan>> = listOf(
+            LocalDate.of(2026, 10, 5) to DayPlan.NoClass,
+            LocalDate.of(2026, 10, 7) to DayPlan.NoClass,
+        )
+        assertEquals(
+            listOf("10/5（周一）放假，当天的课不上", "10/7（周三）放假，当天的课不上"),
+            CourseScheduleAdjustmentLogic.summarize(affected),
+        )
+    }
+
+    /**
+     * 放假后面直接接补课也**不能**合并 —— 安排不同，合并了会把「要补课」说没了。
+     *
+     * 同理（虽然罕见）：两天都补课但补的不是同一个星期几，也是两条。
+     */
+    @Test
+    fun `放假与补课不合并`() {
+        val affected: List<Pair<LocalDate, DayPlan>> = listOf(
+            LocalDate.of(2026, 10, 5) to DayPlan.NoClass,
+            LocalDate.of(2026, 10, 6) to DayPlan.MakeUp(4),
+        )
+        assertEquals(
+            listOf("10/5（周一）放假，当天的课不上", "10/6（周二）按周四课表上课"),
+            CourseScheduleAdjustmentLogic.summarize(affected),
+        )
+    }
+
+    /** 调用方给的顺序来自列的顺序，理论上可能不是日期序 ⇒ 自己排。 */
+    @Test
+    fun `乱序输入也能合并`() {
+        val affected: List<Pair<LocalDate, DayPlan>> = listOf(
+            LocalDate.of(2026, 10, 7) to DayPlan.NoClass,
+            LocalDate.of(2026, 10, 5) to DayPlan.NoClass,
+            LocalDate.of(2026, 10, 6) to DayPlan.NoClass,
+        )
+        assertEquals(
+            listOf("10/5~10/7 放假，当天的课不上"),
+            CourseScheduleAdjustmentLogic.summarize(affected),
+        )
+    }
 }

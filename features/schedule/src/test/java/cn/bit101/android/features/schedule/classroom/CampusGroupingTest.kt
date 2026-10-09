@@ -83,9 +83,34 @@ class CampusGroupingTest {
 
         assertEquals(2, groups.size)
         assertEquals(CampusGrouping.UNKNOWN_CODE, groups[0].campusCode)
-        assertEquals(CampusGrouping.UNKNOWN_CODE, groups[0].campusName)
+        // ⚠️ 分组键那串下划线只用于分组，**不能直接显示** —— 显示的是「未归类」
+        assertEquals(CampusGrouping.UNKNOWN_NAME, groups[0].campusName)
         assertEquals("沙河校区", groups[1].campusCode)
     }
+
+    /**
+     * ⚠️⚠️ **实机发现的 bug**（2026-10-09 空教室页真机走查）：
+     * 页面上出现过一个**名字叫 `null` 的校区**。
+     *
+     * 根因：学校接口把「没有校区」原样返回成**字符串 `"null"`** ——
+     * 它既不是空串也不 blank，`ifBlank` 兜不住，于是被当成真校区名显示了出来。
+     */
+    @Test
+    fun `校区名字面量是 null 字符串时当作没有`() {
+        val weird = building("某栋楼", "A", "null", "null")
+
+        val groups = CampusGrouping.group(listOf(liangxiang1, weird))
+
+        assertEquals(2, groups.size)
+        val unknown = groups.first { it.buildingNames() == listOf("某栋楼") }
+        assertEquals(CampusGrouping.UNKNOWN_NAME, unknown.campusName)
+        assertTrue(
+            "不该出现字面量 null：${groups.map { it.campusName }}",
+            groups.none { it.campusName.contains("null", ignoreCase = true) },
+        )
+    }
+
+    private fun CampusGroup.buildingNames() = buildings.map { it.buildingName }
 
     @Test
     fun `空输入得到空分组`() {
