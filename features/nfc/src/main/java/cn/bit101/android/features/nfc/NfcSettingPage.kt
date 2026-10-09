@@ -100,6 +100,20 @@ fun NfcSettingPage(
     // 「我的校园卡」名片：贴一次卡之后留在设置页顶部，下次打开直接看，不用再贴。
     var savedCard by remember { mutableStateOf(SavedCardStore.read(context)) }
 
+    // 「贴卡即用」：开关默认关，目标页默认跟着 `NfcTapLogic.DEFAULT_ROUTE` 走。
+    var tapEnabled by remember { mutableStateOf(NfcTap.isEnabled(context)) }
+    var tapRoute by remember { mutableStateOf(NfcTap.targetRoute(context)) }
+
+    // ⚠️ 本页一进来就要**把常驻的贴卡监听让出去**。
+    // 一个 Activity 上两套 reader mode 会互相顶掉（见 NfcTapWatcher 的说明），
+    // 结果是从这一页退出去之后贴卡就不灵了 —— 那是极难查的一类问题。
+    // 声明在控制器那个 DisposableEffect **之前**：进入时先让位、再开自己的读卡，
+    // 退出时反过来（Compose 按声明的反序 dispose），顺序正好对称。
+    DisposableEffect(Unit) {
+        NfcTap.setPageActive(true)
+        onDispose { NfcTap.setPageActive(false) }
+    }
+
     DisposableEffect(activity, capability) {
         if (activity == null || capability == NfcCapability.Unsupported) {
             onDispose { }
@@ -183,6 +197,21 @@ fun NfcSettingPage(
             onForget = {
                 SavedCardStore.clear(context)
                 savedCard = null
+            },
+        )
+
+        TapSection(
+            capability = capability,
+            hasCard = savedCard?.uid?.isNotBlank() == true,
+            enabled = tapEnabled,
+            route = tapRoute,
+            onEnabledChange = {
+                tapEnabled = it
+                NfcTap.setEnabled(context, it)
+            },
+            onRouteChange = {
+                tapRoute = it
+                NfcTap.setTargetRoute(context, it)
             },
         )
 
@@ -322,6 +351,92 @@ private fun MyCardSection(
 
 private fun timeText(millis: Long): String =
     SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(millis))
+
+// ---------------------------------------------------------------- 贴卡即用
+
+/**
+ * 「贴卡即用」—— App 在前台时贴自己的校园卡，直接跳到常用那一页。
+ *
+ * ## ⚠️ 开关默认关，而且开关在「读过卡」之前是灰的
+ *
+ * 这个功能要**常驻监听 NFC**，是要花用户的电的；不经同意默认打开是不对的。
+ * 同样地，没读过卡时它没有任何可比对的卡号，打开也只会「贴了没反应」——
+ * 与其让用户对着一个开了却不动的东西纳闷，不如把开关置灰并说清先做什么。
+ */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun TapSection(
+    capability: NfcCapability,
+    hasCard: Boolean,
+    enabled: Boolean,
+    route: String?,
+    onEnabledChange: (Boolean) -> Unit,
+    onRouteChange: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionTitle("贴卡即用")
+
+        Text(
+            "App 在前台时，把自己的校园卡贴在手机背面，就直接跳到你要的那一页。" +
+                "不需要买 NFC 贴纸，也不会往卡里写任何东西（校园卡带 Classic 扇区，写它会弄坏卡）。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = enabled,
+                onCheckedChange = onEnabledChange,
+                enabled = capability == NfcCapability.Enabled && hasCard,
+            )
+            Column(Modifier.weight(1f)) {
+                Text("开启贴卡即用")
+                Text(
+                    "默认关。开着的时候 App 一进前台就常驻监听 NFC，会比平时多耗一点电 —— " +
+                        "所以由你自己决定。只在 App 在前台时生效，退到后台就停。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
+        // 没认过卡就没有可比对的东西 —— 明说下一步做什么，别只说「不可用」。
+        if (!hasCard) {
+            Text(
+                "还认不出你的卡。先到下面「校园卡读取」里贴一次卡，把你自己那张认下来" +
+                    "（会记在本机），这里才有得比对。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        Text("贴卡后打开：", style = MaterialTheme.typography.bodySmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NdefShortcutLogic.targets().forEach { target ->
+                FilterChip(
+                    selected = route == target.route,
+                    onClick = { onRouteChange(target.route) },
+                    label = { Text(target.label) },
+                )
+            }
+        }
+        Text(
+            if (route == null) "还没选，贴卡会默认落到课表页。"
+            else "现在选的是「${labelOf(route)}」。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        Text(
+            "没登录时会先落到登录页 —— 那一页自己会用本机存着的账号密码静默登一次：" +
+                "有凭据就直接进去，没有才要你输。贴卡本身不跳过任何验证。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            "⚠️ 卡号是公开值，任何一台带 NFC 的手机都能读出来，也能被复制成一张同号的卡。" +
+                "所以这是图方便，不是加安全 —— 介意的话就别开。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}
 
 // ------------------------------------------------------------ 校园卡读取
 

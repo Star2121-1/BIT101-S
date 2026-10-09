@@ -3,22 +3,22 @@ package cn.bit101.android.features.nfc
 import android.content.Intent
 import android.nfc.NdefMessage
 import android.nfc.NfcAdapter
+import android.nfc.Tag
+import android.nfc.tech.Ndef
 import cn.bit101.android.features.nfc.logic.NdefShortcutLogic
 
 /**
- * 「碰一下贴纸 → 打开 App 并跳到某个页面」这条链路的**入口**。
+ * 「碰一下 → 打开 App 并跳到某个页面」这条链路的**入口**。两条来路都在这里收口：
  *
- * ## 它补的是哪一段
+ * 1. **贴纸**：App 不在前台时，系统按 manifest 里的 `NDEF_DISCOVERED` 唤起 Activity，
+ *    目标写在 NDEF 记录里（`bit101://nfc/shortcut?to=…`），从 Intent 里取。
+ * 2. **同一张贴纸、但 App 正在前台**：这时 reader mode（见 [NfcTapWatcher]）接管了
+ *    标签派发，系统**不会**再走 Intent 那条路 —— 所以得自己从贴着的标签里读 NDEF。
  *
- * 贴纸那条路原来只做完了前半截 —— `NfcController` 能把载荷**写进**贴纸，
- * 但写完之后碰它，App 并不会被唤起：
- * `AndroidManifest.xml` 里没有 `NDEF_DISCOVERED`，[MainActivity] 也不认 NDEF。
- * 于是「能写不能读」，贴纸等于白贴。
+ * ⚠️ 第 2 条不是锦上添花：漏了它，「贴卡即用」一开，贴纸快捷入口在 App 前台时
+ * 就会**整条失效**（贴了没反应，且看不出原因）。两个功能必须能共存。
  *
- * 这个类把**后半截**收在一处：给一个 Intent，还你一个目标 route。
- * 调用方（`MainActivity.handleGoto`）只多三行，不需要知道 NDEF 长什么样。
- *
- * ## ⚠️ 为什么解析放在这里、不放在 MainActivity
+ * ## 为什么解析放在这里、不放在 MainActivity
  *
  * `NdefShortcutLogic` 是 `internal`（只认同一个 Gradle 模块），
  * 而 `MainActivity` 在 `:features` —— 跨模块拿不到。
@@ -44,18 +44,37 @@ object NfcShortcut {
     fun routeOf(intent: Intent?): String? {
         val raw = intent?.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES)
             ?: return null
+        return raw.filterIsInstance<NdefMessage>().firstNotNullOfOrNull(::routeOfMessage)
+    }
 
-        for (item in raw) {
-            val message = item as? NdefMessage ?: continue
-            for (record in message.records) {
-                // ⚠️ 用 toUri() 而不是直接 String(payload)：
-                // NdefRecord.createUri() 写进去的 payload **第一个字节是 URI 前缀码**，
-                // 后面才是真正的 URI 字节。直接按字符串解会多出一个乱码前缀字符，
-                // 于是永远匹配不上 —— 这种错在没机器的时候根本查不出来。
-                val uri = record.toUri()?.toString() ?: continue
-                val route = NdefShortcutLogic.decode(uri)
-                if (route != null) return route
-            }
+    /**
+     * 从一张**正贴在手机上**的标签里解出目标 route（reader mode 那条路用）。
+     *
+     * 不是 NDEF 标签（`Ndef.get` 返回 `null`）就立刻返回 —— 校园卡就属于这种，
+     * 它只有 `NdefFormatable` 而没有 `Ndef`，所以这一步对它几乎是零成本，
+     * 不会因为「先试着读一下贴纸」而拖慢读卡。
+     */
+    internal fun routeOfTag(tag: Tag): String? {
+        val ndef = runCatching { Ndef.get(tag) }.getOrNull() ?: return null
+        return try {
+            ndef.connect()
+            ndef.ndefMessage?.let(::routeOfMessage)
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { ndef.close() }
+        }
+    }
+
+    private fun routeOfMessage(message: NdefMessage): String? {
+        for (record in message.records) {
+            // ⚠️ 用 toUri() 而不是直接 String(payload)：
+            // NdefRecord.createUri() 写进去的 payload **第一个字节是 URI 前缀码**，
+            // 后面才是真正的 URI 字节。直接按字符串解会多出一个乱码前缀字符，
+            // 于是永远匹配不上 —— 这种错在没机器的时候根本查不出来。
+            val uri = record.toUri()?.toString() ?: continue
+            val route = NdefShortcutLogic.decode(uri)
+            if (route != null) return route
         }
         return null
     }
