@@ -88,10 +88,10 @@ fun NfcSettingPage(
     var busy by remember { mutableStateOf<NfcController.Busy>(NfcController.Busy.Idle) }
     var scan by remember { mutableStateOf<NfcScan?>(null) }
     var route by remember { mutableStateOf<String?>(null) }
-    // 深度扫描默认开：真卡实测它是**唯一**挖出卡内文件的那一轮
-    // （SELECT 0010~001B 命中 8 个文件，其中 0016 里就是姓名）。
-    // 关掉它，贴一次卡就只能看到「这个文件不存在」。
-    var deepProbe by remember { mutableStateOf(true) }
+    // 深度扫描**默认关**：日常要的只是「这是谁的卡」，而快速读一秒内就能给出答案。
+    // 完整那一轮要按住好几秒、400 条命令里绝大多数回「找不到这个文件」——
+    // 把它当默认，等于让每次读卡都白等。换卡读不出来时再打开（页面会提示）。
+    var deepProbe by remember { mutableStateOf(false) }
     var classicScan by remember { mutableStateOf(true) }
     // 学号输入框**从本机读回来**：填过一次就够了，不必每次开这个页面重填。
     var studentId by remember { mutableStateOf(SavedCardStore.readStudentId(context)) }
@@ -394,13 +394,14 @@ private fun ReadCardSection(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(checked = deepProbe, onCheckedChange = onDeepProbeChange, enabled = capability == NfcCapability.Enabled)
             Column(Modifier.weight(1f)) {
-                Text("扫文件区（慢，要贴住几秒；卡里的数据全是这一轮挖出来的）")
+                Text("深度扫描（慢，要贴住好几秒）")
                 Text(
-                    "CPU 卡才有用：先挨个短标识（SFI 1~30）读，再挨个文件标识试 SELECT。" +
-                        "命中就沿文件往下读三段。卡说「你 Le 写错了」（6Cxx，如 6C1E = 只要 30 字节）" +
-                        "会按它说的重发；文件不吃 READ BINARY（6981，记录文件）会改读记录；" +
-                        "选中的是目录（6986）会进去再扫一层。共 400 条左右只读命令，" +
-                        "中途掉卡也保留已经拿到的部分。",
+                    "日常不用开。不勾选时走的是「快速读」—— 只碰文件号 0001~001F 那一段，" +
+                        "几十条只读命令，一秒内就能认出姓名和学号（真卡上有数据的文件都落在这段里）。" +
+                        "勾上则是完整一轮：短标识 SFI 1~30、文件号一直扫到 00FF、还会进目录再扫一层，" +
+                        "共 400 条左右。卡回「你 Le 写错了」（6Cxx）会按它说的重发、" +
+                        "文件不吃 READ BINARY（6981）会改读记录、选中的是目录（6986）会进去再扫 ——" +
+                        "这些两种模式都会做。换个学校的卡读不出东西、或想翻卡里还有没有别的，再打开它。",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -415,6 +416,7 @@ private fun ReadCardSection(
                 onCopy = onCopy,
                 onUseStudentId = onStudentIdChange,
                 expectedStudentId = studentId,
+                deepProbe = deepProbe,
             )
         }
     }
@@ -434,6 +436,8 @@ private fun ReadResultCard(
      * 这正好是改语义时差点带出来的回归。
      */
     expectedStudentId: String,
+    /** 这次跑的是不是深度扫描 —— 决定「没认出人」时要不要提示开它。 */
+    deepProbe: Boolean,
 ) {
     // 深度扫描会有三四百条记录，默认只列有数据的。状态提在这里而不是 `let` 里面，
     // 免得 `probe` 一会儿有一会儿没有时把 remember 的调用顺序打乱。
@@ -457,6 +461,7 @@ private fun ReadResultCard(
                 scan = scan,
                 onUseStudentId = onUseStudentId,
                 expectedStudentId = expectedStudentId,
+                deepProbe = deepProbe,
             )
 
             scan.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -670,6 +675,7 @@ private fun IdentityCard(
     scan: NfcScan,
     onUseStudentId: (String) -> Unit,
     expectedStudentId: String,
+    deepProbe: Boolean,
 ) {
     // ⚠️ `expectedStudentId` 必须进 key：用户改了学号、重新贴卡命中之后，
     // 这张卡要跟着重算，否则它会一直停在「没有学号」的旧结论上。
@@ -736,6 +742,18 @@ private fun IdentityCard(
             ) {
                 Text(
                     "这张卡里没认出姓名 / 学号 / 卡号。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+
+            // ⚠️ 快速读把范围收窄了，**没认出人时必须给出路**。
+            // 静默给一个空结果，用户只会得出「这功能没用」—— 而实际上再翻一轮可能就有。
+            // 只对 CPU 卡提示：贴纸这类根本发不了指令，让它去开深度扫描是误导。
+            if (!deepProbe && scan.kind == CardKind.CPU_CARD && !CardIdentityLogic.hasPerson(identity)) {
+                Text(
+                    "这次跑的是快速读（只碰文件号 0001~001F）。没认出姓名和学号 —— " +
+                        "把上面的「深度扫描」打开再贴一次，它会把短标识、整个文件号区间和目录都翻一遍。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )

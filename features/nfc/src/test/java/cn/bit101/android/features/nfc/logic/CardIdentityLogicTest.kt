@@ -1,6 +1,7 @@
 package cn.bit101.android.features.nfc.logic
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -173,6 +174,35 @@ class CardIdentityLogicTest {
 
         assertEquals("1120241355", id.studentId)
         assertNull(id.guessedStudentId)
+    }
+
+    /**
+     * `hasPerson` 只认**人**（姓名 / 学号），**卡号不算**。
+     *
+     * 它决定「要不要提示用户开深度扫描」—— 而卡号是从 UID 推出来的、每张卡都有，
+     * 把它算进来的话，快速读永远算「认出来了」，那句提示就永远不会出现，
+     * 于是扫描范围收窄之后就没有安全网了。
+     */
+    @Test
+    fun `hasPerson 不把卡号当成人`() {
+        // 只有卡号（UID 推出来的）⇒ 不算认出了人
+        assertFalse(
+            CardIdentityLogic.hasPerson(
+                CardIdentityLogic.summarize(probeLines = emptyList(), candidates = cards)
+            )
+        )
+        // 姓名 ⇒ 算
+        assertTrue(
+            CardIdentityLogic.hasPerson(
+                CardIdentityLogic.summarize(probeLines = listOf(line(text = "高天翔")), candidates = cards)
+            )
+        )
+        // 疑似学号也 ⇒ 算（用户至少知道这是谁了）
+        assertTrue(
+            CardIdentityLogic.hasPerson(
+                CardIdentityLogic.summarize(probeLines = listOf(line(guess = "1120241355")), candidates = cards)
+            )
+        )
     }
 
     /** 卡号有多种解读时要说明，不能只报一种让人误以为那就是卡面号。 */

@@ -623,4 +623,75 @@ class CardProbeLogicTest {
         assertEquals("READ 文件 0001 前 32 字节", steps.first().followUpLabel)
         assertEquals("00 B0 00 00 20", CardProbeLogic.toHex(steps.first().followUp!!))
     }
+
+    // ---------------------------------------------------------------- 快速读
+
+    /**
+     * 快速读的范围必须**罩住真卡实测有数据的那一段**（`0010`~`001B`）。
+     *
+     * 这是它唯一的存在理由：日常读卡只想知道「这是谁的卡」，
+     * 而姓名与学号就在 `0016`。范围一旦收过头，功能就直接失效了。
+     */
+    @Test
+    fun `快速读的范围覆盖真卡有数据的文件段`() {
+        val steps = CardProbeLogic.quickScan()
+
+        // 第一条先把主文件选回来：否则读的是上一轮残留的上下文，结果不可复现
+        assertEquals("SELECT 主文件 3F00（快速读起点）", steps.first().label)
+
+        val fids = steps.mapNotNull { it.fid }
+        listOf(0x0010, 0x0011, 0x0015, 0x0016, 0x0018, 0x001A, 0x001B).forEach { fid ->
+            assertTrue("应含 %04X".format(fid), fid in fids)
+        }
+    }
+
+    /** 快速读的每一条都必须过只读闸门 —— 一次误写就是事故。 */
+    @Test
+    fun `快速读的每条命令都是只读的`() {
+        val steps = CardProbeLogic.quickScan()
+
+        assertTrue(steps.all { CardProbeLogic.isReadOnly(it.apdu) })
+        assertTrue(steps.all { it.followUp == null || CardProbeLogic.isReadOnly(it.followUp) })
+        assertTrue(steps.all { step -> step.followUpMore.all { CardProbeLogic.isReadOnly(it) } })
+    }
+
+    /**
+     * 快速读**必须比深度扫描短得多** —— 它存在的唯一理由就是快。
+     *
+     * 这一条防的是「范围被慢慢加宽」：谁都可能觉得「再多扫几个文件也不慢」，
+     * 加着加着就退化成那个要按住好几秒的深度轮了。
+     */
+    @Test
+    fun `快速读的命令数远少于深度扫描`() {
+        val quick = CardProbeLogic.quickScan().size
+        val deep = CardProbeLogic.sfiScan().size + CardProbeLogic.fidScan().size
+
+        assertTrue("快速读 $quick 条，深度 $deep 条", quick * 5 < deep)
+    }
+
+    /** 每条都要记住自己试的是哪个文件号（命中后要能认回来）。 */
+    @Test
+    fun `快速读的每条都带自己的文件号`() {
+        val small = CardProbeLogic.quickScan(0x0001..0x0003)
+        assertEquals(listOf(0x0001, 0x0002, 0x0003), small.drop(1).map { it.fid })
+        // 首条是 SELECT MF，不带文件号
+        assertNull(small.first().fid)
+    }
+
+    /**
+     * 快速读每条只读**两段**（够拿到 `0016` 里的姓名与学号）。
+     *
+     * ⚠️ 这与深度扫描的「三段」**是有意不同**的，不是漏了：
+     * 那边宁可多读也不漏（要翻遍未知的卡），这边够用即止 ——
+     * 真卡 `0016` 的第三段回的是 `6B00`（已经到文件末尾），多读那一条纯属白等。
+     */
+    @Test
+    fun `快速读每条只读两段`() {
+        val step = CardProbeLogic.quickScan(0x0016..0x0016).last()
+
+        assertEquals(0x0016, step.fid)
+        assertTrue(step.followUp != null)
+        assertEquals(1, step.followUpMore.size)
+        assertEquals("00 B0 00 20 20", CardProbeLogic.toHex(step.followUpMore.single()))
+    }
 }

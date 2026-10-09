@@ -122,6 +122,19 @@ internal object CardIdentityLogic {
     }
 
     /**
+     * 有没有认出**人**（姓名或学号）—— 它决定「这次读卡够不够，要不要再开深度扫描」。
+     *
+     * ⚠️ 卡号**不算**：它是从 UID 推出来的，只说明「还是这张卡」，
+     * 不说明「这是谁」。把卡号也算进来的话，快速读永远算「认出来了」，
+     * 那句「要不要开深度扫描再试」的提示就永远不会出现 —— 而它正是收窄扫描范围后
+     * 唯一的安全网。
+     */
+    fun hasPerson(identity: CardIdentity): Boolean =
+        identity.name != null ||
+            identity.studentId != null ||
+            identity.guessedStudentId != null
+
+    /**
      * 探测流水的**最小接口**。
      *
      * 为什么不让 UI 直接给 `ProbeLine`：`ProbeLine` 定义在 Controller 里（带 APDU、

@@ -77,7 +77,17 @@ internal class NfcController(
     @Volatile
     var pendingWrite: String? = null
 
-    /** 是否在小目标上多跑一轮 SFI / FID 扫描（只对 CPU 卡有意义，且明显更慢）。 */
+    /**
+     * 是否跑**完整的深度扫描**（只对 CPU 卡有意义，且明显更慢）。
+     *
+     * - `false`（默认）：**快速读** —— 只碰文件号 `0001`~`001F`，几十条命令，一秒内出结果。
+     *   真卡上有数据的文件全在那一段里，日常要的就是它。
+     * - `true`：SFI 1~30 + 文件号扫到 `00FF` + 目录下钻，400 条左右。
+     *   换别的学校的卡、或想翻卡里还有没有别的东西时才需要。
+     *
+     * ⚠️ 收窄范围的代价是「可能什么都找不到」，所以上层必须把「快速读没认出人」
+     * 这种情况说出来（提示开深度扫描），不能给一个空结果就完事。
+     */
     @Volatile
     var withSfiScan: Boolean = false
 
@@ -187,30 +197,40 @@ internal class NfcController(
             runCatching { probeClassic(tag) }.getOrNull()
         } else null
 
-        val deep = if (description.supportsApdu && withSfiScan) {
+        // 第二轮有两种规模，由 [withSfiScan] 决定 —— 默认是**小的那个**：
+        // - 关（默认）= 快速读：只碰低区文件号，几十条命令、一秒内出姓名学号。
+        //   真卡上有数据的文件全落在 `0010`~`001B`，日常要的就是那一段；
+        //   而完整那一轮绝大多数命令回的是「找不到这个文件」，纯粹是让用户白按住几秒。
+        // - 开 = 深度读：SFI 1~30 + 文件号扫到 00FF + 目录下钻，共 400 条左右。
+        //   换别的学校的卡、或想翻卡里还有没有别的东西时才打开。
+        val extra = if (description.supportsApdu) {
             runCatching {
-                // 深度轮的顺序是**真卡实测**定下来的，四步各有理由：
-                // ① 先 SELECT MF 把上下文钉死 —— 带 SFI 的 READ BINARY 是「相对当前 DF」的，
-                //    不先选一次主文件，扫出来的结果是上一次操作残留的上下文，不可复现。
-                // ② SFI 扫描（30 条，快）排最前：实测 1..30 里有 12 个有响应，
-                //    性价比最高 —— 含那个回 `6982`「要认证」的 SFI=4。
-                // ③ FID 扫描（255 条，慢）跟上：命中率低，但覆盖的是另一个命名空间，
-                //    真卡上的目录（DF）`0010` 就是它先认出来的。
-                // ④ 目录下钻放最后：DF 是在③里认出来的，认出来才有得进。
-                probeApdu(
-                    tag,
-                    listOf(
-                        CardProbeLogic.ProbeStep(
-                            "SELECT 主文件 3F00（深度轮起点）",
-                            CardProbeLogic.selectMasterFile(),
-                        ),
-                    ) + CardProbeLogic.sfiScan() + CardProbeLogic.fidScan(),
-                    drilldown = true,
-                )
+                if (!withSfiScan) {
+                    probeApdu(tag, CardProbeLogic.quickScan(), drilldown = false)
+                } else {
+                    // 深度轮的顺序是**真卡实测**定下来的，四步各有理由：
+                    // ① 先 SELECT MF 把上下文钉死 —— 带 SFI 的 READ BINARY 是「相对当前 DF」的，
+                    //    不先选一次主文件，扫出来的结果是上一次操作残留的上下文，不可复现。
+                    // ② SFI 扫描（30 条，快）排最前：实测 1..30 里有 12 个有响应，
+                    //    性价比最高 —— 含那个回 `6982`「要认证」的 SFI=4。
+                    // ③ FID 扫描（255 条，慢）跟上：命中率低，但覆盖的是另一个命名空间，
+                    //    真卡上的目录（DF）`0010` 就是它先认出来的。
+                    // ④ 目录下钻放最后：DF 是在③里认出来的，认出来才有得进。
+                    probeApdu(
+                        tag,
+                        listOf(
+                            CardProbeLogic.ProbeStep(
+                                "SELECT 主文件 3F00（深度轮起点）",
+                                CardProbeLogic.selectMasterFile(),
+                            ),
+                        ) + CardProbeLogic.sfiScan() + CardProbeLogic.fidScan(),
+                        drilldown = true,
+                    )
+                }
             }.getOrNull()
         } else null
 
-        val probeLines = base.orEmpty() + deep.orEmpty()
+        val probeLines = base.orEmpty() + extra.orEmpty()
 
         return NfcScan(
             uid = raw.id,
