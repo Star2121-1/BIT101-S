@@ -75,7 +75,9 @@ class NotifyRepository @Inject constructor(
         }
         // 教学调整走它自己的缓存（12h TTL）+ 静默降级；取不到就按「没有调整」处理
         // —— 课表页那条提示条同时也会缺失，两边口径一致
-        val adjustments = if (policy.adjustmentEnabled) {
+        // ⚠️ **上课提醒也要用它**（放假那天不排、补课日按被指定那天排），
+        //    所以不能只在 adjustmentEnabled 时才取
+        val adjustments = if (policy.adjustmentEnabled || policy.classEnabled) {
             runCatching { teachingAdjustmentRepo.load() }.getOrNull()?.entries.orEmpty()
         } else {
             emptyList()
@@ -168,9 +170,18 @@ class NotifyRepository @Inject constructor(
         val courses = runCatching { coursesRepo.getCoursesFromLocal().first() }
             .getOrDefault(emptyList())
         val firstDay = runCatching { courseScheduleSettings.firstDay.get() }.getOrNull()
+
+        // ⚠️ 二次校验要用**与排期时同一个口径**的有效星期几，否则补课日那条
+        //    会在到点被自己判成「那天没课」而**静默丢掉**（周六查周四的课 → 查不到）。
+        //    反过来，放假那天 [effectiveWeekday] 返回 null ⇒ 不补发，也是对的。
+        val adjustments = runCatching { teachingAdjustmentRepo.load() }.getOrNull()?.entries.orEmpty()
+        val weekday = NotifyLogic.effectiveWeekday(date) { d ->
+            adjustments.firstOrNull { it.date == d }?.plan
+        } ?: return null
+
         val week = NotifyLogic.weekOf(firstDay, date)
         val exists = courses.any { course ->
-            course.weekday == date.dayOfWeek.value &&
+            course.weekday == weekday &&
                 (week <= 0 || NotifyLogic.weeksContains(course.weeks, week))
         }
         if (!exists) return null

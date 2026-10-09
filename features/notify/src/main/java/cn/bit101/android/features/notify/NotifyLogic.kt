@@ -173,8 +173,14 @@ object NotifyLogic {
         val until = now.plusDays(policy.horizonDays)
         val out = mutableListOf<Reminder>()
 
+        // ⚠️ 上课提醒**也要看教学调整**（放假那天不排、补课日按被指定那天排），
+        //    所以这份映射不是补课提醒专用的。
+        val planOf: (LocalDate) -> DayPlan? = { date ->
+            adjustments.firstOrNull { it.date == date }?.plan
+        }
+
         if (policy.classEnabled) {
-            out += classReminders(courses, now, until, firstDay, table, policy, sentKeys)
+            out += classReminders(courses, now, until, firstDay, table, policy, sentKeys, planOf)
         }
         if (policy.ddlEnabled) {
             out += ddlReminders(ddls, now, until, policy, sentKeys)
@@ -255,6 +261,21 @@ object NotifyLogic {
 
     // ------------------------------------------------------------ 上课提醒
 
+    /**
+     * 那一天**实际上按哪个星期几上课**；`null` = 那天不上课（放假）。
+     *
+     * ⚠️⚠️ 放假返回 null 而不是原星期几 —— 放假那天按原课表排出来的
+     * 「10 分钟后上课」是**错的提醒**（课根本不上），比不发更糟；
+     * 同理，补课日必须按**被指定那天**的课表排，否则那天一条提醒都没有，
+     * 而那天恰恰是**要上课**的（用户按平时的课表出门就会缺课）。两个方向都不能漏。
+     */
+    fun effectiveWeekday(date: LocalDate, planOf: (LocalDate) -> DayPlan?): Int? =
+        when (val plan = planOf(date)) {
+            is DayPlan.MakeUp -> plan.targetWeekday
+            DayPlan.NoClass -> null
+            null -> date.dayOfWeek.value
+        }
+
     private fun classReminders(
         courses: List<CourseScheduleEntity>,
         now: LocalDateTime,
@@ -263,6 +284,7 @@ object NotifyLogic {
         table: TimeTable,
         policy: NotifyPolicy,
         sentKeys: Set<String>,
+        planOf: (LocalDate) -> DayPlan?,
     ): List<Reminder> {
         val lead = policy.classLeadMinutes.coerceAtLeast(0)
         val out = mutableListOf<Reminder>()
@@ -270,28 +292,32 @@ object NotifyLogic {
         // 逐日扫描（而不是逐课程 × 逐日）—— 覆盖天数通常远小于课程数，且更容易看出边界
         var date = now.toLocalDate()
         while (!date.isAfter(until.toLocalDate())) {
-            val week = weekOf(firstDay, date)
-            courses.asSequence()
-                .filter { it.weekday == date.dayOfWeek.value }
-                .filter { week <= 0 || weeksContains(it.weeks, week) }
-                .forEach { course ->
-                    val start = sectionStart(table, course.start_section) ?: return@forEach
-                    val startAt = LocalDateTime.of(date, start)
-                    val at = startAt.minusMinutes(lead)
-                    if (at.isBefore(now) || at.isAfter(until)) return@forEach
+            // ⚠️ 放假 ⇒ 那天没有课（不排）；补课 ⇒ 按被指定那天的课表排
+            val weekday = effectiveWeekday(date, planOf)
+            if (weekday != null) {
+                val week = weekOf(firstDay, date)
+                courses.asSequence()
+                    .filter { it.weekday == weekday }
+                    .filter { week <= 0 || weeksContains(it.weeks, week) }
+                    .forEach { course ->
+                        val start = sectionStart(table, course.start_section) ?: return@forEach
+                        val startAt = LocalDateTime.of(date, start)
+                        val at = startAt.minusMinutes(lead)
+                        if (at.isBefore(now) || at.isAfter(until)) return@forEach
 
-                    val key = courseKey(course, date, lead)
-                    if (key in sentKeys) return@forEach
+                        val key = courseKey(course, date, lead)
+                        if (key in sentKeys) return@forEach
 
-                    out += Reminder(
-                        key = key,
-                        kind = ReminderKind.CLASS,
-                        at = at,
-                        title = classTitle(lead),
-                        text = classText(course, table, start),
-                        route = PageShowOnNav.Schedule.toPageData().value,
-                    )
-                }
+                        out += Reminder(
+                            key = key,
+                            kind = ReminderKind.CLASS,
+                            at = at,
+                            title = classTitle(lead),
+                            text = classText(course, table, start),
+                            route = PageShowOnNav.Schedule.toPageData().value,
+                        )
+                    }
+            }
             date = date.plusDays(1)
         }
         return out

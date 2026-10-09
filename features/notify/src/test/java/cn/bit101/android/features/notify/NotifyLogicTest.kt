@@ -1148,6 +1148,95 @@ class NotifyLogicTest {
         assertTrue(list.isEmpty())
     }
 
+    // ------------------------------- 上课提醒也要看教学调整（同一个根因的两面）
+
+    /**
+     * ⚠️⚠️ **补课日当天也要有上课提醒**（2026-10-10 自检发现）。
+     *
+     * 以前上课提醒只按「当天星期几」取课 ⇒ 10/10（周六，按周四课表上课）那天
+     * **一条提醒都没有**，而那天恰恰是要上课的。缺课是真实损失。
+     */
+    @Test
+    fun `补课日当天按被指定那天的课排上课提醒`() {
+        val thursdayCourse = course(weekday = 4, start = 3, end = 5)   // 周四第 3 节 09:55
+        val now = LocalDateTime.of(2026, 10, 8, 12, 0)
+
+        val list = NotifyLogic.plan(
+            courses = listOf(thursdayCourse),
+            ddls = emptyList(),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+            adjustments = listOf(adjustment(date = makeUpDate, plan = DayPlan.MakeUp(4))),
+        )
+
+        val classReminders = list.filter { it.kind == ReminderKind.CLASS }
+        // 10/10（周六）被当成周四 ⇒ 09:55 的课提前 10 分钟 = 09:45。
+        // （同一窗口里 10/15 那个真正的周四也会排，那是正常日的课，不是这条要测的）
+        assertTrue(
+            "补课日当天该有上课提醒：${classReminders.map { it.at }}",
+            classReminders.any { it.at == LocalDateTime.of(2026, 10, 10, 9, 45) },
+        )
+    }
+
+    /**
+     * ⚠️⚠️ **放假那天不该排上课提醒**（2026-10-10 自检发现，比上面那条更糟）。
+     *
+     * 放假那天的课**根本不上**，却弹出「10 分钟后上课」—— 这是**错的提醒**，
+     * 比不发更糟（用户会白跑一趟教室）。
+     */
+    @Test
+    fun `放假那天不排上课提醒`() {
+        val mondayCourse = course(weekday = 1, start = 3, end = 5)     // 周一第 3 节
+        val holiday = LocalDate.of(2026, 10, 5)                        // 周一
+        val now = LocalDateTime.of(2026, 10, 1, 12, 0)
+
+        // 对照：没有调整时，10/05（周一）确实会排一条
+        val without = NotifyLogic.plan(
+            courses = listOf(mondayCourse),
+            ddls = emptyList(),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+        )
+        assertEquals(
+            listOf(LocalDateTime.of(2026, 10, 5, 9, 45)),
+            without.filter { it.kind == ReminderKind.CLASS }.map { it.at },
+        )
+
+        // 有放假调整时：一条都不该有
+        val withHoliday = NotifyLogic.plan(
+            courses = listOf(mondayCourse),
+            ddls = emptyList(),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+            adjustments = listOf(adjustment(date = holiday, plan = DayPlan.NoClass)),
+        )
+        assertTrue("放假那天不该有上课提醒", withHoliday.none { it.kind == ReminderKind.CLASS })
+    }
+
+    /** 放假只压掉**那一天**，别的日子照常（不能因为加了这一层就少排正常日的课）。 */
+    @Test
+    fun `放假只影响那一天，别的日子照常提醒`() {
+        val now = LocalDateTime.of(2026, 10, 1, 12, 0)   // 窗口 10/01 ~ 10/08
+        val list = NotifyLogic.plan(
+            courses = listOf(
+                course(name = "周一的课", weekday = 1, start = 3, end = 5),
+                course(name = "周二的课", weekday = 2, start = 3, end = 5),
+            ),
+            ddls = emptyList(),
+            now = now,
+            firstDay = firstDay,
+            table = table,
+            adjustments = listOf(adjustment(date = LocalDate.of(2026, 10, 5), plan = DayPlan.NoClass)),
+        )
+
+        val at = list.filter { it.kind == ReminderKind.CLASS }.map { it.at }
+        assertTrue("10/05 放假 ⇒ 不该有那天的提醒：$at", at.none { it.toLocalDate() == LocalDate.of(2026, 10, 5) })
+        assertTrue("10/06（周二）照常提醒：$at", at.any { it.toLocalDate() == LocalDate.of(2026, 10, 6) })
+    }
+
     /**
      * ⚠️⚠️ **标题与正文里的「周X」必须是同一种写法**。
      *

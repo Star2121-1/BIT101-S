@@ -92,6 +92,9 @@ ddl:{uid}:{窗口}                            例 ddl:lexue-123:1d / ddl:lexue-1
 | `seat_reminder` | HIGH | 座位签到（错过会记违约，累计 5 次暂停 7 天） |
 | `exam_reminder` | HIGH | 考试（只有一次机会，正文必须给考场与座位号） |
 | `adjustment_reminder` | HIGH | 课表调整（补课日前一天 20:00；这是「课表变了」，按平时课表出门会走错） |
+
+⚠️ **上课提醒也吃教学调整**（v1.9.47）：放假那天**不排**（课不上，提醒就是错的），
+补课日按**被指定那天**的课表排（那天是要上课的）。见 [3.8]。
 | `score_reminder` | DEFAULT | 出分（**不含分数**，用户定的隐私边界） |
 | `netfee_reminder` | DEFAULT | 网费不足（每日至多一条） |
 | `netflow_reminder` | DEFAULT | 校园网流量 270 / 300 GB（每周期至多两条） |
@@ -146,6 +149,26 @@ ddl:{uid}:{窗口}                            例 ddl:lexue-123:1d / ddl:lexue-1
 靠单测才发现）。已补一条「标题与正文写法必须一致」的断言守着。
 
 ---
+
+### 3.8 上课提醒也要看教学调整（放假不排 / 补课按指定那天）
+
+`NotifyLogic.effectiveWeekday(date, planOf)` 是**唯一一份**答案：
+
+- 补课 ⇒ 被指定那天的星期几
+- 放假 ⇒ `null` = 那天没课
+- 没覆盖 ⇒ 当天自己的星期几
+
+为什么两个方向都不能漏：补课日不按指定那天排 ⇒ **那天一条提醒都没有，
+而那天恰恰要上课**；放假那天照排 ⇒ **课根本不上却弹出「10 分钟后上课」**，
+那是错的提醒，比不发更糟（用户会白跑一趟教室）。
+
+⚠️⚠️ **两处必须用同一个函数，改一处不改另一处等于没改**：
+`classReminders`（排期）与 `NotifyRepository.classRefreshed`（到点二次校验）。
+后者原本按 `date.dayOfWeek.value` 查「那天还有课吗」—— 补课日去查周四的课必然查不到，
+**排出来的提醒会在到点被自己判成「没课」而静默丢掉**。
+
+⚠️ `NotifyRepository.plan()` 取教学调整的条件是 `adjustmentEnabled || classEnabled`
+—— 别写成只有 `adjustmentEnabled` 才取。
 
 ## 四、设置项（config 模块）
 
