@@ -6,6 +6,7 @@ import cn.bit101.android.data.common.AESUtils
 import cn.bit101.android.data.common.HashUtils
 import cn.bit101.android.data.common.SmsCodeRequestHub
 import cn.bit101.android.data.net.SchoolCookieStore
+import cn.bit101.android.data.net.SessionCleanup
 import cn.bit101.android.data.net.base.APIManager
 import cn.bit101.android.data.repo.base.LoginRefreshResult
 import cn.bit101.android.data.repo.base.LoginRepo
@@ -31,6 +32,11 @@ internal class DefaultLoginRepo @Inject constructor(
     private val apiManager: APIManager,
     private val loginStatus: LoginStatus,
     private val smsCodeRequestHub: SmsCodeRequestHub,
+    /**
+     * ⚠️ 清登录态**只能走它**：`loginStatus.clear()` 只清 BIT101 自己，
+     *    座位侧的 JWT 与任务会留下（详见 [SessionCleanup]）。
+     */
+    private val sessionCleanup: SessionCleanup,
 ) : LoginRepo {
 
     private val api
@@ -80,7 +86,7 @@ internal class DefaultLoginRepo @Inject constructor(
                 }
                 LoginRefreshResult.TRANSIENT -> false
                 LoginRefreshResult.FAILED -> {
-                    withContext(NonCancellable) { loginStatus.clear() }
+                    withContext(NonCancellable) { sessionCleanup.clearAll() }
                     false
                 }
                 // checkLogin 已持有 loginMutex，refreshLoginLocked 不可能返回 BUSY，保守按不清理处理
@@ -219,7 +225,7 @@ internal class DefaultLoginRepo @Inject constructor(
         smsCodeHandler: SmsCodeHandler?,
     ) = withContext(Dispatchers.IO) {
         loginMutex.withLock {
-            loginStatus.clear()
+            sessionCleanup.clearAll()
             try {
                 loginSchool(username, password, smsCodeHandler)
                 loginBIT101(username, password)
@@ -228,7 +234,7 @@ internal class DefaultLoginRepo @Inject constructor(
                 loginStatus.status.set(true)
                 true
             } catch (e: Exception) {
-                withContext(NonCancellable) { loginStatus.clear() }
+                withContext(NonCancellable) { sessionCleanup.clearAll() }
                 throw e
             }
         }
@@ -236,7 +242,7 @@ internal class DefaultLoginRepo @Inject constructor(
 
     override suspend fun logout() = withContext(Dispatchers.IO) {
         loginMutex.withLock {
-            withContext(NonCancellable) { loginStatus.clear() }
+            withContext(NonCancellable) { sessionCleanup.clearAll() }
         }
     }
 

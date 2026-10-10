@@ -1,8 +1,11 @@
 package cn.bit101.android.data.repo
 
 import cn.bit101.android.config.common.SettingItem
+import cn.bit101.android.config.seat.base.SeatTaskStore
 import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.config.user.base.SeatLoginStatus
 import cn.bit101.android.data.common.SmsCodeRequestHub
+import cn.bit101.android.data.net.SessionCleanup
 import cn.bit101.android.data.net.base.APIManager
 import cn.bit101.android.data.repo.base.LoginRefreshResult
 import cn.bit101.api.Bit101Api
@@ -37,6 +40,8 @@ class DefaultLoginRepoTest {
     private lateinit var api: Bit101Api
     private lateinit var apiManager: APIManager
     private lateinit var loginStatus: MemoryLoginStatus
+    private lateinit var seatLoginStatus: MemorySeatLoginStatus
+    private lateinit var seatTaskStore: MemorySeatTaskStore
     private lateinit var repo: DefaultLoginRepo
 
     @Before
@@ -44,11 +49,39 @@ class DefaultLoginRepoTest {
         api = mockk()
         apiManager = mockk()
         loginStatus = MemoryLoginStatus()
+        seatLoginStatus = MemorySeatLoginStatus()
+        seatTaskStore = MemorySeatTaskStore()
         every { apiManager.api } returns api
         coEvery { apiManager.switch(any()) } answers {
             runBlocking { loginStatus.webVpn.set(firstArg()) }
         }
-        repo = DefaultLoginRepo(apiManager, loginStatus, SmsCodeRequestHub())
+        repo = DefaultLoginRepo(
+            apiManager,
+            loginStatus,
+            SmsCodeRequestHub(),
+            SessionCleanup(loginStatus, seatLoginStatus, seatTaskStore),
+        )
+    }
+
+    /**
+     * ⚠️⚠️ **登出必须两边都清**（2026-10-11 解耦时补的锁）。
+     *
+     * 以前这段逻辑藏在 `DefaultLoginStatus.clear()` 里（配置层反向知道座位的存储键），
+     * 抽成 `SessionCleanup` 之后**最容易漏的就是某一侧忘了清** ——
+     * 漏了的表现很隐蔽：BIT101 显示已登出，座位还在拿过期的 JWT 打接口，
+     * 而且两边看起来都「没问题」。
+     */
+    @Test
+    fun `登出同时清掉 BIT101 与座位两侧`() = runBlocking {
+        loginStatus.seedLoggedIn()
+        seatLoginStatus.token.set("seat-jwt")
+        seatTaskStore.tasks.set("[{...}]")
+
+        repo.logout()
+
+        assertFalse("BIT101 侧该清掉", loginStatus.status.get())
+        assertEquals("座位 JWT 该清掉", "", seatLoginStatus.token.get())
+        assertEquals("座位任务该清掉", "", seatTaskStore.tasks.get())
     }
 
     @Test
@@ -338,6 +371,15 @@ class DefaultLoginRepoTest {
             status.set(true)
             fakeCookie.set("fake-cookie")
         }
+    }
+
+    /** 座位侧登录态（只为验证「登出会连座位一起清」）。 */
+    private class MemorySeatLoginStatus : SeatLoginStatus {
+        override val token = MemorySettingItem("")
+    }
+
+    private class MemorySeatTaskStore : SeatTaskStore {
+        override val tasks = MemorySettingItem("")
     }
 
     private class MemorySettingItem<T>(initial: T) : SettingItem<T> {

@@ -31,6 +31,12 @@ private val androidLogger = object : Logger {
 internal class DefaultAPIManager @Inject constructor(
     private val loginStatus: LoginStatus,
     private val loginRepoProvider: Provider<LoginRepo>,
+    /**
+     * ⚠️ 清登录态**只能走它**：`loginStatus.clear()` 只清 BIT101 自己，
+     *    座位侧的 JWT 与任务会留下 —— 表现为「BIT101 显示已登出，
+     *    座位还在拿过期 JWT 打接口」。详见 [SessionCleanup]。
+     */
+    private val sessionCleanup: SessionCleanup,
 ) : APIManager {
     private val cookiesJar = JavaNetCookieJar(loginStatus.cookieManager)
 
@@ -55,7 +61,7 @@ internal class DefaultAPIManager @Inject constructor(
                 // 已重试过，不再重试
                 if (chain.request().header(AUTH_RETRIED_HEADER) != null) {
                     runBlocking {
-                        loginStatus.clear()
+                        sessionCleanup.clearAll()
                     }
                 } else {
                     // 静默刷新整个会话（不弹短信验证码），成功后携带新 fake-cookie 重试一次。
@@ -82,7 +88,7 @@ internal class DefaultAPIManager @Inject constructor(
 
                         // 其他（NEEDS_INTERACTIVE / TRANSIENT / FAILED）维持原清理逻辑
                         else -> runBlocking {
-                            loginStatus.clear()
+                            sessionCleanup.clearAll()
                         }
                     }
                 }

@@ -1,5 +1,6 @@
 package cn.bit101.android.data.repo
 
+import cn.bit101.android.data.net.AppHttpClients
 import android.content.Context
 import cn.bit101.android.data.repo.base.TeachingAdjustmentRepo
 import cn.bit101.android.data.school.TeachingAdjustmentEntry
@@ -9,9 +10,7 @@ import cn.bit101.android.data.school.TeachingAdjustments
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,10 +27,8 @@ internal class DefaultTeachingAdjustmentRepo @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : TeachingAdjustmentRepo {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .build()
+    // 免登录公开页面，不带 cookie；超时用工厂的默认档（8/12，原样）
+    private val client = AppHttpClients.plain()
 
     override suspend fun load(forceRefresh: Boolean): TeachingAdjustments? = withContext(Dispatchers.IO) {
         val cached = TeachingAdjustmentStore.read(context)

@@ -1,5 +1,62 @@
 # CHANGES
 
+## 2026-10-11 v1.9.49 认证盘点 + 两处真重复的收敛
+
+用户问「登录认证是不是写得比较分散，能复用吗」。盘完发现**比想象的干净**，
+真正该做的只有两件。完整结论写进 **`docs/session-map.md`**（含「故意不做什么」，免得下次再来统一一遍）。
+
+### 盘点结论：一套凭据 → 3 个会话产物
+
+```
+学号+密码 ─┬─ BIT101 站点会话（fakeCookie）
+           ├─ 学校 CAS cookie（CookieManager，全局唯一一份）→ 课表/成绩/空教室/一卡通/图书馆/eclass/座位
+           └─ seatlib JWT（用 CAS cookie 换）
+```
+
+- **`LoginStatus` 与上游 `BIT101-Android` 逐字一致**（`diff` 为空）⇒ 这层没跑偏，是资产
+- **真正的 CAS 登录只有一处**：`cn.bit101.bitlogin.sso` + App 内 WebView。
+  座位侧早期手写过一份「取 salt → AES → POST」，**已废弃**
+  ⇒ CAS 表单加密只有一份（`AESUtils`）
+
+### 一、`AppHttpClients`：客户端工厂
+
+此前 4 个 repo 各建一份 `OkHttpClient`，连 `cookieJar(JavaNetCookieJar(...))` 都抄了两遍。
+抄出来的差异**看不出来**（每一种都「能跑」），代价在某个站点变慢时才付：
+表现是「这个页面特别容易失败」，而查的人会先怀疑解析、怀疑登录态，最后才想到超时不一致。
+
+⇒ `AppHttpClients.school(cookieManager)` / `AppHttpClients.plain(connectSec, readSec)`。
+
+⚠️ **只做「消除重复」，没改行为**：各 repo 的超时是各自调过的（学校门户 15/20、
+内网接口 5/5），**原样保留**。统一超时是另一件事 —— 顺手做会把「内网秒回」
+和「门户要等 20 秒」这两种真实差异抹掉。
+
+### 二、`SessionCleanup`：登出清理解耦
+
+此前 `DefaultLoginStatus.clear()` 顺手清了 seatlib 的 token 与任务。
+**方向对**（学校会话失效 ⇒ phpCAS 会话也失效），但**位置错**：
+`config` 是配置层，不该知道「座位有哪些数据、存在哪个键里」——
+于是配置层反向依赖了座位的存储键，以后座位再多存一样东西就得回来改这里。
+
+⇒ `LoginStatus.clear()` 只清自己；`data/net/SessionCleanup.clearAll()` 负责「一起清」。
+4 个调用点（APIManager ×2 / LoginRepo ×4）全部改走它。
+
+⚠️ **补了一条锁**：`登出同时清掉 BIT101 与座位两侧`（`DefaultLoginRepoTest`）——
+解耦之后最容易漏的就是某一侧忘了清，而漏了的表现很隐蔽：
+BIT101 显示已登出、座位还拿过期 JWT 打接口，两边看起来都「没问题」。
+
+### 故意**没做**的（已在 session-map 里写明理由）
+- 把 seatlib JWT 并进 `LoginStatus` —— 两套独立会话，「只登了一边」是真实状态
+- 把学校 SSO 抽成接口 —— 本质就是「WebView 登一次、cookie 共享」，加接口只是多一层
+- **「登录判据统一入口」—— 已经是单一源**（`loginStatus.status` 一个 SettingItem，5 处读同一个 Flow）
+- **集中 cookie 同步 URL 列表 —— 实现已经只有一份**（`WebViewCookieSync`），
+  各 URL 常量归属各自的 `*Logic` 是对的
+
+### 验证
+- 全仓单测 **833 条 0 失败**（+1）
+- 包 `BIT101-S-v1.9.49-release.apk`，真机装后走查见下
+
+---
+
 ## 2026-10-10 v1.9.48 C3：一卡通余额趋势上「我」页卡片
 
 路线图里 C3 的原话是「详情页已有，卡片才是天天看的地方」。现在做完：

@@ -2,16 +2,14 @@ package cn.bit101.android.data.repo
 
 import android.util.Log
 import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.data.net.AppHttpClients
 import cn.bit101.android.data.net.WebViewCookieSync
 import cn.bit101.android.data.repo.base.LibBorrowRepo
 import cn.bit101.android.data.school.LibBorrowLogic
 import cn.bit101.android.data.school.LibBorrowResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import net.gotev.cookiestore.okhttp.JavaNetCookieJar
-import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,12 +43,8 @@ internal class DefaultLibBorrowRepo @Inject constructor(
         const val FALLBACK_SVERSION = "20260928388"
     }
 
-    private val client = OkHttpClient.Builder()
-        .cookieJar(JavaNetCookieJar(loginStatus.cookieManager))
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    // ⚠️ 交给 [AppHttpClients.school]：cookie jar + 超时 + 跟随重定向是全 App 同一套
+    private val client = AppHttpClients.school(loginStatus.cookieManager)
 
     private fun syncCookies() {
         WebViewCookieSync.sync(

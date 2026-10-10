@@ -1,14 +1,13 @@
 package cn.bit101.android.data.repo
 
+import cn.bit101.android.data.net.AppHttpClients
 import android.util.Log
 import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.data.repo.base.CampusNetRepo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,10 +28,8 @@ internal class DefaultCampusNetRepo @Inject constructor() : CampusNetRepo {
         const val URL = "http://10.0.0.55/cgi-bin/rad_user_info"
     }
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .build()
+    // 免登录内网接口，不带 cookie；内网要么秒回要么根本不通 ⇒ 显式给 5/5（原样）
+    private val client = AppHttpClients.plain(connectSec = 5, readSec = 5)
 
     override suspend fun fetchOnlineInfo(): CampusNetResult = withContext(Dispatchers.IO) {
         runCatching {

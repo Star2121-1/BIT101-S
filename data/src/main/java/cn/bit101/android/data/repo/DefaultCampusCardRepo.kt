@@ -1,16 +1,14 @@
 package cn.bit101.android.data.repo
 
 import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.data.net.AppHttpClients
 import cn.bit101.android.data.net.WebViewCookieSync
 import cn.bit101.android.data.repo.base.CampusCardRepo
 import cn.bit101.android.data.school.CampusCardLogic
 import cn.bit101.android.data.school.CampusCardSnapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import net.gotev.cookiestore.okhttp.JavaNetCookieJar
-import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,12 +31,8 @@ internal class DefaultCampusCardRepo @Inject constructor(
     // ⚠️ 首页地址统一在 [CampusCardLogic.HOME_URL] —— 它同时是「校园服务」页
     //    「登录一卡通」按钮的目标，两边必须是同一个字符串（2026-09-30 SSO 审计）
 
-    private val client = OkHttpClient.Builder()
-        .cookieJar(JavaNetCookieJar(loginStatus.cookieManager))
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    // ⚠️ 交给 [AppHttpClients.school]：cookie jar + 超时 + 跟随重定向是全 App 同一套
+    private val client = AppHttpClients.school(loginStatus.cookieManager)
 
     private fun syncCookies() {
         WebViewCookieSync.sync(loginStatus.cookieManager, listOf(CampusCardLogic.HOME_URL))

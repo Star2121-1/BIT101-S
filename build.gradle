@@ -3,8 +3,8 @@ buildscript {
             minSdk: 26,
             targetSdk: 34,
             compileSdk: 36,
-            versionCode: 74,
-            versionName: '1.9.48',
+            versionCode: 75,
+            versionName: '1.9.49',
 
             jvmTarget: '17',
             sourceCompatibility: JavaVersion.VERSION_17,
