@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.data.school.CampusCardBalanceLogic
 import cn.bit101.android.data.school.CampusCardLogic
 import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.data.school.CampusNetResult
@@ -357,8 +358,18 @@ private fun CampusServiceSection(mainController: MainController) {
     val netResult by vm.netResult.collectAsState()
     val loading by vm.loading.collectAsState()
     val fetched by vm.fetched.collectAsState()
+    val balanceTrend by vm.balanceTrend.collectAsState()
 
     val balanceText = CampusCardLogic.balanceText(snapshot, loading, fetched)
+
+    // ⚠️ 两个坑都要挡：
+    //   ① 用 [CampusCardBalanceLogic.trendText]（算不出返回 null）而不是详情页那个
+    //      [trendRowText]（算不出返回「记录中…」）—— 卡片上一行字很金贵，
+    //      「记录中…」这种占位放在天天看的地方是噪音，留给详情页去说。
+    //   ② 余额一直没动时 [trendText] 会给出「今日 无变化 · 近 7 天 无变化」，
+    //      占了那一行却什么都没说 ⇒ 没实质变化就不显示，把行让回「点开详情」。
+    val balanceTrendText = CampusCardBalanceLogic.trendText(balanceTrend)
+        ?.takeIf { CampusCardBalanceLogic.hasChange(balanceTrend) }
 
     // 校园网摘要：区分「不在校内」与「在校内但未认证」—— 一律说「需连接校园网」
     // 会让在校内的用户无从下手（2026-09-25 踩过）
@@ -400,10 +411,18 @@ private fun CampusServiceSection(mainController: MainController) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // C3（2026-10-10）：趋势上卡片 —— 这才是天天看的地方，
+                // 详情页那行反而没人点开。算不出趋势（刚装 / 没历史）时退回原来的入口提示。
                 Text(
-                    text = if (loading && fetched) "刷新中…" else "点开详情",
+                    text = when {
+                        loading && fetched -> "刷新中…"
+                        balanceTrendText != null -> balanceTrendText
+                        else -> "点开详情"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

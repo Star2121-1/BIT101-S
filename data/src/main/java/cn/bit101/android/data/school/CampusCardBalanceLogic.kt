@@ -2,6 +2,7 @@ package cn.bit101.android.data.school
 
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.abs
 
 /**
  * 一卡通余额的一次采样。
@@ -190,6 +191,19 @@ object CampusCardBalanceLogic {
         delta < -EPSILON -> "-¥%.2f".format(-delta)
         else -> "无变化"
     }
+
+    /**
+     * 有没有**实质**变化（两个窗口里至少有一个不是 0）。
+     *
+     * ⚠️ 卡片上要用它挡一层：[trendText] 在余额一直没动时会给出
+     * 「今日 无变化 · 近 7 天 无变化」—— 那两句话占了天天看的一行，却什么都没说。
+     * ⇒ **卡片改成「没有变化就不显示」**，把那一行让回给「点开详情」。
+     * 详情页不受影响：那里 [trendRowText] 的「记录中…」是有用的解释。
+     */
+    fun hasChange(trend: BalanceTrend): Boolean =
+        isNonZero(trend.todayDelta) || isNonZero(trend.spanDelta)
+
+    private fun isNonZero(v: Double?): Boolean = v != null && abs(v) > EPSILON
 
     /**
      * 详情页那一行的文案 —— **算不出来时也要给一句话**。

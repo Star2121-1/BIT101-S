@@ -1,7 +1,9 @@
 package cn.bit101.android.data.school
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -256,5 +258,45 @@ class CampusCardBalanceLogicTest {
         assertEquals("无变化", CampusCardBalanceLogic.signedText(0.001))
         assertEquals("-¥0.01", CampusCardBalanceLogic.signedText(-0.01))
         assertEquals("+¥0.01", CampusCardBalanceLogic.signedText(0.01))
+    }
+
+    // ------------------------------------------------------- hasChange（卡片上用）
+
+    /**
+     * ⚠️ 卡片那一行只留给「真的变了」：余额没动时 [CampusCardBalanceLogic.trendText]
+     * 会给出「今日 无变化 · 近 7 天 无变化」，占着天天看的一行却什么都没说。
+     */
+    @Test
+    fun `余额没动时算没有变化`() {
+        assertFalse(CampusCardBalanceLogic.hasChange(BalanceTrend()))
+        assertFalse(CampusCardBalanceLogic.hasChange(BalanceTrend(todayDelta = 0.0, spanDelta = 0.0)))
+        // 浮点残差也不能算「变了」
+        assertFalse(CampusCardBalanceLogic.hasChange(BalanceTrend(todayDelta = 1e-15)))
+    }
+
+    /** 任一窗口有变化就算有（今天没花、但近几天花了，也值得显示）。 */
+    @Test
+    fun `任一窗口有变化就算有`() {
+        assertTrue(CampusCardBalanceLogic.hasChange(BalanceTrend(todayDelta = -5.95)))
+        assertTrue(CampusCardBalanceLogic.hasChange(BalanceTrend(spanDelta = -25.95, spanDays = 7)))
+        assertTrue(CampusCardBalanceLogic.hasChange(BalanceTrend(spanDelta = 50.0, spanDays = 3)))
+        // 今天 0、近几天有变化 ⇒ 仍然要显示
+        assertTrue(CampusCardBalanceLogic.hasChange(BalanceTrend(todayDelta = 0.0, spanDelta = -3.0, spanDays = 2)))
+    }
+
+    /** 与 trendText 对得上：说「无变化」的那种趋势，hasChange 必须是 false。 */
+    @Test
+    fun `无变化的趋势文本与 hasChange 一致`() {
+        val samples = listOf(
+            BalanceSample(at("2026-09-26", 8), 34.05),
+            BalanceSample(at("2026-09-26", 18), 34.05),
+        )
+        val trend = CampusCardBalanceLogic.trend(samples, today, zone)
+
+        val text = CampusCardBalanceLogic.trendText(trend)
+        if (text != null && text.contains("无变化")) {
+            assertFalse("文案说无变化，hasChange 就不该为真：$text", CampusCardBalanceLogic.hasChange(trend))
+        }
+        assertTrue("无变化时卡片不应显示趋势", !CampusCardBalanceLogic.hasChange(trend))
     }
 }
