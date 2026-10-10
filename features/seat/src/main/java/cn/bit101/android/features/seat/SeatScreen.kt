@@ -52,8 +52,14 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
 
     // 进座位页自动试一次静默续期（不弹 WebView）：
     // 会话被清空时用户不该被迫「重新授权」——能静默恢复就恢复。
-    LaunchedEffect(Unit) {
-        viewModel.autoRenewSilently()
+    //
+    // ⚠️ key 用 [SeatViewModel.seatlibReady] 而不是 `Unit`：ViewModel.init 里
+    // 「恢复持久化 token → 静默认证」是一段异步流程，若在它跑完之前就发起续期，
+    // 两者会并发读写同一份会话状态（此前 isLoggedIn 就是这么被互相覆盖、
+    // 表现为「授权好了界面却不动」）。等 init 把手头的事做完再动手。
+    val seatlibReady by viewModel.seatlibReady.collectAsState()
+    LaunchedEffect(seatlibReady) {
+        if (seatlibReady) viewModel.autoRenewSilently()
     }
 
     if (showCasLogin) {

@@ -54,6 +54,7 @@ import cn.bit101.android.features.seat.model.Seat
 import cn.bit101.android.features.seat.model.SeatNumberComparator
 import cn.bit101.android.features.seat.model.SeatStatus
 import cn.bit101.android.features.seat.ui.component.ErrorCard
+import cn.bit101.android.features.seat.ui.component.SeatAuthGate
 import cn.bit101.android.features.seat.ui.component.SeatColors
 import cn.bit101.android.features.seat.ui.component.SeatGrid
 import cn.bit101.android.features.seat.ui.component.SeatMapCanvas
@@ -78,6 +79,7 @@ fun SeatMapScreen(
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
     val bit101LoggedIn by viewModel.bit101LoggedIn.collectAsState()
     val authNotice by viewModel.authNotice.collectAsState()
+    val authorizing by viewModel.authorizing.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -223,26 +225,14 @@ fun SeatMapScreen(
         modifier = modifier
     ) { innerPadding ->
         if (!isLoggedIn) {
-            Box(modifier = Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(24.dp)
-                ) {
-                    if (authNotice != null) {
-                        Text(authNotice!!, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-                    }
-                    Text(
-                        if (bit101LoggedIn) "学校账号已登录，但座位系统尚未授权" else "尚未登录学校账号",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Button(onClick = {
-                        if (!bit101LoggedIn) mainController.navigate(NavDest.Login)
-                        else scope.launch { viewModel.ensureSeatlibSession() }
-                    }) { Text(if (bit101LoggedIn) "授权座位系统" else "登录") }
-                }
-            }
+            SeatAuthGate(
+                modifier = Modifier.padding(innerPadding),
+                bit101LoggedIn = bit101LoggedIn,
+                authorizing = authorizing,
+                authNotice = authNotice,
+                onLogin = { mainController.navigate(NavDest.Login) },
+                onAuthorize = { viewModel.authorize() },
+            )
             return@Scaffold
         }
 

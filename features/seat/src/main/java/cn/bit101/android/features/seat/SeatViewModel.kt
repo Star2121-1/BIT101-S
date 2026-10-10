@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -91,9 +92,28 @@ class SeatViewModel @Inject constructor(
      *
      * 两者是独立会话：BIT101 已登录不代表 seatlib 已授权。早期用「BIT101 已登录」直接置
      * true，会出现 UI 显示已登录、但 token 为空、所有接口实际无认证的假象。
+     *
+     * ⚠️⚠️ **必须从 [SeatApi.tokenFlow] 派生，不能另立一个可写变量**。
+     * 此前它是一个独立 `MutableStateFlow`，却被 **4 处并发写入**（恢复持久化 token 的结果、
+     * 静默认证成功、BIT101 登录态变化、token 变空）。冷启动时「恢复」与「静默认证」是两条
+     * 并行协程，会互相覆盖 —— 认证先成功置 true、恢复随后读到**旧的空值**又置回 false，
+     * 表现就是 **token 明明已经拿到、界面却卡在「尚未授权」一动不动；切走再回来才好**
+     * （切回来时持久化里已是新 token，恢复读到的就是非空）。
+     * 改为从 token 派生后，「状态与 token 不一致」在结构上不可能发生。
      */
-    private val _isLoggedIn = MutableStateFlow(false)
-    val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
+    val isLoggedIn: StateFlow<Boolean> = seatApi.tokenFlow
+        .map { it.isNotEmpty() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, seatApi.token.isNotEmpty())
+
+    /**
+     * 门禁上的「自动恢复 / 手动授权」是否正在进行。
+     *
+     * 授权链路可能要走静默续期、甚至一次完整的 CAS 凭据直登（最长 25s）——
+     * 没有这个状态时按钮点了像失灵（真机反馈：「点完之后不加一个反馈」）。
+     */
+    private val _authorizing = MutableStateFlow(false)
+    val authorizing: StateFlow<Boolean> = _authorizing.asStateFlow()
 
     /** BIT101 学校账号是否已登录。用于区分「需要登录学校账号」与「需要授权座位系统」。 */
     private val _bit101LoggedIn = MutableStateFlow(false)
@@ -118,7 +138,7 @@ class SeatViewModel @Inject constructor(
     fun cancelSmsChallenge() = seatSession.cancelSmsChallenge()
 
     private fun onAuthSuccess() {
-        _isLoggedIn.value = true
+        // isLoggedIn 已由 tokenFlow 派生（token 非空即为 true），这里只需清掉失效提示
         _authNotice.value = null
     }
 
@@ -129,7 +149,6 @@ class SeatViewModel @Inject constructor(
             if (saved.isNotEmpty()) {
                 SeatLog.d(TAG) { "restored persisted token=${SeatLog.mask(saved)}" }
             }
-            _isLoggedIn.value = saved.isNotEmpty()
             _bit101LoggedIn.value = loginStatus.status.get()
 
             // 2. 尝试静默认证刷新 token。失败不影响已恢复的 token：
@@ -156,9 +175,9 @@ class SeatViewModel @Inject constructor(
         viewModelScope.launch {
             loginStatus.status.flow.collect { loggedIn ->
                 _bit101LoggedIn.value = loggedIn
-                when {
-                    !loggedIn -> _isLoggedIn.value = seatApi.token.isNotEmpty()
-                    seatApi.token.isEmpty() -> seatSession.authenticateSeatlib()
+                // 登出时 isLoggedIn 会随 token 一并清空而自动变 false（派生），无需手工同步
+                if (loggedIn && seatApi.token.isEmpty()) {
+                    seatSession.authenticateSeatlib()
                         .onSuccess {
                             seatApi.token = it.token
                             onAuthSuccess()
@@ -190,7 +209,7 @@ class SeatViewModel @Inject constructor(
                             seatApi.token = renewed
                             onAuthSuccess()
                         } else {
-                            _isLoggedIn.value = false
+                            // token 已为空，isLoggedIn 派生为 false；这里只补一条提示
                             _authNotice.value = "登录已失效，请重新登录"
                         }
                     }
@@ -210,6 +229,21 @@ class SeatViewModel @Inject constructor(
 
     private val _seatTreeError = MutableStateFlow<String?>(null)
     val seatTreeError: StateFlow<String?> = _seatTreeError.asStateFlow()
+
+    /**
+     * 座位树「已经为哪一天加载过」。
+     *
+     * ⚠️ 必须与 [seatTree] **同生命周期**地放在 ViewModel 里，不能放在 composable 的
+     * `rememberSaveable` 里：后者能活过进程重建，而座位树（VM 状态）不能 —— 重建后
+     * guard 说「今天已加载过」、数据却是空的，加载被跳过，界面就永远停着不动，
+     * 切走再回来（guard 被清）才恢复。判断要挂在**真正持有数据的那个对象**上。
+     */
+    private val _seatTreeDate = MutableStateFlow<String?>(null)
+    val seatTreeDate: StateFlow<String?> = _seatTreeDate.asStateFlow()
+
+    /** 座位树是否正在加载。用显式状态而非「列表为空」，否则「跳过加载」会伪装成永久转圈。 */
+    private val _seatTreeLoading = MutableStateFlow(false)
+    val seatTreeLoading: StateFlow<Boolean> = _seatTreeLoading.asStateFlow()
 
     private val _seatDates = MutableStateFlow<List<SeatDate>>(emptyList())
     val seatDates: StateFlow<List<SeatDate>> = _seatDates.asStateFlow()
@@ -394,9 +428,34 @@ class SeatViewModel @Inject constructor(
         viewModelScope.launch {
             // token 还在就什么都不用做（续期只在「会话被清空」时才有意义）
             if (seatApi.token.isNotEmpty()) return@launch
-            val renewed = runCatching { autoLogin.renew() }.getOrNull() ?: return@launch
-            seatApi.token = renewed
-            onAuthSuccess()
+            // 让门禁显示「正在恢复授权…」而不是一个需要手点的死按钮
+            _authorizing.value = true
+            try {
+                val renewed = runCatching { autoLogin.renew() }.getOrNull() ?: return@launch
+                seatApi.token = renewed
+                onAuthSuccess()
+            } finally {
+                _authorizing.value = false
+            }
+        }
+    }
+
+    /**
+     * 门禁上的「授权座位系统」按钮。
+     *
+     * 走的是与自动恢复**同一条链路**（[ensureSeatlibSession]：静默续期 → cookie 静默认证 →
+     * 必要时才弹 CAS 登录页），差别只在于它允许弹 WebView。
+     * [authorizing] 在这里统一维护，这样按钮点下去立刻有转圈反馈，且不会重复触发。
+     */
+    fun authorize() {
+        if (_authorizing.value) return
+        _authorizing.value = true
+        viewModelScope.launch {
+            try {
+                ensureSeatlibSession()
+            } finally {
+                _authorizing.value = false
+            }
         }
     }
 
@@ -474,21 +533,27 @@ class SeatViewModel @Inject constructor(
 
     fun loadSeatTree(date: String = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))) {
         viewModelScope.launch {
-            val treeResult = seatApi.getSeatTree(date)
-            if (treeResult.isSuccess) {
-                _seatTree.value = treeResult.getOrThrow()
-                _seatTreeError.value = null
-            } else {
-                _seatTreeError.value = treeResult.exceptionOrNull()?.message
-                handleApiError(treeResult.exceptionOrNull())
-                verifySessionOrLogout()
-                return@launch
-            }
-            val datesResult = seatApi.getSeatDates()
-            if (datesResult.isSuccess) {
-                _seatDates.value = datesResult.getOrThrow()
-            } else {
-                handleApiError(datesResult.exceptionOrNull())
+            _seatTreeLoading.value = true
+            try {
+                val treeResult = seatApi.getSeatTree(date)
+                if (treeResult.isSuccess) {
+                    _seatTree.value = treeResult.getOrThrow()
+                    _seatTreeError.value = null
+                    _seatTreeDate.value = date
+                } else {
+                    _seatTreeError.value = treeResult.exceptionOrNull()?.message
+                    handleApiError(treeResult.exceptionOrNull())
+                    verifySessionOrLogout()
+                    return@launch
+                }
+                val datesResult = seatApi.getSeatDates()
+                if (datesResult.isSuccess) {
+                    _seatDates.value = datesResult.getOrThrow()
+                } else {
+                    handleApiError(datesResult.exceptionOrNull())
+                }
+            } finally {
+                _seatTreeLoading.value = false
             }
         }
     }

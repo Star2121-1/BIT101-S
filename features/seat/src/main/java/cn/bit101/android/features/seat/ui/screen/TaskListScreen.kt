@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -90,6 +92,7 @@ fun TaskListScreen(
     /** 「我的研讨间预约」（与座位同一后端）。 */
     val seminars by viewModel.seminars.collectAsState()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
+    val authorizing by viewModel.authorizing.collectAsState()
     val bit101LoggedIn by viewModel.bit101LoggedIn.collectAsState(initial = false)
     val authNotice by viewModel.authNotice.collectAsState()
     val notificationPermission = rememberNotificationPermissionState()
@@ -175,10 +178,27 @@ fun TaskListScreen(
                     )
                 }
                 Spacer(Modifier.height(6.dp))
-                Button(onClick = {
-                    if (!bit101LoggedIn) mainController.navigate(NavDest.Login)
-                    else scope.launch { viewModel.ensureSeatlibSession() }
-                }) { Text(if (bit101LoggedIn) "开通座位系统权限" else "登录") }
+                Button(
+                    onClick = {
+                        if (!bit101LoggedIn) mainController.navigate(NavDest.Login)
+                        // 走 VM 的统一入口：与「预约 / 座位图」页是同一套「进行中」状态，
+                        // 链路可能要走静默续期 + CAS 直登（最长 25s），必须给反馈
+                        else viewModel.authorize()
+                    },
+                    enabled = !authorizing,
+                ) {
+                    if (authorizing) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(
+                        when {
+                            authorizing -> "正在恢复授权…"
+                            bit101LoggedIn -> "开通座位系统权限"
+                            else -> "登录"
+                        }
+                    )
+                }
             }
         }
         return

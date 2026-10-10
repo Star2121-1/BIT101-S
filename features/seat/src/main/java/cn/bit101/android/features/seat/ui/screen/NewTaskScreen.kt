@@ -2,7 +2,6 @@ package cn.bit101.android.features.seat.ui.screen
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,10 +27,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -45,9 +42,9 @@ import cn.bit101.android.features.seat.ui.component.ErrorCard
 import cn.bit101.android.features.seat.ui.component.LocationPicker
 import cn.bit101.android.features.seat.ui.component.ModeSelector
 import cn.bit101.android.features.seat.ui.component.PickedSeatRow
+import cn.bit101.android.features.seat.ui.component.SeatAuthGate
 import cn.bit101.android.features.seat.ui.component.SeatColors
 import cn.bit101.android.features.common.helper.rememberNotificationPermissionState
-import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -72,8 +69,6 @@ fun NewTaskScreen(
     var selectedFloorId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAreaId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    /** 最近一次真正发起加载的日期，用来区分「日期变了要重载」与「只是重新进入页面」。 */
-    var loadedTreeDate by rememberSaveable { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val pickedSeats by viewModel.pickedSeats.collectAsState()
 
@@ -86,11 +81,14 @@ fun NewTaskScreen(
     val availableDays by viewModel.availableDays.collectAsState()
     val notificationPermission = rememberNotificationPermissionState()
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val treeLoading = treeNodes.isEmpty()
+    // ⚠️ 用 VM 的显式加载态，而不是「树为空」—— 后者在「这一轮跳过加载」时会伪装成永久转圈
+    val treeLoading by viewModel.seatTreeLoading.collectAsState()
+    /** 座位树已经为哪一天加载过。放在 VM 里，与座位树本身同生命周期（见 VM 注释）。 */
+    val seatTreeDate by viewModel.seatTreeDate.collectAsState()
     val isLoggedIn by viewModel.isLoggedIn.collectAsState(initial = false)
     val bit101LoggedIn by viewModel.bit101LoggedIn.collectAsState(initial = false)
     val authNotice by viewModel.authNotice.collectAsState()
-    val scope = rememberCoroutineScope()
+    val authorizing by viewModel.authorizing.collectAsState()
 
     // 日期选项优先用服务端返回的可约日期；接口未返回时回落到「今天 / 明天」，避免出现空列表。
     val today = remember { LocalDate.now().format(dateFormatter) }
@@ -120,40 +118,25 @@ fun NewTaskScreen(
     // ⚠️ 但**只在日期真的变了时才加载并清空已选地点**：从座位图选完座位返回时
     // 本页会重新进入组合、这个副作用会再跑一次，若无条件清空，用户刚选好的
     // 校区/楼层/区域（连同选座的前提）就又没了。
-    LaunchedEffect(reserveDate, seatlibReady, isLoggedIn) {
-        if (seatlibReady && isLoggedIn && loadedTreeDate != reserveDate) {
+    //
+    // ⚠️ 「已加载过哪一天」取自 ViewModel（与座位树同生命周期），不能放 composable 的
+    // rememberSaveable —— 后者能活过进程重建而座位树不能，会跳过一次本该发生的加载。
+    LaunchedEffect(reserveDate, seatlibReady, isLoggedIn, seatTreeDate) {
+        if (seatlibReady && isLoggedIn && seatTreeDate != reserveDate) {
             viewModel.loadSeatTree(reserveDate)
             selectedCampusId = null; selectedFloorId = null; selectedAreaId = null
-            loadedTreeDate = reserveDate
         }
     }
 
     if (!isLoggedIn) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(24.dp)
-            ) {
-                if (authNotice != null) {
-                    Text(authNotice!!, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-                }
-                Text(
-                    if (bit101LoggedIn) "学校账号已登录，但座位系统尚未授权" else "尚未登录学校账号",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(onClick = {
-                    if (!bit101LoggedIn) {
-                        mainController.navigate(NavDest.Login)
-                    } else {
-                        scope.launch { viewModel.ensureSeatlibSession() }
-                    }
-                }) {
-                    Text(if (bit101LoggedIn) "授权座位系统" else "登录")
-                }
-            }
-        }
+        SeatAuthGate(
+            modifier = modifier,
+            bit101LoggedIn = bit101LoggedIn,
+            authorizing = authorizing,
+            authNotice = authNotice,
+            onLogin = { mainController.navigate(NavDest.Login) },
+            onAuthorize = { viewModel.authorize() },
+        )
         return
     }
 
@@ -184,7 +167,11 @@ fun NewTaskScreen(
         if (treeLoading && seatTreeError == null) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator() }
         } else if (seatTreeError != null) {
-            ErrorCard(title = "加载校区信息失败", errorText = seatTreeError!!, onDismiss = { viewModel.clearSeatTreeError() }, modifier = Modifier.fillMaxWidth())
+            ErrorCard(title = "加载校区信息失败", errorText = seatTreeError!!, onDismiss = {
+                viewModel.clearSeatTreeError()
+                // 关闭后立刻重试一次 —— 否则页面会停在一个空的选择器上，没有任何入口能再拉一次
+                viewModel.loadSeatTree(reserveDate)
+            }, modifier = Modifier.fillMaxWidth())
         } else {
             LocationPicker(
                 nodes = treeNodes,
