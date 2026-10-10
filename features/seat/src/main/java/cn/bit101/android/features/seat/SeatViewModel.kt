@@ -203,8 +203,11 @@ class SeatViewModel @Inject constructor(
                     // ⚠️ 先别急着把用户打回登录页 —— 学号密码已加密持久化，
                     // 大多数情况能静默重登成功（v1.6.4 修「老要重新授权」）。
                     // renew 内部有限流与超时保护，失败自然落回下面的失效提示。
+                    // ⚠️ 这是**自动**续期（用户没发起）⇒ 只允许 cookie 静默认证。
+                    //    凭据直登会打学校 SSO，风控时学校会真发一条短信，而这里没人输。
                     viewModelScope.launch {
-                        val renewed = runCatching { autoLogin.renew() }.getOrNull()
+                        val renewed = runCatching { autoLogin.renew(allowCredentials = false) }
+                            .getOrNull()
                         if (renewed != null) {
                             seatApi.token = renewed
                             onAuthSuccess()
@@ -431,7 +434,8 @@ class SeatViewModel @Inject constructor(
             // 让门禁显示「正在恢复授权…」而不是一个需要手点的死按钮
             _authorizing.value = true
             try {
-                val renewed = runCatching { autoLogin.renew() }.getOrNull() ?: return@launch
+                val renewed = runCatching { autoLogin.renew(allowCredentials = false) }.getOrNull()
+                    ?: return@launch
                 seatApi.token = renewed
                 onAuthSuccess()
             } finally {
@@ -463,8 +467,10 @@ class SeatViewModel @Inject constructor(
     suspend fun ensureSeatlibSession(): Boolean {
         // ⚠️ token 为空 ≠ 一定要人工登录：先试静默续期（cookie → 持久化凭据）。
         // 之前这里直接判死，是「老要重新授权」的根因之一 —— 会话一旦被清就永远要人工。
+        // ⚠️ 这条路径是**用户发起的**（点了「授权」或点了预约）⇒ 允许用凭据直登；
+        //    若学校要求短信验证，SeatScreen 顶层的验证码对话框会立刻弹出让用户输入。
         if (seatApi.token.isEmpty()) {
-            runCatching { autoLogin.renew() }.getOrNull()?.let {
+            runCatching { autoLogin.renew(allowCredentials = true) }.getOrNull()?.let {
                 seatApi.token = it
                 onAuthSuccess()
                 return true

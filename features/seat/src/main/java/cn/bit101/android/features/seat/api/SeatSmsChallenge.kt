@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,6 +31,17 @@ data class SeatSmsChallenge(
 @Singleton
 class SeatSmsChallengeHub @Inject constructor() {
 
+    private companion object {
+        /**
+         * 等用户输验证码的上限。
+         *
+         * ⚠️ 必须有上限：登录流程正挂起等这个码，用户走开 / 界面被划掉时不能让协程永远悬着。
+         * 5 分钟足够「掏手机 → 看短信 → 输入」；超时按登录失败处理，输入框自动收起
+         * （短信已发出，重新授权会再发一条）。
+         */
+        const val WAIT_CODE_TIMEOUT_MS = 5 * 60_000L
+    }
+
     private var pending: CompletableDeferred<String>? = null
 
     private val _challenge = MutableStateFlow<SeatSmsChallenge?>(null)
@@ -41,7 +53,8 @@ class SeatSmsChallengeHub @Inject constructor() {
         synchronized(this) { pending = deferred }
         _challenge.value = SeatSmsChallenge(maskedPhone = maskedPhone, purpose = purpose)
         return try {
-            deferred.await()
+            withTimeoutOrNull(WAIT_CODE_TIMEOUT_MS) { deferred.await() }
+                ?: throw IOException("验证码输入超时，请重新授权")
         } finally {
             _challenge.value = null
             synchronized(this) { if (pending === deferred) pending = null }

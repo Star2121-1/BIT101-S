@@ -139,7 +139,11 @@ class SeatApi @Inject constructor(
                 return@withContext Result.failure(first)
             }
             SeatLog.w(TAG, "session expired, trying silent renew")
-            val renewed = runCatching { autoLogin.renew() }.getOrNull()
+            // ⚠️⚠️ **绝不允许在这里用凭据直登**：这条重试被前台服务（SeatMonitorService）
+            // 调用 —— App 在后台/锁屏时也会走到这里，那时连界面都没有，
+            // 学校风控发的短信会变成一条「来路不明的验证码」（真机反馈）。
+            // 只试 cookie 静默认证；失败就交回上层引导用户手动授权。
+            val renewed = runCatching { autoLogin.renew(allowCredentials = false) }.getOrNull()
             if (renewed.isNullOrBlank()) {
                 // 续期失败（无凭据 / 二次验证 / 限流冷却中）→ 交由上层引导手动登录
                 return@withContext Result.failure(first)

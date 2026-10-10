@@ -6,7 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,13 +27,14 @@ import javax.inject.Singleton
  * 1. **cookie 静默认证**（`authenticateSeatlib()`）—— phpCAS 会话还在时成本最低
  * 2. **学号密码重走 CAS**（`loginWithCredentials()`）—— 最可靠，但会打学校 SSO
  *
- * ## ⚠️ 两个必须做的防护
+ * ## ⚠️ 两条必须守住的线
  *
  * - **限流**：学校 CAS 短时间多次登录会触发风控（要求短信二次验证）。
  *   成功后 30s 内不重复；失败后 5 分钟内不再尝试。
- * - **限时**：`SsoLogin` 的短信回调是**无限期挂起等用户输入**的 ——
- *   后台静默续期一旦赶上学校要求二次验证，就会永远卡住。
- *   所以必须 `withTimeoutOrNull`，超时即取消（并清理短信挂起），回退到手动登录。
+ * - **谁有权打 SSO**：调用方必须显式声明 [renew] 的 `allowCredentials`。
+ *   只有用户明确发起授权的路径才允许走「学号密码重走 CAS」——
+ *   那一步会被学校风控触发**真实短信**，自动路径上没人输验证码，短信就白发了。
+ *   「等验证码」不设总超时（用户要掏手机），限时交给 [SeatSmsChallengeHub]。
  */
 @Singleton
 class SeatAutoLogin @Inject constructor(
@@ -50,9 +50,6 @@ class SeatAutoLogin @Inject constructor(
 
         /** 失败后多久内不再尝试（反复打 SSO 会触发学校风控） */
         const val FAIL_BACKOFF_MS = 5 * 60_000L
-
-        /** 凭据登录的限时。正常全程 <10s；超时基本就是撞上了短信二次验证 */
-        const val CREDENTIAL_TIMEOUT_MS = 25_000L
     }
 
     /** 用锁把并发续期合并成一次 —— 多个任务同时发现会话失效时只打一次 SSO */
@@ -62,22 +59,37 @@ class SeatAutoLogin @Inject constructor(
     private var nextAllowedAt = 0L
 
     /**
-     * 尝试静默续期。成功返回新 token；失败/冷却中返回 null（调用方回退到手动登录）。
+     * 尝试续期。成功返回新 token；失败/冷却中返回 null（调用方回退到手动登录）。
+     *
+     * ⚠️⚠️ [allowCredentials] 决定**允不允许走「学号密码重走 CAS」这一步**。
+     * 那一步会真的打学校 SSO，而**风控触发时学校会直接给你发一条短信验证码**。
+     * 所以规则是：**只有「用户明确发起授权」的路径才传 true**
+     * （点「授权座位系统」/ 点预约）；一切**自动**路径都传 false ——
+     * 进页面的自动续期、token 失效的自动续期、业务请求的 401 重试。
+     * 那些路径要么没有界面、要么用户没要求，短信发出去也没人输（前台服务甚至能在
+     * 锁屏时触发），用户只会收到一条**来路不明的验证码**（真机反馈）。
      *
      * ⚠️ **不会抛异常** —— 续期失败不是要上报的错误，调用方只需要知道成没成。
      */
-    suspend fun renew(): String? = mutex.withLock {
+    suspend fun renew(allowCredentials: Boolean): String? = mutex.withLock {
         val now = System.currentTimeMillis()
-        if (now < nextAllowedAt) return@withLock null
 
-        // 1. cookie 静默认证
+        // 1. cookie 静默认证 —— 只打 seatlib，不打学校 SSO，**永远不会发短信**，
+        //    所以它不受「凭据路径的限流」约束，任何时候都可以先试。
         seatSession.authenticateSeatlib().getOrNull()?.let { result ->
             nextAllowedAt = now + SUCCESS_COOLDOWN_MS
             SeatLog.d(TAG) { "renew ok via cookie" }
             return@withLock result.token
         }
 
-        // 2. cookie 失效 → 学号密码重走 CAS（凭据在登录时已加密持久化）
+        if (!allowCredentials) {
+            SeatLog.d(TAG) { "cookie silent auth failed; this path must not hit SSO" }
+            return@withLock null
+        }
+
+        // 2. 凭据直登会真的打学校 SSO（可能触发风控 → 发短信），必须限流
+        if (now < nextAllowedAt) return@withLock null
+
         val sid = runCatching { loginStatus.sid.get() }.getOrNull().orEmpty()
         val pwd = runCatching { loginStatus.password.get() }.getOrNull().orEmpty()
         if (sid.isBlank() || pwd.isBlank()) {
@@ -87,19 +99,12 @@ class SeatAutoLogin @Inject constructor(
             return@withLock null
         }
 
-        val result = withContext(Dispatchers.IO) {
-            withTimeoutOrNull(CREDENTIAL_TIMEOUT_MS) {
-                seatSession.loginWithCredentials(sid, pwd)
-            }
-        }
-        if (result == null) {
-            // 超时 = 大概率撞上短信二次验证（回调在无限期等输入）。
-            // 取消挂起并回退：让用户在界面上完成验证，比后台永久卡住好。
-            seatSession.cancelSmsChallenge()
-            nextAllowedAt = now + FAIL_BACKOFF_MS
-            SeatLog.w(TAG, "silent credential login timed out (likely 2FA required)")
-            return@withLock null
-        }
+        // ⚠️ 这里**刻意不设总超时**：学校要求短信二次验证时，登录流程会挂起等用户输入，
+        //    而用户掏手机看验证码本来就要一会儿 —— 早先那个 25s 固定超时会在用户还没输完
+        //    时就把整次登录取消、验证码随之作废（真机反馈：「收到了验证码却没人让我们输」）。
+        //    「等验证码」的时限交给 [SeatSmsChallengeHub]（5 分钟，界面上还可手动取消），
+        //    网络段由各自 HTTP 客户端的超时兜底。
+        val result = withContext(Dispatchers.IO) { seatSession.loginWithCredentials(sid, pwd) }
 
         val token = result.getOrNull()?.token
         nextAllowedAt = if (token != null) now + SUCCESS_COOLDOWN_MS else now + FAIL_BACKOFF_MS

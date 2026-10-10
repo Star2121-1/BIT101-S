@@ -36,6 +36,10 @@ android {
         // 供 SeatLog 使用 BuildConfig.DEBUG 区分 debug/release（AGP 8 起 library 默认关闭）
         buildConfig true
     }
+    // 与 :data 一致：单测里 android.util.Log 是空壳，SeatLog 会踩到它
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
     packagingOptions {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
@@ -71,4 +75,6 @@ dependencies {
     // org.json 必须显式提供真实实现：Android SDK 里的 org.json 在单元测试中是空壳，
     // 会让 parseCasUser / serializeTasks 这类纯解析逻辑的测试全部失效。
     testImplementation 'org.json:json:20231013'
+    // 「谁能打学校 SSO」这条线要能被测试证伪（见 SeatAutoLoginPolicyTest）
+    testImplementation "io.mockk:mockk:1.14.5"
 }

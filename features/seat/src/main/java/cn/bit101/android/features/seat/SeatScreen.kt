@@ -30,6 +30,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.seat.ui.component.SmsCodeDialog
 import cn.bit101.android.features.seat.ui.screen.CasLoginScreen
 import cn.bit101.android.features.seat.ui.screen.NewTaskScreen
 import cn.bit101.android.features.seat.ui.screen.SeatMapScreen
@@ -60,6 +61,19 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
     val seatlibReady by viewModel.seatlibReady.collectAsState()
     LaunchedEffect(seatlibReady) {
         if (seatlibReady) viewModel.autoRenewSilently()
+    }
+
+    // ⚠️ 验证码输入框放在这里（`showCasLogin` 早返回**之前**），是**全校唯一入口**。
+    // 学校风控触发二次验证时，短信是「学校直接发出去的」，而触发它的可能是任何一条路径
+    // （自动续期 / 401 重试 / 用户点授权）。之前这个框只存在于「账号密码直登」表单内，
+    // 从其它路径触发的验证码没有任何界面能输入 —— 短信白发了，用户还收到一条莫名验证码。
+    val smsChallenge by viewModel.smsChallenge.collectAsState()
+    smsChallenge?.let { challenge ->
+        SmsCodeDialog(
+            challenge = challenge,
+            onSubmit = { viewModel.submitSmsCode(it) },
+            onCancel = { viewModel.cancelSmsChallenge() },
+        )
     }
 
     if (showCasLogin) {

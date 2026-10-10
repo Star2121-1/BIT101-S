@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -42,7 +41,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.utils.InAppWebUrls
 import cn.bit101.android.features.seat.SeatViewModel
-import cn.bit101.android.features.seat.api.SeatSmsChallenge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -299,60 +297,8 @@ private fun CredentialLoginForm(
         }
     }
 
-    // 学校风控触发二次验证时弹出验证码输入框
-    smsChallenge?.let { challenge ->
-        SmsCodeDialog(
-            challenge = challenge,
-            onSubmit = { viewModel.submitSmsCode(it) },
-            onCancel = { viewModel.cancelSmsChallenge() }
-        )
-    }
-}
-
-/**
- * 短信验证码输入框。
- *
- * 提交后不立即关闭：登录流程拿到验证码才继续，失败会重新弹出（重新发起登录即可）。
- * 这里保持简单 —— 提交即关闭，错误由表单下方的提示呈现。
- */
-@Composable
-private fun SmsCodeDialog(
-    challenge: SeatSmsChallenge,
-    onSubmit: (String) -> Unit,
-    onCancel: () -> Unit,
-) {
-    var code by remember(challenge) { mutableStateOf("") }
-
-    AlertDialog(
-        // 刻意不响应「点外部 / 返回键」：登录流程正挂起等这个验证码，
-        // 误触（例如按返回键收键盘）会直接取消整次登录。要放弃必须显式点「取消」。
-        onDismissRequest = { },
-        title = { Text("输入短信验证码") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(challenge.hint, style = MaterialTheme.typography.bodyMedium)
-                OutlinedTextField(
-                    value = code,
-                    onValueChange = { input -> code = input.filter { it.isDigit() }.take(8) },
-                    label = { Text("验证码") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.NumberPassword,
-                        imeAction = ImeAction.Done
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onSubmit(code) },
-                enabled = code.isNotBlank()
-            ) { Text("确定") }
-        },
-        dismissButton = {
-            TextButton(onClick = onCancel) { Text("取消") }
-        }
-    )
+    // 验证码输入框已提到 SeatScreen 顶层（全校唯一入口）——
+    // 从**任何**路径（自动续期 / 401 重试 / 用户点授权）触发的验证码都必须能立刻输入，
+    // 见 ui/component/SmsCodeDialog.kt
 }
 
