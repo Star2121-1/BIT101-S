@@ -25,6 +25,34 @@ object SchoolDomains {
     /** 学校主域。**写死在这一处**，别在别的地方再拼字符串。 */
     const val ROOT = "bit.edu.cn"
 
+    /**
+     * 统一身份认证（CAS）的那几个域 —— 各子系统的登录跳转都会经过它们。
+     *
+     * ⚠️ 为什么单独列出来：见 [isSsoDomain] 的用途（跨子系统带会话 cookie）。
+     * 从代码里看，跳转链实际是 `子系统 → login.bit.edu.cn → sso.bit.edu.cn`。
+     */
+    private val SSO_HOSTS = listOf("sso.bit.edu.cn", "login.bit.edu.cn")
+
+    /**
+     * 是否 CAS（统一身份认证）域。
+     *
+     * ## 用途：让「跨子系统自动登录」成立
+     *
+     * 各子系统（一卡通 / 图书馆 / 延河课堂）自己域下的会话 cookie，要靠**完整走一遍
+     * CAS 跳转链**才能建立。而 OkHttp 的 cookie jar 是**按域名匹配**的：请求
+     * `dkykt.info.bit.edu.cn` 时带不上 CAS 的 cookie，于是被 302 到 CAS 就停住了
+     * —— 表现和「没登录」一模一样（v1.9.51 真机取证：BIT101 已登录、课表正常，
+     * 但一卡通显示「未登录，点下方登录一卡通」）。
+     *
+     * 修法是：**在请求 CAS 域时，显式把 CAS 会话 cookie 补上**（课表那套做法的
+     * 通版——`DefaultCoursesRepo` 一直是把 cookie 当参数传的，所以它能成功）。
+     * 只在该带的地方带，不把 CAS 的 cookie 滥发给任意子系统。
+     */
+    fun isSsoDomain(host: String?): Boolean {
+        val normalized = normalize(host) ?: return false
+        return SSO_HOSTS.any { normalized == it || normalized.endsWith(".$it") }
+    }
+
     /** 是否学校域（**含**根域 `bit.edu.cn` 本身）。 */
     fun isSchoolDomain(host: String?): Boolean {
         val normalized = normalize(host) ?: return false

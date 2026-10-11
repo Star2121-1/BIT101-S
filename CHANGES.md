@@ -1,5 +1,45 @@
 # CHANGES
 
+## 2026-10-11 v1.9.52 一卡通/图书馆/延河课堂：登录一次就该自动可用
+
+用户问：「登录 BIT101 会同时登录所有可登录的部分吗？别让用户多次验证。」
+
+答是**不会**，而且有真机证据：BIT101 已登录、课表正常，但一卡通显示
+「未登录，点下方登录一卡通」——用户得手动点按钮，在 App 内 WebView 里再走一遍。
+
+### 根因：两套带 cookie 的方式，其中一套不好使
+
+- **课表能成功**，是因为 `DefaultCoursesRepo` 把 cookie **当参数显式传**
+  （`schoolCookies()` → `schoolJxzxehall`），**不受域名匹配影响**。
+- **一卡通 / 图书馆 / 延河课堂**走的是 OkHttp 的 cookie jar，**按域名匹配**：
+  请求 `dkykt.info.bit.edu.cn` 时带不上 CAS 会话 cookie，被 302 到
+  `sso.bit.edu.cn` 就停住了。判据很硬 —— `CampusCardLogic.parse` 只看最终 URL
+  是不是 CAS 域，真机上它判成未登录，说明确实停在了 CAS。
+
+子系统会话此前之所以能用，靠的是「你之前在 WebView 里打开过一次」留下的
+子系统 cookie；它一旦过期就断，且**没有自愈路径**（v1.9.49 一卡通还是 ¥76.97，
+v1.9.51 就变成未登录）。
+
+### 改法：`SsoAwareCookieJar`
+
+CAS 跳转链的**目标域**是 CAS 域，只有那一步需要 CAS 会话 cookie。所以：
+
+- 只在**请求 CAS 域时**，把 CAS 会话 cookie 补进去（按 name 去重，已有的不覆盖）
+- 其余请求完全走原逻辑 —— **绝不把 CAS 会话 cookie 滥发给任意子系统域**
+- 单条 cookie 构造失败只跳过它自己（与 `WebViewCookieSync` 同一原则）
+
+域判据统一加在 `SchoolDomains.isSsoDomain`（`sso.bit.edu.cn` / `login.bit.edu.cn`），
+cookie 出口加在 `SchoolCookieStore.ssoSnapshot`。
+
+⚠️ 这样改完，子系统会话**过期后也能自愈**：CAS 会话还在时，请求会自动重走跳转链
+把子系统 cookie 换回来，不需要用户再点一次。
+
+### 验证
+
+- 新增 5 条单测（`AppHttpClientsTest`），其中「请求子系统域时不带 CAS cookie」是
+  **安全边界**。已按铁律**故意拆掉守卫验证它会红**（拆后 2 条变红）才恢复
+- ⚠️ 改动生效的前提是「CAS 会话还在」—— 若 CAS 也过期了，仍需重新登录（属正常）
+
 ## 2026-10-11 v1.9.51 别再无来由地发短信验证码了；要发就必须立刻能输入
 
 用户反馈：「有些情况会静默发一个验证码到我手机上，也不显示是干嘛的，好像也没有必要。

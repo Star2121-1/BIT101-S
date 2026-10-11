@@ -77,3 +77,20 @@
 3. 客户端用 `AppHttpClients.school()` / `plain()`，别自己 `OkHttpClient.Builder()`
 4. 域名判据一律走 `SchoolDomains`，别就地写 `contains("bit.edu.cn")`
 5. 需要清登录态时用 `SessionCleanup.clearAll()`，别直接 `loginStatus.clear()`
+
+### 子系统（一卡通 / 图书馆 / 延河课堂）的会话怎么来
+
+⚠️ 这些子系统**自己域下的 cookie 必须完整走一遍 CAS 跳转链**才能建立：
+
+```
+子系统 → login.bit.edu.cn → sso.bit.edu.cn → 子系统?ticket=xxx → 落子系统会话 cookie
+```
+
+- **只要用 `AppHttpClients.school()`，这条链就能自己走完** —— 它的 `SsoAwareCookieJar`
+  会在请求 CAS 域时把 CAS 会话 cookie 补上（v1.9.52）。子系统 cookie 过期后能**自愈**，
+  不需要用户再手动点一次「登录一卡通」。
+- 前提是 **CAS 会话还在**；CAS 也过期了就只能重新登录（那是正常的）。
+- ⚠️ `SsoAwareCookieJar` **只在请求 CAS 域时**补 cookie，**绝不滥发给任意子系统域**
+  —— 这条是安全边界，有单测盯着（`AppHttpClientsTest`）。
+- ⚠️ 反例：课表当初能成功，是因为它把 cookie **当参数显式传**
+  （`DefaultCoursesRepo.schoolCookies()`），绕开了域名匹配 —— 那是个例，别照抄。

@@ -37,6 +37,20 @@ internal object SchoolCookieStore {
             .filter { SchoolDomains.isSchoolDomain(it.domain) && !it.hasExpired() }
             .map { it.toSchoolCookie(nowEpochSeconds) }
 
+    /**
+     * 只取 **CAS 域**的 cookie —— 供「跨子系统自动登录」用（见 [SchoolDomains.isSsoDomain]）。
+     *
+     * ⚠️ 与 [snapshot] 的区别不是"多一层过滤"这么简单：这条**只该在请求 CAS 域时带**，
+     * 不要拿它去喂任意子系统的请求 —— 那等于把 CAS 会话 cookie 滥发给第三方域。
+     */
+    fun ssoSnapshot(
+        cookieStore: CookieStore,
+        nowEpochSeconds: Long = Instant.now().epochSecond,
+    ): List<SchoolCookie> =
+        cookieStore.cookies
+            .filter { SchoolDomains.isSsoDomain(it.domain) && !it.hasExpired() }
+            .map { it.toSchoolCookie(nowEpochSeconds) }
+
     internal fun HttpCookie.toSchoolCookie(nowEpochSeconds: Long): SchoolCookie {
         return SchoolCookie(
             name = name,
