@@ -8,8 +8,10 @@ import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.repo.base.CoursesRepo
 import cn.bit101.android.data.repo.base.DDLScheduleRepo
 import cn.bit101.android.data.repo.base.EclassRepo
+import cn.bit101.android.data.repo.base.StudySpotRepository
 import cn.bit101.android.data.repo.base.TeachingAdjustmentRepo
 import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.data.school.TeachingAdjustmentEntry
 import cn.bit101.android.data.school.TeachingAdjustmentStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -54,6 +56,7 @@ class WidgetRepository @Inject constructor(
      * 平时走 [TeachingAdjustmentStore] 的本机缓存。
      */
     private val teachingAdjustmentRepo: TeachingAdjustmentRepo,
+    private val studySpotRepository: StudySpotRepository,
 ) {
 
     /** 动态页的数据：列表 + 「是不是登录着」（前者非空时后者必然为真）。 */
@@ -108,6 +111,14 @@ class WidgetRepository @Inject constructor(
 
         val eclass = eclassData(fresh = forceEclass)
 
+        // 「现在去哪儿自习」：⚠️ 只有**真的要取数**时才算（它要逐栋拉空教室），
+        // 重绘时只读 [StudySpotSnapshot] 的快照 —— 组件重绘不打网络。
+        if (forceEclass) {
+            val spot = runCatching { studySpotRepository.suggest(now) }.getOrNull()
+            StudySpotSnapshot.write(context, spot?.let { StudySpotLogic.coarseTitle(it) })
+        }
+        val studySpotLine = StudySpotSnapshot.read(context)
+
         // 教学安排调整：放假 ⇒ 那天没课；补课 ⇒ 装的是被指定那天的课表。
         // ⚠️ 组件与 App 内课表页必须说同一句话 —— 否则用户拿组件当出门依据会缺课。
         val adjustments = adjustmentEntries(fresh = forceEclass)
@@ -135,6 +146,7 @@ class WidgetRepository @Inject constructor(
             activities = eclass.activities,
             eclassLoggedIn = eclass.loggedIn,
             planOf = planOf,
+            studySpotLine = studySpotLine,
         )
     }
 

@@ -10,6 +10,7 @@ import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.database.entity.ExamScheduleEntity
 import cn.bit101.android.data.database.entity.startAt
+import cn.bit101.android.data.school.CourseWeekdayLogic
 import cn.bit101.android.data.school.DayPlan
 import cn.bit101.android.data.school.TeachingAdjustmentEntry
 import cn.bit101.android.data.school.dateLabelCn
@@ -270,11 +271,9 @@ object NotifyLogic {
      * 而那天恰恰是**要上课**的（用户按平时的课表出门就会缺课）。两个方向都不能漏。
      */
     fun effectiveWeekday(date: LocalDate, planOf: (LocalDate) -> DayPlan?): Int? =
-        when (val plan = planOf(date)) {
-            is DayPlan.MakeUp -> plan.targetWeekday
-            DayPlan.NoClass -> null
-            null -> date.dayOfWeek.value
-        }
+        // ⚠️ 实现下沉到 data 层的 [CourseWeekdayLogic] —— 自习建议要用同一份，
+        // 抄第二份就会漏分支（放假 / 补课两个方向）
+        CourseWeekdayLogic.effectiveWeekday(date, planOf)
 
     private fun classReminders(
         courses: List<CourseScheduleEntity>,
@@ -741,12 +740,9 @@ object NotifyLogic {
      * 与组件侧 `WidgetLogic.weekOf` 同一套规则：**判不出来就不按周次过滤**，
      * 宁可多提醒也不漏。
      */
-    fun weekOf(firstDay: LocalDate?, date: LocalDate): Int {
-        if (firstDay == null) return -1
-        val days = ChronoUnit.DAYS.between(firstDay, date)
-        if (days < 0) return -1
-        return (days / 7).toInt() + 1
-    }
+    fun weekOf(firstDay: LocalDate?, date: LocalDate): Int =
+        // ⚠️ 实现下沉到 data 层（与组件侧、自习建议共用同一份）
+        CourseWeekdayLogic.weekOf(firstDay, date)
 
     /** 周次串（`[1][2][3]`）是否包含第 [week] 周。 */
     fun weeksContains(weeks: String, week: Int): Boolean = weeks.contains("[$week]")

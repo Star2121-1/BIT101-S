@@ -13,6 +13,7 @@ import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.ddl.DdlSource
+import cn.bit101.android.data.school.CourseWeekdayLogic
 import cn.bit101.android.data.school.DayPlan
 import cn.bit101.android.data.school.weekdayCn
 import java.time.LocalDate
@@ -108,6 +109,18 @@ enum class PageKind(val label: String) {
 
     /** 座位预约 */
     SEAT("座位"),
+
+    /**
+     * 「现在去哪儿自习」。
+     *
+     * ⚠️ **新页只能追加在末尾** —— 枚举顺序 = 页签顺序，插在中间会让老用户的页号错位
+     * （页号存的是页名，历史 int 按旧顺序还原）。
+     *
+     * ⚠️ 这一页**只到教学楼粒度、不给具体数字**：组件重绘不打网络，
+     * 「12 间空教室」这种数字可能是几小时前的，写上去就是在骗人。
+     * 数字留给 App 内那张卡（现拉现算），见 [StudySpotLogic.coarseTitle]。
+     */
+    STUDY("自习"),
 }
 
 /**
@@ -462,6 +475,13 @@ object WidgetLogic {
          * ⚠️ 由调用方给 —— [WidgetLogic] 不该知道它是从哪来的（本地缓存 / 网络 / 单测造的）。
          */
         planOf: (LocalDate) -> DayPlan? = { null },
+        /**
+         * 「现在去哪儿自习」的**一行文案**（已粗化到不含数字）；`null` = 取不到。
+         *
+         * ⚠️ 传**字符串**而不是 `Suggestion`：组件重绘不打网络，这份数据只能来自
+         * 周期任务 / 手动刷新时写下的快照，而快照里存的就是一句文案。
+         */
+        studySpotLine: String? = null,
     ): WidgetData = WidgetData(
         pages = listOf(
             coursePage(
@@ -478,7 +498,25 @@ object WidgetLogic {
             // ⚠️ 顺序必须与 PageKind.entries 一致（页签按索引画、页号按页名存）
             activityPage(activities, now, loggedIn = eclassLoggedIn),
             seatPage(seat, loggedIn = seatLoggedIn),
+            // ⚠️ 顺序必须与 PageKind.entries 一致（页签按索引画、页号按页名存）
+            studyPage(studySpotLine),
         )
+    )
+
+    /**
+     * 「现在去哪儿自习」页 —— **只给一句话，且刻意不含数字**。
+     *
+     * ⚠️ 组件重绘不打网络（这是铁律），所以「12 间空教室」这种数字可能是几小时前的。
+     * 写上去就是在骗人 ⇒ 用 [StudySpotLogic.coarseTitle]，只说「哪栋楼有空教室」。
+     * 数字留给 App 内「我」页那张卡（现拉现算）。
+     *
+     * @param suggestion `null` 时整页走空态 —— 取不到就不给建议。
+     */
+    fun studyPage(line: String?): WidgetPage = WidgetPage(
+        kind = PageKind.STUDY,
+        title = PageKind.STUDY.label,
+        items = if (line.isNullOrBlank()) emptyList() else listOf(WidgetLine(lead = "", main = line)),
+        emptyText = "暂时看不了空教室",
     )
 
     // ---------------------------------------------------------- 登录引导与动作键
@@ -864,10 +902,7 @@ object WidgetLogic {
      *
      * @param firstDay 学期第一天。为 null 时返回 -1（未知），调用方应据此**跳过周次过滤**。
      */
-    fun weekOf(firstDay: LocalDate?, today: LocalDate): Int {
-        if (firstDay == null) return -1
-        val days = ChronoUnit.DAYS.between(firstDay, today)
-        if (days < 0) return -1
-        return (days / 7).toInt() + 1
-    }
+    fun weekOf(firstDay: LocalDate?, today: LocalDate): Int =
+        // ⚠️ 实现下沉到 data 层（与提醒侧、自习建议共用同一份）
+        CourseWeekdayLogic.weekOf(firstDay, today)
 }

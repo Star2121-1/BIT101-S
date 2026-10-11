@@ -1,7 +1,9 @@
 package cn.bit101.android.features.user
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,10 +16,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Badge
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Divider
@@ -47,10 +53,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.config.setting.base.PageShowOnNav
+import cn.bit101.android.config.setting.base.ScheduleTabs
+import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.data.school.CampusCardBalanceLogic
 import cn.bit101.android.data.school.CampusCardLogic
 import cn.bit101.android.data.school.CampusNetLogic
 import cn.bit101.android.data.school.CampusNetResult
+import cn.bit101.android.data.school.StudySpotLogic
+import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.component.Avatar
 import cn.bit101.android.features.common.component.CircularProgressIndicatorForPage
@@ -219,6 +230,18 @@ private fun UserScreenContent(    mainController: MainController,
             state = state,
             loading = loadState == SimpleState.Loading,
         ) {
+            // 「现在去哪儿自习」（仅本人页）：放在校园服务卡**更上面** ——
+            // 这是当下最该知道的事，比查余额更即时。
+            if (data.own) {
+                item(key = "study-spot") {
+                    StudySpotSection()
+                    Divider(
+                        modifier = Modifier.fillMaxWidth(),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                    )
+                }
+            }
             // 校园服务卡（仅本人页显示）：一卡通余额摘要 + 校园网入口。
             // 放在信息流最顶上 —— 查余额是高频操作，不该滚去找。
             if (data.own) {
@@ -341,6 +364,155 @@ fun UserScreen(
             }
             ErrorMessageForPage()
         }
+    }
+}
+
+/**
+ * 「现在去哪儿自习」卡片（仅本人页）。
+ *
+ * ⚠️ **取不到建议就整张卡不渲染** —— [StudySpotRepository.suggest] 在拿不到空教室数据、
+ * 或所有楼都满时返回 null；这时候显示一张空卡是噪音，一条瞎猜的建议更糟。
+ * 但**取值期间要显示「正在找空教室…」**，否则就是「半天什么都不出现、然后突然冒出来」。
+ *
+ * ## 点开去哪儿
+ *
+ * 三种建议各自有该去的地方，都走 `GotoRequest`（＝桌面组件点条目那条路）：
+ * 空教室 → 课表页的「空教室」子页签；正在上课 → 课表页；有预约 → 座位页。
+ *
+ * ⚠️ 「空教室」不是一条 `NavDest` 路由，而是课表页里的**子页签** —— 所以不能用
+ *    `mainController.navigate(...)`，必须 `GotoRequest` + `ScheduleTabs` 下标：
+ *    `IndexScreen` 消费 route 切底栏页，`ScheduleScreen` 消费 tab 切子页签。
+ *    ⚠️ `GotoRequest.request` 的 route 取 `toPageData().value`（`"schedule"`），
+ *    **不是** `PageShowOnNav.Schedule.toString()`（那是 NavHost 内部用的另一套）。
+ */
+@Composable
+private fun StudySpotSection() {
+    val vm: CampusServiceViewModel = hiltViewModel()
+    val spot by vm.studySpot.collectAsState()
+    val loading by vm.studySpotLoading.collectAsState()
+
+    val suggestion = spot
+    if (suggestion == null) {
+        if (loading) StudySpotLoadingCard()
+        return
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .clickable { openStudySpotTarget(suggestion.kind) },
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
+        ),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+                        ),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "现在去哪儿自习",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                // 可点击的提示：光靠卡片本身「看起来能点」用户不一定敢点
+                Text(
+                    text = studySpotActionHint(suggestion.kind),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            Spacer(modifier = Modifier.height(5.dp))
+            Text(
+                text = suggestion.title,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = suggestion.detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** 取值中的占位卡 —— 有反馈总比「什么都没发生」强。 */
+@Composable
+private fun StudySpotLoadingCard() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.25f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                strokeWidth = 2.dp,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "正在找空教室…",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** 卡片右上角的动作提示 —— 必须与 [openStudySpotTarget] 真的去的地方一致。 */
+private fun studySpotActionHint(kind: StudySpotLogic.Kind): String = when (kind) {
+    StudySpotLogic.Kind.FREE_ROOM -> "看空教室"
+    StudySpotLogic.Kind.IN_CLASS -> "看课表"
+    StudySpotLogic.Kind.HAS_BOOKING -> "看座位"
+}
+
+/**
+ * 点开建议卡片 → 跳到对应的页面。
+ *
+ * ⚠️ 三种建议指向三个不同页面，别图省事全跳同一个地方。
+ */
+private fun openStudySpotTarget(kind: StudySpotLogic.Kind) {
+    when (kind) {
+        // 空教室 → 课表页的「空教室」子页签（要看得具体是哪几间）
+        StudySpotLogic.Kind.FREE_ROOM -> GotoRequest.request(
+            PageShowOnNav.Schedule.toPageData().value,
+            tab = ScheduleTabs.FREE_CLASSROOM,
+        )
+
+        // 正在上课 → 课表页（看得见这门课在哪、几点下课）
+        StudySpotLogic.Kind.IN_CLASS -> GotoRequest.request(
+            PageShowOnNav.Schedule.toPageData().value,
+            tab = ScheduleTabs.COURSE,
+        )
+
+        // 有座位预约 → 座位页
+        StudySpotLogic.Kind.HAS_BOOKING -> GotoRequest.request(
+            PageShowOnNav.Seat.toPageData().value,
+        )
     }
 }
 

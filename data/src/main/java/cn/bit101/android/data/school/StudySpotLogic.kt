@@ -21,12 +21,51 @@ import java.time.LocalTime
  */
 object StudySpotLogic {
 
-    /** 一栋楼在当前时段的空闲情况。 */
+    /**
+     * 一个「自习点」（**楼 + 楼层**）在当前时段的空闲情况。
+     *
+     * @param floor `null` 表示教室名没解析出楼层 —— 此时文案退回到只说楼名
+     */
     data class BuildingFree(
         val buildingId: String,
         val buildingName: String,
         val freeCount: Int,
+        val floor: Int? = null,
     )
+
+    /**
+     * 从教室名解析楼层。
+     *
+     * **真机样例**（2026-10-12 空教室页实测）：教室名 = 教学楼名 + 房间号 + **房间名后缀**：
+     * `文萃楼H125良乡二号机房` / `文萃楼H221良乡四号机房`；也有不带后缀的 `文萃楼I101`。
+     * 所以先去掉楼名，再取**第一段连续数字**。
+     *
+     * - 数字 3 位（`125`）→ 首位是楼层
+     * - 数字 4 位（`1001`）→ 前两位是楼层（十层以上）
+     * - 其它（解析不出 / 位数不符）→ `null`，**不给楼层**
+     *
+     * ⚠️ 必须取**第一段**数字，不能取末段 —— 后缀是汉字（「良乡二号机房」），
+     *    取末段永远解析不出（v1.9.53 前的实现就是这么错的，界面上一律没有楼层）。
+     *
+     * ⚠️ 解析不出来就返回 null，绝不硬猜一个楼层出来 —— 显示错的楼层比不显示更糟。
+     */
+    fun floorOf(classroomName: String, buildingName: String): Int? {
+        val rest = if (buildingName.isNotEmpty() && classroomName.startsWith(buildingName)) {
+            classroomName.substring(buildingName.length)
+        } else {
+            classroomName
+        }
+        val digits = rest.dropWhile { !it.isDigit() }.takeWhile { it.isDigit() }
+        return when (digits.length) {
+            3 -> digits[0].digitToIntOrNull()
+            4 -> digits.substring(0, 2).toIntOrNull()
+            else -> null
+        }
+    }
+
+    /** 显示用的地点名（带楼层则「楼名 N 楼」）。 */
+    fun placeName(buildingName: String, floor: Int?): String =
+        if (floor == null) buildingName else "${buildingName} ${floor} 楼"
 
     /** 当前或即将开始的一节课（**由调用方按 10 分钟窗口判好**再传进来）。 */
     data class NextCourse(
@@ -130,7 +169,7 @@ object StudySpotLogic {
         // 1. 有课 —— 这时候说「去哪自习」没有意义
         if (course != null) {
             val detail = if (best != null && course.endsAt != null) {
-                "${course.endsAt}下课后，${best.buildingName}有 ${best.freeCount} 间空教室"
+                "${course.endsAt}下课后，${placeName(best.buildingName, best.floor)}有 ${best.freeCount} 间空教室"
             } else {
                 "现在在 ${course.classroom}"
             }
@@ -157,7 +196,7 @@ object StudySpotLogic {
         if (best == null) return null
         return Suggestion(
             kind = Kind.FREE_ROOM,
-            title = "${best.buildingName}现在有 ${best.freeCount} 间空教室",
+            title = "${placeName(best.buildingName, best.floor)}现在有 ${best.freeCount} 间空教室",
             detail = "当前时段空闲",
             buildingName = best.buildingName,
             buildingId = best.buildingId,

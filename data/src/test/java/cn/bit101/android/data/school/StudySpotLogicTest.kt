@@ -127,6 +127,65 @@ class StudySpotLogicTest {
         )
     }
 
+    /**
+     * 楼层解析 —— 用**真机空教室页实测的教室名**当样例（2026-10-12）：
+     * `文萃楼H125良乡二号机房` / `文萃楼H221良乡四号机房`（带房间名后缀）
+     * 与 `文萃楼I101` / `文萃楼I102` / `文萃楼I202`（不带后缀）。
+     *
+     * ⚠️ 解析不出来要返回 null，**绝不能硬猜一个楼层出来**。
+     */
+    @Test
+    fun `楼层解析用真机教室名样例`() {
+        assertEquals(1, StudySpotLogic.floorOf("文萃楼I101", "文萃楼I"))
+        assertEquals(1, StudySpotLogic.floorOf("文萃楼I102", "文萃楼I"))
+        assertEquals(2, StudySpotLogic.floorOf("文萃楼I202", "文萃楼I"))
+        assertEquals(10, StudySpotLogic.floorOf("文萃楼I1001", "文萃楼I"))
+        // 教室名不带楼名前缀时，直接取第一段数字
+        assertEquals(3, StudySpotLogic.floorOf("I301", "文萃楼I"))
+        // 解析不出 → 不给楼层
+        assertNull(StudySpotLogic.floorOf("文萃楼I", "文萃楼I"))
+        assertNull(StudySpotLogic.floorOf("文萃楼IAB", "文萃楼I"))
+    }
+
+    /**
+     * ⚠️ 房间号后面还挂着房间名（真机实况）—— 必须取**第一段**数字。
+     *
+     * 曾经写成「取末尾那串数字」，而末尾是「良乡二号机房」这种汉字 ⇒ 一律解析成 null，
+     * 界面上就永远没有楼层（承诺的「精确到楼层」等于没实现）。
+     */
+    @Test
+    fun `房间号带房间名后缀时仍能解析楼层`() {
+        assertEquals(1, StudySpotLogic.floorOf("文萃楼H125良乡二号机房", "文萃楼H"))
+        assertEquals(1, StudySpotLogic.floorOf("文萃楼H126良乡三号机房", "文萃楼H"))
+        assertEquals(2, StudySpotLogic.floorOf("文萃楼H221良乡四号机房", "文萃楼H"))
+        assertEquals(2, StudySpotLogic.floorOf("文萃楼H229良乡七号机房", "文萃楼H"))
+        // 楼名给了简写（少一个区号字母）也要能解析
+        assertEquals(1, StudySpotLogic.floorOf("文萃楼H125良乡二号机房", "文萃楼"))
+        // 房间名里的数字**不能**被当成房间号：第一段才是房间号
+        assertEquals(2, StudySpotLogic.floorOf("文萃楼H221三号机房2", "文萃楼H"))
+        // 第一段数字位数不对 → 宁可没有楼层，也不猜
+        assertNull(StudySpotLogic.floorOf("线上考试2", "综合教学楼大楼B"))
+        assertNull(StudySpotLogic.floorOf("文萃楼H1-101", "文萃楼H"))
+    }
+
+    @Test
+    fun `地点名带楼层`() {
+        assertEquals("文萃楼I 3 楼", StudySpotLogic.placeName("文萃楼I", 3))
+        assertEquals("文萃楼I", StudySpotLogic.placeName("文萃楼I", null))
+    }
+
+    /** 有楼层时，推荐文案要写到楼层这一级。 */
+    @Test
+    fun `推荐文案写到楼层`() {
+        val s = StudySpotLogic.suggest(
+            now = LocalTime.of(12, 0),
+            course = null,
+            booking = null,
+            buildings = listOf(StudySpotLogic.BuildingFree("b1", "文萃楼I", floor = 3, freeCount = 12)),
+        )
+        assertEquals("文萃楼I 3 楼现在有 12 间空教室", s?.title)
+    }
+
     /** ⚠️ 组件那份**刻意不含数字**（组件不打网络，数字可能是几小时前的）。 */
     @Test
     fun `组件用的粗粒度文案不含数量`() {

@@ -120,6 +120,13 @@ internal abstract class RepoModule {
         freeClassroomRepo: DefaultFreeClassroomRepo
     ): FreeClassroomRepo
 
+    /** 「现在去哪儿自习」—— 课表 / 教学调整 / 空教室三份数据拼成一条建议。 */
+    @Binds
+    @Singleton
+    abstract fun bindStudySpotRepository(
+        studySpotRepository: DefaultStudySpotRepository
+    ): StudySpotRepository
+
     /** 成绩（BIT101 /scores）—— 目前只为「出分提醒」服务。 */
     @Binds
     @Singleton

@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import cn.bit101.android.data.repo.base.CampusCardRepo
 import cn.bit101.android.data.repo.base.CampusNetRepo
 import cn.bit101.android.data.repo.base.LibBorrowRepo
+import cn.bit101.android.data.repo.base.StudySpotRepository
 import cn.bit101.android.data.school.BalanceTrend
 import cn.bit101.android.data.school.CampusCardBalanceStore
 import cn.bit101.android.data.school.CampusCardSnapshot
+import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.data.school.CampusNetResult
 import cn.bit101.android.data.school.CampusNetTrafficStore
 import cn.bit101.android.data.school.LibBorrowResult
@@ -37,8 +39,25 @@ internal class CampusServiceViewModel @Inject constructor(
     private val campusCardRepo: CampusCardRepo,
     private val campusNetRepo: CampusNetRepo,
     private val libBorrowRepo: LibBorrowRepo,
+    private val studySpotRepository: StudySpotRepository,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
+
+    /**
+     * 「现在去哪儿自习」的建议；`null` = 取不到或当下不该给（**不给瞎建议**）。
+     */
+    private val _studySpot = MutableStateFlow<StudySpotLogic.Suggestion?>(null)
+    val studySpot: StateFlow<StudySpotLogic.Suggestion?> = _studySpot.asStateFlow()
+
+    /**
+     * 自习建议是否正在取。
+     *
+     * ⚠️ 这个建议要逐栋拉空教室（并发但仍是好几个请求），**不是瞬间就能有** ——
+     * 没有它的话界面就是「什么都不显示，十几秒后突然冒出一张卡」，
+     * 用户会以为功能坏了（座位页栽过同一个坑：没有反馈就当成没反应）。
+     */
+    private val _studySpotLoading = MutableStateFlow(false)
+    val studySpotLoading: StateFlow<Boolean> = _studySpotLoading.asStateFlow()
 
     private val _snapshot = MutableStateFlow<CampusCardSnapshot?>(null)
     val snapshot: StateFlow<CampusCardSnapshot?> = _snapshot.asStateFlow()
@@ -96,6 +115,16 @@ internal class CampusServiceViewModel @Inject constructor(
 
     fun refresh() {
         if (_loading.value) return
+        // ⚠️ 自习建议**单独起一个协程**：它要逐栋拉空教室（最多 8 栋），
+        //    不该拖慢一卡通 / 校园网这些秒回的数据
+        viewModelScope.launch {
+            _studySpotLoading.value = true
+            try {
+                _studySpot.value = runCatching { studySpotRepository.suggest() }.getOrNull()
+            } finally {
+                _studySpotLoading.value = false
+            }
+        }
         viewModelScope.launch {
             _loading.value = true
             try {
