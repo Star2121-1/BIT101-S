@@ -464,6 +464,31 @@ object StudySpotLogic {
     }
 
     /**
+     * 「今天的课是不是都上完了」—— `at` 已过作息表里最后一节的**结束时刻**。
+     *
+     * ⚠️ 这时候 [sectionFor] 会返回 `null`（没有「当前节次」可算），但**那不等于不知道**：
+     *    恰恰相反 —— 既然今天没有更多节次了，一间此刻空着的教室**今天不会再被课占用**。
+     *    ⇒ 这种场合要有一个**更强也更准**的结论，而不是含糊的「现在空着」
+     *    （后者会让用户以为马上就得走，其实是白丢了一个能待一晚上的地方）。
+     *
+     * ⚠️ 别跟「算不出来」混为一谈：[freeUntilTime] 返回 `null` 是「不做断言」，
+     *    而这里是有明确结论 —— 所以由 [SpotOption.dayOver] 单独携带，不能塞进 `untilAt`。
+     */
+    fun isDayOver(table: TimeTable, at: LocalTime): Boolean {
+        val last = table.lastOrNull() ?: return false
+        return !at.isBefore(last.endTime)
+    }
+
+    /**
+     * [isDayOver] 时那句话。
+     *
+     * ⚠️ 与空教室页（`features/schedule/FreeClassroomSearch.kt`）的「空闲到明天」
+     * **保持同一口径** —— 同一个事实两处说法不一样，用户会以为出了两个错。
+     * ⚠️ 不谈明天白天（那不是今天的数据能说的），只说「到明天」= 今天剩下的时间。
+     */
+    const val DAY_OVER_TEXT = "空闲到明天"
+
+    /**
      * 从 [from] 节起，某间教室还能**连续**空几节（含 [from] 这一节）。
      *
      * ⚠️ `busyTimeStr` 为 null / 空串 = 全天空闲（见 [parseBusySections]），不是数据缺失。
@@ -640,8 +665,17 @@ object StudySpotLogic {
     /**
      * 把教室候选**筛出来并排好序**：门槛（[MIN_FREE_SECTIONS]）→ 打分 → 同楼限流。
      *
-     * ⚠️ **必须有确定性**：并列时按楼名、再按教室名 —— 输入顺序来自并发请求的 `awaitAll`，
-     *    不兜住的话同一份数据两次排序给出的第一条会不一样，卡片上的推荐会自己跳。
+     * ⚠️ **必须有确定性**：并列时按「这栋楼空几间」、再楼名、再教室名 ——
+     *    输入顺序来自并发请求的 `awaitAll`，不兜住的话同一份数据两次排序给出的第一条会不一样，
+     *    卡片上的推荐会自己跳。
+     *
+     * ## ⚠️ 为什么并列规则是「这栋楼还有几间」
+     *
+     * 晚上（没有参考点、又过了最后一节）时 [RoomCandidate.score] 会**全部变成 0**
+     * ⇒ 若直接落到楼名字典序，候选就成了「文萃楼B/C/E/F」这种**按拼音排出来的结果**：
+     * 用户课表里的文萃楼I 反而进不了前 8（真机实测过）。
+     * 「这栋楼空着几间」是**真信息**：空得多的楼，用户真走过去时更可能有位子。
+     * 有参考点时打分本身就分得开，这条很少触发，只在并列时兜底。
      */
     fun rankRooms(rooms: List<RoomFree>, reference: Reference? = null): List<RoomCandidate> {
         val ref = CampusLocations.match(reference?.classroom)
@@ -651,6 +685,7 @@ object StudySpotLogic {
             .sortedWith(
                 compareByDescending<RoomCandidate> { it.score() }
                     .thenByDescending { it.room.freeSectionsAhead }
+                    .thenByDescending { it.room.buildingFreeCount }
                     .thenBy { it.room.buildingName }
                     .thenBy { it.room.classroomName },
             )
@@ -732,9 +767,20 @@ object StudySpotLogic {
         val distance: String? = null,
         /** 能待到几点（`20:55`）；`null` = 不做断言 */
         val untilAt: String? = null,
+        /** 今天的课已经上完了吗（见 [isDayOver]）；为真时 [untilAt] 必然是 `null` */
+        val dayOver: Boolean = false,
     ) {
-        /** 标题：`文萃楼C 501a，空到 20:55`。算不出钟点时只说地点（**不编时间**）。 */
-        val title: String get() = if (untilAt != null) "$place，空到 $untilAt" else place
+        /**
+         * 标题：`文萃楼C 501a，空到 20:55`。
+         *
+         * ⚠️ 三态，优先级固定：**今天上完了**（`文萃楼B 129，空闲到明天`）
+         * > 算得出钟点（`空到 20:55`）> 只说地点（**不编时间**）。
+         */
+        val title: String get() = when {
+            dayOver -> "$place，$DAY_OVER_TEXT"
+            untilAt != null -> "$place，空到 $untilAt"
+            else -> place
+        }
 
         /**
          * 副文案：距哪儿多远 · 几层 · 房间名 · 这栋楼还有几间。
@@ -883,6 +929,7 @@ object StudySpotLogic {
             roomKind = roomKindOf(room.classroomName, room.buildingName),
             distance = referenceLabel?.let { distanceText(candidate.distance, it) },
             untilAt = freeUntilTime(table, at, room.freeSectionsAhead),
+            dayOver = isDayOver(table, at),
         )
     }
 
@@ -1059,10 +1106,14 @@ object StudySpotLogic {
             SpotDetailRow(
                 buildingId = option.buildingId,
                 place = option.place,
-                // ⚠️ 算不出「空到几点」时说「现在空着」而不是留空：
-                //    这间教室在到达时刻确实是空的（取数时就按这个筛过），这是**事实**；
-                //    而「空到几点」我们算不出来，所以不说。
-                untilText = option.untilAt?.let { "空到 $it" } ?: "现在空着",
+                // ⚠️ 三态，优先级与 [SpotOption.title] 一致：**今天上完了** > 算得出钟点 > 「现在空着」。
+                //    「现在空着」不是兜底废话：这间教室在到达时刻确实是空的（取数时就按这个筛过），
+                //    这是**事实**；只是「空到几点」算不出来，所以只说当前状态、不编钟点。
+                untilText = when {
+                    option.dayOver -> DAY_OVER_TEXT
+                    option.untilAt != null -> "空到 ${option.untilAt}"
+                    else -> "现在空着"
+                },
                 detail = option.detail,
                 top = index == 0,
             )

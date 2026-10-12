@@ -3,6 +3,7 @@ package cn.bit101.android.data.school
 import cn.bit101.api.model.common.ClassroomInfo
 import cn.bit101.android.config.setting.base.TimeTableItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -527,6 +528,57 @@ class StudySpotLogicTest {
         assertEquals("3 层 · 这栋楼还有 3 间", card.detail)
     }
 
+    /**
+     * ⚠️⚠️ **当天的课都上完时**，不能再说含糊的「现在空着」。
+     *
+     * 真机（2026-10-12 22:29）实测：卡片是 `文萃楼B 129`、副文案 `1 层 · 这栋楼还有 11 间`，
+     * 详情页每行却写「现在空着」，而**空教室页**对同一间教室写的是「空闲到明天」
+     * —— 同一个事实两种说法；更要命的是「现在空着」会让人以为马上就得走，
+     * 其实当天已经没有课了，可以一直待下去。
+     */
+    @Test
+    fun `当天的课上完了就说空闲到明天`() {
+        assertTrue(StudySpotLogic.isDayOver(table, LocalTime.of(12, 0)))
+
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(12, 0),
+            table = table,
+            course = null,
+            booking = null,
+            rooms = listOf(room("b1", "文萃楼B", "文萃楼B129", floor = 1, ahead = 0, inBuilding = 11)),
+        )
+        val card = StudySpotLogic.studySpotCardOf(plan, 0)!!
+        assertEquals("文萃楼B 129，空闲到明天", card.title)
+        assertEquals("1 层 · 这栋楼还有 11 间", card.detail)
+
+        // 详情页必须与卡片口径一致（铁律 0.1：两边该一致处必补「两边一致」断言）
+        assertEquals(StudySpotLogic.DAY_OVER_TEXT, StudySpotLogic.detailOf(plan).rows.first().untilText)
+    }
+
+    /**
+     * 反向钉住：还在作息表里时**不许**说「空闲到明天」（那会让人以为今天没课了）。
+     *
+     * ⚠️ 「没发生 X」的断言必须先把 X 的前提桩上，否则会假通过 —— 这条就是上一条的守卫。
+     * ⚠️ 边界：恰好等于最后一节**结束**时刻（10:50）就已经算「上完了」。
+     */
+    @Test
+    fun `还在作息表内时不说空闲到明天`() {
+        assertFalse(StudySpotLogic.isDayOver(table, LocalTime.of(8, 20)))
+        assertFalse(StudySpotLogic.isDayOver(table, LocalTime.of(10, 49)))
+        assertTrue(StudySpotLogic.isDayOver(table, LocalTime.of(10, 50)))
+
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(8, 20),
+            table = table,
+            course = null,
+            booking = null,
+            rooms = listOf(room("b1", "文萃楼B", "文萃楼B129", floor = 1, ahead = 3, inBuilding = 11)),
+        )
+        val card = StudySpotLogic.studySpotCardOf(plan, 0)!!
+        assertEquals("文萃楼B 129，空到 10:50", card.title)
+        assertEquals("空到 10:50", StudySpotLogic.detailOf(plan).rows.first().untilText)
+    }
+
     /** 空闲态卡片：标题只谈**一间教室**，副文案给距离 / 楼层 / 这栋楼还有几间。 */
     @Test
     fun `空闲态卡片的主语是一间教室`() {
@@ -687,6 +739,51 @@ class StudySpotLogicTest {
             reference = StudySpotLogic.Reference("文萃楼I404", "你上一节课"),
         )
         assertEquals("甲楼101", ranked2.first().room.classroomName)
+    }
+
+    /**
+     * ⚠️⚠️ **打分全部并列时**，不能再落到楼名字典序。
+     *
+     * 真机（2026-10-12 22:29）实测：晚上没有参考点、又过了最后一节 ⇒ 打分**全是 0** ⇒
+     * 排序退化成按楼名排，候选成了「文萃楼B/C/E/F」这种**按拼音排出来的结果**，
+     * 用户课表里的文萃楼I 反而进不了前 8。
+     * ⇒ 并列时优先「这栋楼空着几间」—— 那是**真信息**：空得多的楼，走过去更可能有位子。
+     */
+    @Test
+    fun `打分全部并列时优先这栋楼空得多的`() {
+        // ⚠️ 刻意选「楼名 E < F」的一对：字典序会让 E 在前，
+        //    所以这一条能证明起作用的是**新规则**，不是碰巧和字典序一致
+        val ranked = StudySpotLogic.rankRooms(
+            rooms = listOf(
+                room("bE", "文萃楼E", "文萃楼E201", ahead = 0, inBuilding = 2),
+                room("bF", "文萃楼F", "文萃楼F101", ahead = 0, inBuilding = 33),
+            ),
+        )
+        assertEquals("文萃楼F", ranked.first().room.buildingName)
+
+        // 换过来也一样：与楼名字典序无关，只看谁空得多
+        val ranked2 = StudySpotLogic.rankRooms(
+            rooms = listOf(
+                room("bF", "文萃楼F", "文萃楼F101", ahead = 0, inBuilding = 1),
+                room("bE", "文萃楼E", "文萃楼E201", ahead = 0, inBuilding = 40),
+            ),
+        )
+        assertEquals("文萃楼E", ranked2.first().room.buildingName)
+    }
+
+    /** 有参考点时打分本身分得开 —— 「空几间」只在**并列**时兜底，不得喧宾夺主。 */
+    @Test
+    fun `有参考点时仍然是打分高的优先`() {
+        val ranked = StudySpotLogic.rankRooms(
+            rooms = listOf(
+                // 这栋楼空 33 间，但在别处
+                room("bF", "文萃楼F", "文萃楼F101", ahead = 0, inBuilding = 33),
+                // 只空 2 间，但就在用户上一节课那栋楼 ⇒ 有「同一栋楼」加成
+                room("bI", "文萃楼I", "文萃楼I302", ahead = 0, inBuilding = 2),
+            ),
+            reference = StudySpotLogic.Reference("文萃楼I404", "你上一节课"),
+        )
+        assertEquals("文萃楼I302", ranked.first().room.classroomName)
     }
 
     /** 距离档位与文案（坐标表是真的，但精度只到 ~31 米 ⇒ **只给档位**）。 */
