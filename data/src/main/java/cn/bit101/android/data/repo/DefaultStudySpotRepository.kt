@@ -79,7 +79,7 @@ internal class DefaultStudySpotRepository @Inject constructor(
             ?.takeIf { it.isNotEmpty() }
             ?: return@withContext null
 
-        val ofDay = runCatching { coursesOfDay(now, table) }.getOrDefault(emptyList())
+        val ofDay = runCatching { coursesOfDay(now) }.getOrDefault(emptyList())
 
         // ⚠️ 判断本身**只有一份实现**，在 [StudySpotLogic]（桌面组件的自习页也调它）。
         //    这里只负责「把当天的课凑出来」，别把「节次落在区间内 + 10 分钟窗口」再写一遍。
@@ -129,10 +129,7 @@ internal class DefaultStudySpotRepository @Inject constructor(
      * ⚠️ 放假那天没有课（[CourseWeekdayLogic.effectiveWeekday] 返回 null）——
      *    补课日装的则是**被指定那天**的课表。
      */
-    private suspend fun coursesOfDay(
-        now: LocalDateTime,
-        table: TimeTable,
-    ): List<StudySpotLogic.CourseAt> {
+    private suspend fun coursesOfDay(now: LocalDateTime): List<StudySpotLogic.CourseAt> {
         val date = now.toLocalDate()
         val entries = runCatching { teachingAdjustmentRepo.load() }.getOrNull()?.entries.orEmpty()
         val planOn: (LocalDate) -> cn.bit101.android.data.school.DayPlan? =
