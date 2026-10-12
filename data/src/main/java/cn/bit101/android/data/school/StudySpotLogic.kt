@@ -767,12 +767,23 @@ object StudySpotLogic {
         /** 候选取舍，按推荐度排序 */
         val options: List<SpotOption> = emptyList(),
     ) {
-        /** 有东西可展示吗 —— 三种建议都取不到时**整张卡不渲染**（不给瞎建议）。 */
+        /**
+         * 有东西可展示吗 —— 决定**这张卡要不要出现**。为 `false` 时整块区域不渲染。
+         *
+         * ⚠️⚠️ 这里问的是「**这张卡能不能显示**」，**不是**「有没有候选」。
+         *    2026-10-12 真机栽过一次：空闲态曾经写成 `FREE_ROOM -> options.isNotEmpty()`，
+         *    于是**取不到空教室时整张卡静默消失** —— 界面看起来完全正常（就是少了一块），
+         *    用户分不清「没查到数据」和「功能坏了」。更糟的是详情页那句兜底文案
+         *    [NO_CANDIDATE_HINT_NOW] **永远够不着**：详情页唯一的入口就是这张卡。
+         *    ⇒ 「没有候选」必须由 [studySpotCardOf] 用文案表达，**不许在这里退化成「不显示」**。
+         */
         val hasContent: Boolean
             get() = when (kind) {
                 Kind.IN_CLASS -> courseTitle != null
                 Kind.HAS_BOOKING -> bookingTitle != null
-                Kind.FREE_ROOM -> options.isNotEmpty()
+                // 空闲态**永远可显示**：至少有「现在没课」+「暂未查到空教室」两句真话可说。
+                // 别改回 options.isNotEmpty() —— 那正是上面那个静默消失的成因。
+                Kind.FREE_ROOM -> true
             }
     }
 
@@ -924,7 +935,15 @@ object StudySpotLogic {
                 //    标题（`文萃楼C 501a，空到 20:55`）自己已经说完了，
                 //    再补一句「当前时段空闲」是重复（而重复会让卡片显得啰嗦、没有新信息）
                 SpotCard(kind = Kind.FREE_ROOM, title = it.title, detail = it.detail)
-            }
+            } ?: SpotCard(
+                // ⚠️⚠️ 一间候选都没有时**也必须出卡**（这里曾经是 `?: null` ⇒ 整块区域静默消失）。
+                //    说两句**真话**：确知的「现在没课」+ 只声明没查到的「暂未查到空教室」。
+                //    ⚠️ 别改回 null —— 界面拿到 null 会直接 `return`，详情页就再也进不去了
+                //    （见 [Plan.hasContent] 的注释）。
+                kind = Kind.FREE_ROOM,
+                title = FREE_HEADLINE,
+                detail = NO_CANDIDATE_HINT_NOW,
+            )
         }
     }
 
@@ -1022,6 +1041,13 @@ object StudySpotLogic {
     const val NO_CANDIDATE_HINT_NOW = "暂未查到空教室"
 
     /**
+     * 空闲态的那一句**事实**（「现在没课」）—— 卡片标题与详情页 headline **共用这一份**。
+     *
+     * ⚠️ 两处各写一个字面量迟早会漂移：同一个状态，卡片和详情页说法不一样，用户会以为出错了。
+     */
+    const val FREE_HEADLINE = "现在没课"
+
+    /**
      * 组装详情页内容。
      *
      * ⚠️ 与卡片用的是**同一份** [Plan]（同一时刻、同一批候选）——
@@ -1059,7 +1085,7 @@ object StudySpotLogic {
 
             Kind.FREE_ROOM -> SpotDetail(
                 kind = plan.kind,
-                headline = "现在没课",
+                headline = FREE_HEADLINE,
                 subline = if (rows.isEmpty()) "" else "按能待多久、离你多近排的",
                 rows = rows,
                 emptyHint = if (rows.isEmpty()) NO_CANDIDATE_HINT_NOW else null,

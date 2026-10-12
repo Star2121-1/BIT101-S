@@ -854,9 +854,17 @@ class StudySpotLogicTest {
         assertEquals("已约好，直接去就行", card.detail)
     }
 
-    /** 一间候选都没有时 `hasContent` 为 false ⇒ 整张卡不渲染，另一条路照常给。 */
+    /**
+     * ⚠️⚠️ 空闲态**一间候选都没查到，也必须出卡**。
+     *
+     * 这条测试以前断言的是相反的行为（`hasContent == false` + 卡片为 `null`）——
+     * 而那正是 2026-10-12 真机抓到的缺陷：取数失败 ⇒ **整块区域静默消失**，
+     * 界面看起来完全正常，用户分不清「没查到数据」和「功能坏了」；
+     * 详情页那句兜底文案也因此**永远够不着**（详情页唯一的入口就是这张卡）。
+     * ⇒ 「能不能显示」与「有没有候选」**是两件事**，后者靠文案表达。
+     */
     @Test
-    fun `没有任何候选时不显示卡片`() {
+    fun `空闲态一间候选都没有也要出卡并说清没查到`() {
         val empty = StudySpotLogic.planOf(
             at = LocalTime.of(12, 0),
             table = table,
@@ -864,8 +872,51 @@ class StudySpotLogicTest {
             booking = null,
             rooms = emptyList(),
         )
-        assertEquals(false, empty.hasContent)
-        assertNull(StudySpotLogic.studySpotCardOf(empty, 0))
+        assertTrue(empty.options.isEmpty())
+        // 没有候选 ≠ 不许显示
+        assertTrue(empty.hasContent)
+
+        val card = StudySpotLogic.studySpotCardOf(empty, 0)!!
+        assertEquals(StudySpotLogic.Kind.FREE_ROOM, card.kind)
+        assertEquals("现在没课", card.title)
+        // ⚠️ 只声明「没查到」，**不声明「没有空教室」**（我们只看了前 MAX_BUILDINGS 栋）
+        assertEquals("暂未查到空教室", card.detail)
+    }
+
+    /** 无候选时详情页也够得着 —— 以前这句兜底永远进不去（入口就是那张卡）。 */
+    @Test
+    fun `空闲态无候选时详情页给出没查到的说明`() {
+        val empty = StudySpotLogic.planOf(
+            at = LocalTime.of(12, 0),
+            table = table,
+            course = null,
+            booking = null,
+            rooms = emptyList(),
+        )
+
+        val detail = StudySpotLogic.detailOf(empty)
+        assertTrue(detail.rows.isEmpty())
+        assertEquals("暂未查到空教室", detail.emptyHint)
+    }
+
+    /**
+     * 同状态在卡片与详情页上**必须说同一句话**。
+     *
+     * ⚠️ 铁律 0.1：两边各写一个字面量迟早漂移，用户会以为出了两个错。这里钉住「两边一致」。
+     */
+    @Test
+    fun `空闲态的标题在卡片与详情页上一致`() {
+        val empty = StudySpotLogic.planOf(
+            at = LocalTime.of(12, 0),
+            table = table,
+            course = null,
+            booking = null,
+            rooms = emptyList(),
+        )
+
+        val card = StudySpotLogic.studySpotCardOf(empty, 0)!!
+        assertEquals(StudySpotLogic.FREE_HEADLINE, card.title)
+        assertEquals(StudySpotLogic.FREE_HEADLINE, StudySpotLogic.detailOf(empty).headline)
     }
 
     // ===================================================== 详情页（点卡片进去看）
