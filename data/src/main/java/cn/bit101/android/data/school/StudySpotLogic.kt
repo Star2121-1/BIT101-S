@@ -441,28 +441,26 @@ object StudySpotLogic {
         "${candidatePlace(candidate)}现在有 ${candidate.freeCount} 间空教室"
 
     /**
-     * 「这里能待多久」。
+     * 「这间教室能待到几点」的**钟点**（`20:55`）；算不出来返回 `null`。
      *
      * @param at **用户实际会到那儿的时刻**（正在上课时就是下课后，见 [planOf] 的说明）
      * @param freeSectionsAhead 见 [freeSectionsAhead]；`<= 0` 返回 `null`（**不做断言**）
-     * @return `有教室空到 20:55`；当前不在任何时段（课都上完了）时返回 `null`
      *
-     * ## ⚠️⚠️ 措辞为什么是「**有教室**空到」，而不是「（这栋楼）空到」
+     * ## ⚠️ 只返回钟点，**不返回整句话**
      *
-     * 这个数的来源是：**各间教室里，「从现在起连续空着」最长的那个房间**。
-     * 它保证的是「**至少有 1 间**能一路坐到底」，**不保证**整栋楼/整层都空着。
-     *
-     * 曾经写成「至少空到 20:55」—— 挂在楼名后面，读起来就是「这栋楼空到 20:55」，
-     * 而那是另一句话（而且多半是假的）。同一份数据换个主语，正确性就变了。
+     * 主语是谁必须由调用方按**它当时在说哪一级**来决定：
+     * 教室级是「文萃楼C 501a 空到 20:55」，楼级是「有教室空到 20:55」——
+     * 同一份数据换个主语，正确性就变了（「这栋楼空到 20:55」是另一句话，而且多半是假的）。
+     * 把措辞塞进这里，迟早有一个调用方把主语说错。
      */
-    fun freeUntilText(table: TimeTable, at: LocalTime, freeSectionsAhead: Int): String? {
+    fun freeUntilTime(table: TimeTable, at: LocalTime, freeSectionsAhead: Int): String? {
         if (freeSectionsAhead <= 0) return null
         // ⚠️ 空表 / 当天课都上完时 sectionFor 返回 null ⇒ 没有「到几点」可言，也不说
         val section = sectionFor(table, at) ?: return null
         // 超出作息表就截到最后一节（不能因为「后面没定义了」就不给结论）
         val last = minOf(section + freeSectionsAhead - 1, table.size)
         val end = table.getOrNull(last - 1)?.endTime ?: return null
-        return "有教室空到 ${end.truncatedTo(ChronoUnit.MINUTES)}"
+        return end.truncatedTo(ChronoUnit.MINUTES).toString()
     }
 
     /**
@@ -481,31 +479,273 @@ object StudySpotLogic {
         return count
     }
 
+    // ======================================================== 教室级候选（v1.12）
+    //
+    // ## 为什么还要从「楼」往下走一级
+    //
+    // 楼级只说得出「文萃楼C现在有 10 间空教室」—— 人到了那栋楼还得自己一间间找。
+    // 教室级能直接说「文萃楼C 501a，空到 20:55」，而且「能待多久」终于有了**准确的主语**
+    //（楼级只能取各间里最长的那个，于是措辞得绕成「有教室空到…」）。
+    //
+    // ⚠️ 代价是候选会爆炸：8 栋 × 约 10 间 = 80 间，「换一个」翻 80 次没有意义。
+    //    所以必须先**硬门槛**筛、再**同楼限流**，最后只留几个。
+
+    /** 一间教室在当前时段的空闲情况 —— **教室级**的原始事实。 */
+    data class RoomFree(
+        val buildingId: String,
+        val buildingName: String,
+        /** 服务端给的完整教室名，如 `文萃楼C501a` / `文萃楼H125良乡二号机房` */
+        val classroomName: String,
+        /** 解析出的楼层；`null` = 解析不出 */
+        val floor: Int? = null,
+        /** 从到达时刻起，这间教室连续空几节（含当前节）；`0` = **算不出**（不是「空 0 节」） */
+        val freeSectionsAhead: Int = 0,
+        /** 这栋楼当前时段一共空多少间 —— 教室级候选也要能看出「这栋楼还有几间」 */
+        val buildingFreeCount: Int = 0,
+    )
+
     /**
-     * 卡片上的一条候选取舍 —— **文案已经渲染好**，界面不需要知道时间表与时刻。
+     * 距离的**参考点**：用户大概在哪。
      *
-     * ⚠️ 三段说明**分开存**而不是拼成一句：上课中与空闲时要说的话不一样 ——
-     *    上课中要的是「下课后去哪儿」，此时「你上一节在 X 上课」是废话
-     *    （正在上的那节就在那栋楼）。拼死了就没法按场合取舍。
+     * ⚠️ 这是**代理**，不是真实位置（我们不做定位）。所以 [label] 必须如实说清
+     * 这个代理是什么（「你上一节课」/「你下节课」），**不许**简化成「你」——
+     * 那是在声称一个我们并不知道的位置。
+     */
+    data class Reference(
+        /** 参考教室（`文萃楼I404`） */
+        val classroom: String,
+        /** 说话时的主语，如 `你上一节课` / `你现在上课` / `你下节课` */
+        val label: String,
+    )
+
+    /** 一个通过筛选、排好序的**教室**候选。 */
+    data class RoomCandidate(
+        val room: RoomFree,
+        /** 距参考点的档位；`null` = 算不出来（参考点或楼坐标缺一） */
+        val distance: CampusLocations.Distance? = null,
+    )
+
+    /**
+     * ⚠️ 至少要能**连续**空这么多节 —— 空 1 节等于坐下就该走。
+     *
+     * ⚠️ 门槛只挡「**知道**它空得短」的那种（1 节）。
+     *    `freeSectionsAhead == 0` 是「算不出来」，**不因此排除** ——
+     *    它分数本来就低、会排到最后；把「不知道」当成「短」是一种假结论。
+     */
+    const val MIN_FREE_SECTIONS = 2
+
+    /**
+     * ⚠️ 同一栋楼最多出几间。
+     *
+     * 不限的话文萃楼C 一家就能刷满整个列表 —— 而用户真正要比的是**去哪儿**，
+     * 不是「这栋楼的第 3 间和第 5 间哪个好」。留 2 间：给一点同楼内的余地。
+     */
+    const val MAX_ROOMS_PER_BUILDING = 2
+
+    /**
+     * ⚠️ 候选**总数**上限。
+     *
+     * 同楼限流只管住了「一栋楼刷屏」，管不住「楼多」：把拉取上限放宽到 16 栋之后，
+     * 真机上立刻出现 **1/27** —— 「换一个」要按 27 次，没人会按。
+     * ⇒ 再兜一道总数：8 个已经足够「比一比」，再多用户不会翻。
+     */
+    const val MAX_ROOM_CANDIDATES = 8
+
+    /**
+     * 排序里「能空节数」的**封顶**。
+     *
+     * 空 8 节和空 6 节对自习的人来说差不多（都够坐到不想坐）。不封顶的话时长会压死距离，
+     * 而「走过去要多久」同样是决定性的。
+     */
+    private const val FREE_SECTIONS_CAP = 4
+
+    /** 同楼的加成（等价于几节）。⚠️ 与楼级的 [SAME_BUILDING_BONUS] 同量级，别再调大。 */
+    private const val SAME_BUILDING_ROOM_BONUS = 2
+
+    /** 「紧挨着」的加成（比同楼小一档）。 */
+    private const val NEXT_DOOR_ROOM_BONUS = 1
+
+    /**
+     * 教室名 → **房间号**。
+     *
+     * ## 真机样例（2026-10-12 空教室页 + 推荐卡片实测）
+     *
+     * | 教室名 | 楼名 | 房间号 |
+     * |---|---|---|
+     * | `文萃楼C501a` | `文萃楼C` | `501a` |
+     * | `文萃楼H125良乡二号机房` | `文萃楼H` | `125` |
+     * | `理教楼203` | `理科教学大楼` | `203` |
+     * | `综教B301` | `综合教学大楼` | `B301` |
+     *
+     * ⚠️⚠️ 两条规则都别改：
+     *
+     * 1. **先丢掉开头不是英文/数字的部分**，再取第一段英文/数字。
+     *    接口**教室名用简称、楼名用全称**（`理教楼203` vs `理科教学大楼`）——
+     *    只按「去掉楼名前缀」处理的话，`理教楼` 这三个字会留在房间号里，
+     *    界面上就成了「理科教学大楼 理教楼203」（楼名说两遍）。
+     * 2. **取第一段**英文/数字，不是最后一段 —— `501a` 里的 `a` 是房间号的一部分，
+     *    而 `良乡二号机房` 这种后缀里也有数字，取末段会取到「二号」的「2」。
+     *
+     * ⚠️ 解析不出就返回**原串**，不硬编一个房间号。
+     */
+    fun roomLabelOf(classroomName: String, buildingName: String): String =
+        roomParts(classroomName, buildingName).label
+
+    /**
+     * 教室名里的**房间名后缀**（`良乡二号机房`）；没有则 `null`。
+     *
+     * ⚠️ **原样返回，不做类型推断**。它是我们唯一能拿到的「教室性质」线索，
+     *    但格式不稳定（文萃楼C 的教室一个后缀都没有），而且「良乡二号机房」里混着校区名 ——
+     *    任何「提取出『机房』两个字」的加工都是**我们自己编的结论**，
+     *    学校那边一改版就会悄悄说错。原样展示最稳。
+     *
+     * ⚠️ 房间号都取不出来时返回 `null`（那种情况下**整串都不是后缀**）——
+     *    否则会把「理教楼203」整串当成后缀，界面上同一件事说两遍。
+     */
+    fun roomKindOf(classroomName: String, buildingName: String): String? =
+        roomParts(classroomName, buildingName).kind
+
+    private data class RoomParts(val label: String, val kind: String?)
+
+    /**
+     * 把「去掉了楼名前缀」的剩余部分拆成（房间号, 房间名后缀）。
+     *
+     * ⚠️ 房间号取不出来时 [RoomParts.label] 给**原教室名**（不是空串），
+     *    这样 [roomPlace] 能认出「它和楼名一样」而不拼成「文萃楼C 文萃楼C」。
+     */
+    private fun roomParts(classroomName: String, buildingName: String): RoomParts {
+        val rest = roomRest(classroomName, buildingName)
+        val tail = rest.dropWhile { !it.isAsciiLetterOrDigit() }
+        if (tail.isEmpty()) {
+            return RoomParts(classroomName.ifBlank { rest }, kind = null)
+        }
+        val label = tail.takeWhile { it.isAsciiLetterOrDigit() }
+        val kind = tail.substring(label.length)
+            .trim { it.isWhitespace() || it == '-' || it == '_' }
+            .takeIf { it.isNotBlank() }
+        return RoomParts(label, kind)
+    }
+
+    /** 去掉楼名前缀后的剩余部分（`文萃楼H125良乡二号机房` → `125良乡二号机房`）。 */
+    private fun roomRest(classroomName: String, buildingName: String): String =
+        (if (buildingName.isNotEmpty() && classroomName.startsWith(buildingName)) {
+            classroomName.substring(buildingName.length)
+        } else {
+            classroomName
+        }).trim()
+
+    private fun Char.isAsciiLetterOrDigit(): Boolean =
+        this in '0'..'9' || this in 'a'..'z' || this in 'A'..'Z'
+
+    /**
+     * 把教室候选**筛出来并排好序**：门槛（[MIN_FREE_SECTIONS]）→ 打分 → 同楼限流。
+     *
+     * ⚠️ **必须有确定性**：并列时按楼名、再按教室名 —— 输入顺序来自并发请求的 `awaitAll`，
+     *    不兜住的话同一份数据两次排序给出的第一条会不一样，卡片上的推荐会自己跳。
+     */
+    fun rankRooms(rooms: List<RoomFree>, reference: Reference? = null): List<RoomCandidate> {
+        val ref = CampusLocations.match(reference?.classroom)
+        val scored = rooms
+            .filter { it.freeSectionsAhead == 0 || it.freeSectionsAhead >= MIN_FREE_SECTIONS }
+            .map { room -> RoomCandidate(room, distanceOf(room.buildingName, ref)) }
+            .sortedWith(
+                compareByDescending<RoomCandidate> { it.score() }
+                    .thenByDescending { it.room.freeSectionsAhead }
+                    .thenBy { it.room.buildingName }
+                    .thenBy { it.room.classroomName },
+            )
+
+        // 同楼限流：按排好的顺序过一遍，每栋楼最多留 MAX_ROOMS_PER_BUILDING 间
+        val taken = HashMap<String, Int>()
+        return scored.filter { candidate ->
+            val used = taken[candidate.room.buildingId] ?: 0
+            if (used >= MAX_ROOMS_PER_BUILDING) {
+                false
+            } else {
+                taken[candidate.room.buildingId] = used + 1
+                true
+            }
+        }.take(MAX_ROOM_CANDIDATES)
+    }
+
+    private fun RoomCandidate.score(): Int {
+        val time = minOf(room.freeSectionsAhead, FREE_SECTIONS_CAP)
+        val bonus = when (distance) {
+            CampusLocations.Distance.SAME -> SAME_BUILDING_ROOM_BONUS
+            CampusLocations.Distance.NEXT_DOOR -> NEXT_DOOR_ROOM_BONUS
+            else -> 0
+        }
+        return time + bonus
+    }
+
+    /**
+     * 一栋楼名 → 它的档位。
+     *
+     * ⚠️ 两个名字任一匹配不上地点就返回 `null` —— **宁可不说距离，也不给假距离**
+     *    （`前沿楼`就不在坐标表里）。
+     */
+    private fun distanceOf(
+        buildingName: String,
+        ref: CampusLocations.Location?,
+    ): CampusLocations.Distance? {
+        val from = CampusLocations.match(buildingName) ?: return null
+        if (ref == null) return null
+        if (from.name == ref.name) return CampusLocations.Distance.SAME
+        return CampusLocations.distanceOf(CampusLocations.distanceMeters(from, ref))
+    }
+
+    /**
+     * 距离档位 → 一句话。
+     *
+     * ⚠️ 只说**直线距离**的相对关系，不说「走几分钟」—— 我们没有路网，也没有用户的位置。
+     * ⚠️ [label] 是参考点的**主语**（「你上一节课」），**必须带上**：
+     *    只说「就在隔壁」用户不知道跟哪儿比。
+     */
+    fun distanceText(distance: CampusLocations.Distance?, label: String): String? =
+        when (distance) {
+            null -> null
+            // ⚠️ 必须写 ${label}：Kotlin 的中文也算标识符字符，"$label那栋楼" 会被当成一个名字
+            CampusLocations.Distance.SAME -> "就在${label}那栋楼"
+            CampusLocations.Distance.NEXT_DOOR -> "紧挨着${label}那栋楼"
+            CampusLocations.Distance.NEAR -> "距${label}那栋楼一段路"
+            CampusLocations.Distance.FAR -> "距${label}那栋楼挺远"
+        }
+
+    /**
+     * 卡片 / 详情页上的一条候选取舍 —— **一间教室**，文案已渲染好。
+     *
+     * ⚠️ 数值与主语**必须同范围**：[place] 是**一间教室**，所以 [untilAt] 说的是这一间；
+     *    楼的总数单独走 [buildingFreeCount]，而且文案里**明写「这栋楼」**。
      */
     data class SpotOption(
         val buildingId: String,
         val buildingName: String,
-        val freeCount: Int,
-        /** 范围与 [freeCount] **一致**的地点名（单层点名楼层，多层只说楼）—— 见 [candidateTitle] */
+        /** 「文萃楼C 501a」—— 楼名 + 房间号 */
         val place: String,
-        /** 标题 */
-        val title: String,
-        /** 为什么推荐它（「你上一节在 X 上课」）；`null` = 没有就近依据 */
-        val reason: String? = null,
-        /** 各层分布（**只有多层才有**；单层时标题已点名，写两遍是重复） */
-        val floors: String? = null,
-        /** 「至少空到 12:20」；`null` = 算不出来 ⇒ **不做断言** */
-        val until: String? = null,
+        /** 该教室所在楼层；`null` = 解析不出 */
+        val floor: Int? = null,
+        /** 这栋楼当前时段一共空多少间 */
+        val buildingFreeCount: Int = 0,
+        /** 房间名后缀（`良乡二号机房`）；`null` = 没有。**原样展示** */
+        val roomKind: String? = null,
+        /** 距参考点的档位文案；`null` = 算不出 */
+        val distance: String? = null,
+        /** 能待到几点（`20:55`）；`null` = 不做断言 */
+        val untilAt: String? = null,
     ) {
-        /** 空闲时的那句副文案。 */
-        val detail: String? get() = listOfNotNull(reason, floors, until)
-            .takeIf { it.isNotEmpty() }?.joinToString(" · ")
+        /** 标题：`文萃楼C 501a，空到 20:55`。算不出钟点时只说地点（**不编时间**）。 */
+        val title: String get() = if (untilAt != null) "$place，空到 $untilAt" else place
+
+        /**
+         * 副文案：距哪儿多远 · 几层 · 房间名 · 这栋楼还有几间。
+         * 四段都可能没有，全没有时返回 `null`（那一行就不渲染）。
+         */
+        val detail: String? get() = listOfNotNull(
+            distance,
+            floor?.let { "$it 层" },
+            roomKind,
+            buildingFreeCount.takeIf { it > 0 }?.let { "这栋楼还有 $it 间" },
+        ).takeIf { it.isNotEmpty() }?.joinToString(" · ")
     }
 
     /**
@@ -548,16 +788,18 @@ object StudySpotLogic {
     )
 
     /**
-     * 组装完整建议。**取不到数据也只是 `options` 为空**，由 [Plan.hasContent] 决定要不要显示。
+     * 组装完整建议（**教室级**）。取不到数据也只是 `options` 为空，
+     * 由 [Plan.hasContent] 决定要不要显示。
      *
      * @param at **用户实际会到那儿的时刻**。见下。
-     * @param lastClassroom 上一节课刚下课的教室（见 [recentClassroomOf]）；`null` = 不做就近判断
+     * @param rooms 各间教室在当前（到达）时段的空闲情况
+     * @param reference 距离的**参考点**（用户大概在哪）；`null` = 不给距离，也不加位置分
      *
      * ## ⚠️ 为什么不是「现在」，而是「到达时刻」
      *
      * 空教室数是**按时段（节次）**算的，而正在上课的人**到不了**——他要等下课。
-     * 拿「现在这一节」的数说「下课后去文萃楼F（9 间空）」，那 9 间是**现在**的数；
-     * 12:25 人到了，第 6 节（13:20 起）的课已经排上，可能就是 4 间了。
+     * 拿「现在这一节」的数说「下课后去文萃楼F」，那是**现在**的数；
+     * 12:25 人到了，第 6 节（13:20 起）的课已经排上，情况可能完全不同。
      * ⇒ 上课中时调用方要传**下课钟点**（[NextCourse.endsAt]），其余情况传当下。
      *   这样标题、数量、时长说的才是**同一时刻**的事。
      */
@@ -566,10 +808,11 @@ object StudySpotLogic {
         table: TimeTable,
         course: NextCourse?,
         booking: Booking?,
-        buildings: List<BuildingFree>,
-        lastClassroom: String? = null,
+        rooms: List<RoomFree>,
+        reference: Reference? = null,
     ): Plan {
-        val options = rank(buildings, lastClassroom).map { optionOf(it, table, at) }
+        val options = rankRooms(rooms, reference)
+            .map { optionOf(it, table, at, reference?.label) }
 
         return when {
             // 1. 有课 —— 这时候说「去哪自习」没有意义
@@ -594,29 +837,43 @@ object StudySpotLogic {
     }
 
     /**
-     * 把候选渲染成卡片上的一条（三段说明，见 [SpotOption]）。
+     * 教室的显示名：`文萃楼C 501a`。
+     *
+     * ⚠️ 房间号取不出来时**只说楼名**，不硬编一个号（`文萃楼C` 比 `文萃楼C 0` 诚实）。
+     */
+    fun roomPlace(room: RoomFree): String {
+        val label = roomLabelOf(room.classroomName, room.buildingName)
+        return if (label.isBlank() || label == room.buildingName) room.buildingName
+        else "${room.buildingName} $label"
+    }
+
+    /**
+     * 把教室候选渲染成卡片 / 详情页上的一条。
      *
      * @param at 用户实际会到那儿的时刻（见 [planOf]）
+     * @param referenceLabel 距离的**主语**（「你上一节课」）；`null` = 没有参考点，不提距离
      *
-     * ⚠️ 「你上一节在 X 上课」只陈述**事实**（课表上就写着），不写「你就在附近」那种**推论** ——
-     *    推错的时候用户会觉得这个 App 在瞎猜（推论不该写进用户可见文案）。
+     * ⚠️ 距离那句话只陈述**事实**（课表上写着参考点是哪间教室 + 坐标表算出的相对远近），
+     *    不写「你就在附近」那种**推论** —— 推错的时候用户会觉得这个 App 在瞎猜。
      */
-    fun optionOf(candidate: Candidate, table: TimeTable, at: LocalTime): SpotOption = SpotOption(
-        buildingId = candidate.buildingId,
-        buildingName = candidate.buildingName,
-        freeCount = candidate.freeCount,
-        place = candidatePlace(candidate),
-        title = candidateTitle(candidate),
-        reason = if (candidate.matchLastClass) "你上一节在${candidate.buildingName}上课" else null,
-        // 多层才列分布：单层时标题已经点了名，再写一遍是重复
-        floors = if (candidate.floors.size > 1) {
-            candidate.floors.take(MAX_FLOOR_PARTS).joinToString(" · ") { floor ->
-                val name = floor.floor?.let { "$it 层" } ?: "其它层"
-                "$name ${floor.count} 间"
-            }
-        } else null,
-        until = freeUntilText(table, at, candidate.freeSectionsAhead),
-    )
+    fun optionOf(
+        candidate: RoomCandidate,
+        table: TimeTable,
+        at: LocalTime,
+        referenceLabel: String? = null,
+    ): SpotOption {
+        val room = candidate.room
+        return SpotOption(
+            buildingId = room.buildingId,
+            buildingName = room.buildingName,
+            place = roomPlace(room),
+            floor = room.floor,
+            buildingFreeCount = room.buildingFreeCount,
+            roomKind = roomKindOf(room.classroomName, room.buildingName),
+            distance = referenceLabel?.let { distanceText(candidate.distance, it) },
+            untilAt = freeUntilTime(table, at, room.freeSectionsAhead),
+        )
+    }
 
     /**
      * 有课、但**一个候选都没取到**时的那句话。
@@ -652,61 +909,58 @@ object StudySpotLogic {
                 val head = option?.let {
                     buildString {
                         plan.courseEndsAt?.let { at -> append("$at 下课后 · ") }
-                        append("去${it.place}（${it.freeCount} 间空）")
+                        append("去${it.place}")
+                        it.untilAt?.let { at -> append("（空到 $at）") }
                     }
                 }
-                // ⚠️ 上课中**不说**「你上一节在 X 上课」：正在上的那节就在那栋楼，重复且绕
-                val tail = option?.let { o ->
-                    listOfNotNull(o.floors, o.until).takeIf { it.isNotEmpty() }?.joinToString(" · ")
-                }
+                val tail = option?.let { o -> o.detail?.takeIf { it.isNotBlank() } }
                 val detail = listOfNotNull(head, tail).takeIf { it.isNotEmpty() }?.joinToString(" · ")
                     ?: NO_CANDIDATE_HINT
                 SpotCard(kind = Kind.IN_CLASS, title = title, detail = detail)
             }
 
             Kind.FREE_ROOM -> option?.let {
-                // 一段副信息都没有时给一句兜底，否则第二行是空的、卡片看着像坏了
-                SpotCard(kind = Kind.FREE_ROOM, title = it.title, detail = it.detail ?: "当前时段空闲")
+                // ⚠️ 副文案全没有时**不占那一行**，不给兜底句：
+                //    标题（`文萃楼C 501a，空到 20:55`）自己已经说完了，
+                //    再补一句「当前时段空闲」是重复（而重复会让卡片显得啰嗦、没有新信息）
+                SpotCard(kind = Kind.FREE_ROOM, title = it.title, detail = it.detail)
             }
         }
     }
 
     /**
-     * 兼容入口：旧的一条 [Suggestion]（**桌面组件走这条**）。
+     * **楼级**的一条建议（**桌面组件走这条**）。
      *
-     * ⚠️ 保留是为了组件那条路完全不动（它读 [coarseTitle]，不关心候选列表）。
-     *    内部走 [planOf] ⇒ 排序改进对组件**自动生效**。
+     * ## ⚠️ 为什么组件留在楼级、不跟着走到教室级
      *
-     * ⚠️ 这里拿不到时间表（旧签名如此）⇒ 少「至少空到」那一段。组件只用到 [coarseTitle]，
-     *    `detail` 根本不显示，所以没有影响。
+     * 组件 30 分钟才真刷一次（Doze 下更久），而快照里那句话是**有时效的断言**。
+     * 「文萃楼C 501a 空着」比「文萃楼C 有空教室」细得多，一旦过期就更容易误导 ——
+     * 用户按它跑到 501a，结果门开着但里面在上课。
+     * ⇒ App 内（现拉现算）给到**教室**；组件只说**哪栋楼**（见 [coarseTitle]）。
+     *
+     * ⚠️ 排序仍然走 [rank]（空教室数 + 就近加成），所以**楼级的改进对组件自动生效**。
      */
     fun suggest(
         now: LocalTime,
         course: NextCourse?,
         booking: Booking?,
         buildings: List<BuildingFree>,
-    ): Suggestion? = suggestionOf(planOf(now, emptyList(), course, booking, buildings))
+        lastClassroom: String? = null,
+    ): Suggestion? {
+        val best = rank(buildings, lastClassroom).firstOrNull()
 
-    /**
-     * [Plan] → 旧的具体一条建议（[Suggestion]），取推荐度最高的那条候选。
-     *
-     * ⚠️ 语义与改造前一致（`title` / `buildingName` / `freeCount` 都还是那一套），
-     *    只是「最优」的判据从「空教室最多」变成 [rank]（空教室 + 就近加成）。
-     */
-    fun suggestionOf(plan: Plan): Suggestion? {
-        val best = plan.options.firstOrNull()
-
-        plan.courseTitle?.let { title ->
-            val detail = if (best != null && plan.courseEndsAt != null) {
-                "${plan.courseEndsAt}下课后，${best.place}有 ${best.freeCount} 间空教室"
+        // 1. 有课 —— 这时候说「去哪自习」没有意义
+        if (course != null) {
+            val detail = if (best != null && course.endsAt != null) {
+                "${course.endsAt}下课后，${candidatePlace(best)}有 ${best.freeCount} 间空教室"
             } else {
-                "地点：${plan.coursePlace ?: "教室"}"
+                "地点：${course.classroom}"
             }
             return Suggestion(
                 // ⚠️ 「正在上」与「马上要上」措辞分开 —— 课间那几分钟人还没进教室，
                 //    说「正在上」是错的。措辞只有 [courseLine] 一份实现（组件也用）。
                 kind = Kind.IN_CLASS,
-                title = title,
+                title = courseLine(course),
                 detail = detail,
                 buildingName = best?.buildingName,
                 buildingId = best?.buildingId,
@@ -714,42 +968,38 @@ object StudySpotLogic {
             )
         }
 
-        if (plan.kind == Kind.HAS_BOOKING && plan.bookingTitle != null) {
+        // 2. 有预约 —— 已经安排好了，别再推荐别的地方
+        if (booking != null) {
             return Suggestion(
                 kind = Kind.HAS_BOOKING,
-                title = plan.bookingTitle,
-                detail = plan.bookingDetail.orEmpty(),
+                title = "你 ${booking.timeText} 在 ${booking.place} 有座位预约",
+                detail = "已约好，直接去就行",
             )
         }
 
+        // 3. 空教室
         if (best == null) return null
         return Suggestion(
             kind = Kind.FREE_ROOM,
-            title = best.title,
-            detail = best.detail ?: "当前时段空闲",
+            title = candidateTitle(best),
+            detail = "当前时段空闲",
             buildingName = best.buildingName,
             buildingId = best.buildingId,
             freeCount = best.freeCount,
         )
     }
 
-    /** 副文案里最多列几层（列太多会把那一行挤爆）。 */
-    private const val MAX_FLOOR_PARTS = 3
-
     // ==================================================== 详情页（点卡片进去看）
 
-    /** 详情页上的一行候选 —— **文案已经渲染好**，界面只管画。 */
+    /** 详情页上的一行候选（**一间教室**）—— 文案已经渲染好，界面只管画。 */
     data class SpotDetailRow(
         val buildingId: String,
-        /** 地点名（单层点名楼层，多层只说楼）—— 与 [freeCount] **同范围** */
+        /** 「文萃楼C 501a」 */
         val place: String,
-        val freeCount: Int,
-        /** 「10 间空教室」：数字与主语一起给，界面别自己拼 */
-        val countText: String,
-        /** 各层分布 + 能待到几点；`null` = 都没有 */
+        /** 「空到 20:55」—— 与 [place] **同范围**（都是这一间教室），界面别自己拼时间 */
+        val untilText: String,
+        /** 距哪儿多远 · 几层 · 房间名 · 这栋楼还有几间；`null` = 都没有 */
         val detail: String?,
-        /** 「你上一节在这栋楼上过课」；`null` = 没有就近依据。**只陈述事实** */
-        val reason: String?,
         /** 是不是推荐度最高的那一个（界面给它一个「推荐」标记） */
         val top: Boolean,
     )
@@ -775,7 +1025,7 @@ object StudySpotLogic {
      * 组装详情页内容。
      *
      * ⚠️ 与卡片用的是**同一份** [Plan]（同一时刻、同一批候选）——
-     *    详情页只是「把那一排候选展开看」，不该自己再算一遍，
+     *    详情页只是「把那一排候选展开看」，**不自己再算一遍**，
      *    否则点进去看到的数和卡片上的对不上（那才是真的说不清）。
      */
     fun detailOf(plan: Plan): SpotDetail {
@@ -783,12 +1033,11 @@ object StudySpotLogic {
             SpotDetailRow(
                 buildingId = option.buildingId,
                 place = option.place,
-                freeCount = option.freeCount,
-                countText = "${option.freeCount} 间空教室",
-                // 详情页把「为什么推荐」单独成一行（卡片是挤进同一行的），所以这里去掉 reason
-                detail = listOfNotNull(option.floors, option.until)
-                    .takeIf { it.isNotEmpty() }?.joinToString(" · "),
-                reason = option.reason,
+                // ⚠️ 算不出「空到几点」时说「现在空着」而不是留空：
+                //    这间教室在到达时刻确实是空的（取数时就按这个筛过），这是**事实**；
+                //    而「空到几点」我们算不出来，所以不说。
+                untilText = option.untilAt?.let { "空到 $it" } ?: "现在空着",
+                detail = option.detail,
                 top = index == 0,
             )
         }
@@ -811,7 +1060,7 @@ object StudySpotLogic {
             Kind.FREE_ROOM -> SpotDetail(
                 kind = plan.kind,
                 headline = "现在没课",
-                subline = if (rows.isEmpty()) "" else "按空教室多少排序",
+                subline = if (rows.isEmpty()) "" else "按能待多久、离你多近排的",
                 rows = rows,
                 emptyHint = if (rows.isEmpty()) NO_CANDIDATE_HINT_NOW else null,
             )

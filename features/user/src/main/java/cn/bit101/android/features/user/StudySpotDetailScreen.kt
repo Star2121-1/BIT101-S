@@ -226,21 +226,12 @@ private fun SpotRowCard(row: StudySpotLogic.SpotDetailRow) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = row.countText,
+                    text = row.untilText,
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
             row.detail?.let {
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            // ⚠️ 只陈述事实（课表上写着「上一节在 X」），不说「你就在附近」那种推论
-            row.reason?.let {
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = it,
