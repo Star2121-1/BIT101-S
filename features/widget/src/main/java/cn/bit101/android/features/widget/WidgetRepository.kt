@@ -113,6 +113,11 @@ class WidgetRepository @Inject constructor(
 
         // 「现在去哪儿自习」：⚠️ 只有**真的要取数**时才算（它要逐栋拉空教室），
         // 重绘时只读 [StudySpotSnapshot] 的快照 —— 组件重绘不打网络。
+        //
+        // ⚠️ 快照里**只存「哪栋楼有空教室」这一半**（需要网络）。
+        //    「正在上什么」是**有时效的断言**，由 `WidgetLogic` 每次重绘用本地课表现算 ——
+        //    存快照就会出现「晚上点开显示上午在上什么」（周期任务 30 分钟，Doze 下更久）。
+        // ⚠️ [StudySpotSnapshot.read] 对**过期的快照返回 null**（同上：不能说几小时前的「现在」）。
         if (forceEclass) {
             val spot = runCatching { studySpotRepository.suggest(now) }.getOrNull()
             StudySpotSnapshot.write(context, spot?.let { StudySpotLogic.coarseTitle(it) })

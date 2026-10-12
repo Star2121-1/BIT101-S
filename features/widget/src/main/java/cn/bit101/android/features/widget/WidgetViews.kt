@@ -38,8 +38,21 @@ import cn.bit101.android.config.setting.base.toPageData
  */
 internal object WidgetViews {
 
-    /** 页签 id，顺序与 [PageKind.entries] 一致（课程 / DDL / 座位 / 动态） */
-    private val TAB_IDS = intArrayOf(R.id.tab_0, R.id.tab_1, R.id.tab_2, R.id.tab_3)
+    /**
+     * 页签槽位 id，**顺序与 `PageKind.entries` 一致，个数也必须一致**。
+     *
+     * ⚠️ 这三个地方必须同时改（**加新页时最容易漏的就是这里和布局**）：
+     * ① `PageKind` 枚举 ② `widget_root.xml` 的 `tab_N` 槽位 ③ 这个数组。
+     * v1.9.54 加「自习」页时就只改了 ① —— 组件上永远看不到第 5 页。
+     * 有单测 `页签槽位数与 PageKind 一致` 守着（同时数布局与这个数组）。
+     */
+    private val TAB_IDS = intArrayOf(
+        R.id.tab_0,
+        R.id.tab_1,
+        R.id.tab_2,
+        R.id.tab_3,
+        R.id.tab_4,
+    )
 
     fun build(
         context: Context,
@@ -76,8 +89,16 @@ internal object WidgetViews {
         pageIndex: Int,
     ) {
         TAB_IDS.forEachIndexed { i, id ->
-            val kind = pages.getOrNull(i)?.kind ?: PageKind.entries[i]
-            val title = pages.getOrNull(i)?.title ?: kind.label
+            // 槽位比页数多时（比如某版临时只出 4 页）把多余槽位收起来，
+            // 否则会留下一个「有底色的空页签」。正常情况两者相等，见 TAB_IDS 的说明。
+            if (i >= pages.size) {
+                rv.setViewVisibility(id, View.GONE)
+                return@forEachIndexed
+            }
+            rv.setViewVisibility(id, View.VISIBLE)
+
+            val kind = pages[i].kind
+            val title = pages[i].title
             val selected = i == pageIndex
 
             rv.setTextViewText(id, title)

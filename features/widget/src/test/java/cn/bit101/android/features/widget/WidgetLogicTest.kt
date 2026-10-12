@@ -638,17 +638,115 @@ class WidgetLogicTest {
         )
     }
 
-    /** ⚠️ 组件那份**刻意不含数字**（组件不打网络，数字可能是几小时前的）。 */
+    /**
+     * ⚠️ 组件那份**刻意不含数字**（组件不打网络，数字可能是几小时前的）。
+     *
+     * 两行来源不同：课程那句**本地现算**、空教室那句**读快照**。
+     */
     @Test
-    fun `自习页只给一句话且不含数量`() {
-        val page = WidgetLogic.studyPage("文萃楼I现在有空教室")
-        assertEquals(1, page.items.size)
-        assertEquals("文萃楼I现在有空教室", page.items.single().main)
+    fun `自习页两行各有来源且不含数量`() {
+        val both = WidgetLogic.studyPage(
+            courseLine = "正在上操作系统（文萃楼I404）",
+            freeLine = "文萃楼I现在有空教室",
+        )
+        assertEquals(2, both.items.size)
+        assertEquals("正在上操作系统（文萃楼I404）", both.items[0].main)
+        assertEquals("文萃楼I现在有空教室", both.items[1].main)
 
-        // 取不到 → 整页空态，不给瞎建议
-        val empty = WidgetLogic.studyPage(null)
+        // 没课时只剩空教室那句
+        val freeOnly = WidgetLogic.studyPage(courseLine = null, freeLine = "文萃楼I现在有空教室")
+        assertEquals(1, freeOnly.items.size)
+        assertEquals("文萃楼I现在有空教室", freeOnly.items.single().main)
+
+        // 两行都没有 → 整页空态，不给瞎建议
+        val empty = WidgetLogic.studyPage(courseLine = null, freeLine = null)
         assertEquals(0, empty.items.size)
         assertEquals("暂时看不了空教室", empty.emptyText)
+    }
+
+    /**
+     * ⚠️ 「正在上什么」必须**每次重绘现算**，不能读快照 ——
+     * 它是有时效的断言，而组件真刷数据靠 30 分钟周期任务（Doze 下更久），
+     * 存快照就会出现「晚上点开显示上午在上什么」。
+     */
+    @Test
+    fun `自习页的课程一句由本地课表现算`() {
+        val table = WidgetLogic.FALLBACK_TIME_TABLE
+        val course = course(
+            name = "操作系统",
+            classroom = "文萃楼I404",
+            weekday = today.dayOfWeek.value,
+            start = 1,
+            end = 2,
+        )
+
+        // 第 1 节正在上 → 「正在上」
+        assertEquals(
+            "正在上操作系统（文萃楼I404）",
+            WidgetLogic.studyCourseLine(
+                courses = listOf(course),
+                today = today,
+                now = today.atTime(table[0].startTime).plusMinutes(5),
+                firstDay = null,
+                timeTable = table,
+            ),
+        )
+
+        // 上课前 5 分钟 → 说清「几点上」，**不能说「正在上」**（人还在路上）
+        val soon = WidgetLogic.studyCourseLine(
+            courses = listOf(course),
+            today = today,
+            now = today.atTime(table[0].startTime).minusMinutes(5),
+            firstDay = null,
+            timeTable = table,
+        )
+        assertEquals("${table[0].startTime} 上操作系统（文萃楼I404）", soon)
+        assertFalse("人还没进教室，不能说正在上", soon?.contains("正在上") == true)
+
+        // 上课前 3 小时 → 还早，什么都不说
+        assertNull(
+            WidgetLogic.studyCourseLine(
+                courses = listOf(course),
+                today = today,
+                now = today.atTime(table[0].startTime).minusHours(3),
+                firstDay = null,
+                timeTable = table,
+            ),
+        )
+
+        // 今天的课都上完了 → 不留在「正在上」
+        assertNull(
+            WidgetLogic.studyCourseLine(
+                courses = listOf(course),
+                today = today,
+                now = today.atTime(table[1].endTime).plusMinutes(30),
+                firstDay = null,
+                timeTable = table,
+            ),
+        )
+    }
+
+    /** ⚠️ 放假那天没有课 ⇒ 不该说「正在上 X」（教学调整与课程页同源）。 */
+    @Test
+    fun `放假当天自习页不说正在上课`() {
+        val table = WidgetLogic.FALLBACK_TIME_TABLE
+        val course = course(
+            name = "操作系统",
+            classroom = "文萃楼I404",
+            weekday = today.dayOfWeek.value,
+            start = 1,
+            end = 2,
+        )
+        assertNull(
+            WidgetLogic.studyCourseLine(
+                courses = listOf(course),
+                today = today,
+                now = today.atTime(table[0].startTime).plusMinutes(5),
+                firstDay = null,
+                timeTable = table,
+                planOf = { if (it == today) DayPlan.NoClass else null },
+            ),
+        )
     }
 
     @Test

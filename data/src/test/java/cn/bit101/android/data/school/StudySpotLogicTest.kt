@@ -199,4 +199,126 @@ class StudySpotLogicTest {
         assertEquals("文萃楼现在有空教室", coarse)
         assertTrue(coarse?.contains("12") != true)
     }
+
+    /**
+     * ⚠️ **上课中也不说「正在上 X」**，只说「哪栋楼有空教室」。
+     *
+     * 「正在上什么」是**有时效的断言**：组件真刷数据靠 30 分钟周期任务（Doze 下更久），
+     * 存进快照就会出现「晚上点开显示上午在上什么」⇒ 组件改为每次重绘用本地课表现算
+     * （见 `WidgetLogic.studyCourseLine`），快照只负责需要网络的那一半。
+     */
+    @Test
+    fun `组件用的粗粒度文案在上课时也不说正在上什么`() {
+        val s = StudySpotLogic.suggest(
+            now = LocalTime.of(8, 20),
+            course = StudySpotLogic.NextCourse(name = "操作系统", classroom = "文萃楼I404"),
+            booking = null,
+            buildings = listOf(StudySpotLogic.BuildingFree("b1", "文萃楼H", 7)),
+        )
+        assertEquals(StudySpotLogic.Kind.IN_CLASS, s?.kind)
+        val coarse = StudySpotLogic.coarseTitle(s!!)
+        assertEquals("文萃楼H现在有空教室", coarse)
+        assertTrue("粗粒度文案里不该出现有时效的「正在上」", coarse?.contains("正在上") != true)
+    }
+
+    // ------------------------------------------------- 「现在算不算有课」的唯一实现
+
+    private fun courseAt(name: String, room: String, start: Int, end: Int) =
+        StudySpotLogic.CourseAt(name = name, classroom = room, startSection = start, endSection = end)
+
+    /** 正在上 → 取正在上的那一节，并带上「下课时间」与 `ongoing = true`。 */
+    @Test
+    fun `正在上课时取当前这一节`() {
+        val r = StudySpotLogic.currentCourseOf(
+            courses = listOf(courseAt("操作系统", "文萃楼I404", 1, 1)),
+            table = table,
+            now = LocalTime.of(8, 20),
+        )
+        assertEquals("操作系统", r?.name)
+        assertEquals("文萃楼I404", r?.classroom)
+        assertEquals(LocalTime.of(8, 50), r?.endsAt)
+        assertEquals(true, r?.ongoing)
+    }
+
+    /**
+     * ⚠️ **课间十分钟算「马上要上」而不是「正在上」** —— 人还在路上。
+     *
+     * 这条断言的第一版**期望值写错了**（以为 `ongoing` 该是 true），跑红后才发现代码真错：
+     * 当时用 [StudySpotLogic.sectionFor] 的节次号判「正在上」，而它在课间返回的是**下一节**
+     * ⇒ 9:40-10:00 的课间会把 10:00 那节课报成「正在上」。
+     */
+    @Test
+    fun `课间十分钟内要上的课算马上要上`() {
+        val r = StudySpotLogic.currentCourseOf(
+            courses = listOf(courseAt("操作系统", "文萃楼I404", 3, 3)),
+            table = table,
+            now = LocalTime.of(9, 55),      // 第 3 节 10:00 开始，还有 5 分钟
+        )
+        assertEquals("操作系统", r?.name)
+        assertEquals(false, r?.ongoing)
+        assertEquals(LocalTime.of(10, 0), r?.startsAt)
+        // 措辞要说清「几点上」，不能说「正在上」
+        assertEquals("10:00 上操作系统（文萃楼I404）", StudySpotLogic.courseLine(r!!))
+    }
+
+    /**
+     * ⚠️ 措辞只有一份实现：正在上 / 马上要上**必须分开说**。
+     * 组件与 App 内那张卡都调 [StudySpotLogic.courseLine]，不许各自写。
+     */
+    @Test
+    fun `正在上与马上要上的措辞分开`() {
+        assertEquals(
+            "正在上操作系统（文萃楼I404）",
+            StudySpotLogic.courseLine(
+                StudySpotLogic.NextCourse("操作系统", "文萃楼I404", ongoing = true),
+            ),
+        )
+        assertEquals(
+            "10:00 上操作系统（文萃楼I404）",
+            StudySpotLogic.courseLine(
+                StudySpotLogic.NextCourse(
+                    "操作系统",
+                    "文萃楼I404",
+                    ongoing = false,
+                    startsAt = LocalTime.of(10, 0),
+                ),
+            ),
+        )
+        // 拿不到开课钟点也不许说「正在上」
+        assertEquals(
+            "马上要上操作系统（文萃楼I404）",
+            StudySpotLogic.courseLine(
+                StudySpotLogic.NextCourse("操作系统", "文萃楼I404", ongoing = false),
+            ),
+        )
+    }
+
+    /** 离上课还早 / 今天的课都上完了 → 不给「有课」的结论。 */
+    @Test
+    fun `离上课还早或课都上完时不算有课`() {
+        // 9:00 时，10:00 那节课还有一个小时
+        assertNull(
+            StudySpotLogic.currentCourseOf(
+                courses = listOf(courseAt("操作系统", "文萃楼I404", 3, 3)),
+                table = table,
+                now = LocalTime.of(9, 0),
+            ),
+        )
+        // 全天课程结束（第三节 10:50 下课后）
+        assertNull(
+            StudySpotLogic.currentCourseOf(
+                courses = listOf(courseAt("操作系统", "文萃楼I404", 3, 3)),
+                table = table,
+                now = LocalTime.of(11, 30),
+            ),
+        )
+        // 那天没课（调用方按星期几/周次/放假过滤后传空）
+        assertNull(
+            StudySpotLogic.currentCourseOf(
+                courses = emptyList(),
+                table = table,
+                now = LocalTime.of(8, 20),
+            ),
+        )
+    }
 }

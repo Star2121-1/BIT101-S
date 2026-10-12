@@ -16,7 +16,6 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -66,7 +65,7 @@ internal class DefaultStudySpotRepository @Inject constructor(
             )
         }
 
-    /** 当前正在上的课，或 [COMING_SOON_MINUTES] 内就要开始的课。 */
+    /** 当前正在上的课，或 [StudySpotLogic.COMING_SOON_MINUTES] 内就要开始的课。 */
     private suspend fun currentCourse(now: LocalDateTime, table: TimeTable): StudySpotLogic.NextCourse? {
         val date = now.toLocalDate()
         val entries = runCatching { teachingAdjustmentRepo.load() }.getOrNull()?.entries.orEmpty()
@@ -78,34 +77,25 @@ internal class DefaultStudySpotRepository @Inject constructor(
         val firstDay = runCatching { courseScheduleSettings.firstDay.get() }.getOrNull()
         val week = CourseWeekdayLogic.weekOf(firstDay, date)
 
-        val courses = runCatching { coursesRepo.getCoursesFromLocal().first() }
+        val ofDay = runCatching { coursesRepo.getCoursesFromLocal().first() }
             .getOrDefault(emptyList())
             .filter { it.weekday == weekday }
             .filter { week <= 0 || CourseWeekdayLogic.weeksContains(it.weeks, week) }
-        if (courses.isEmpty()) return null
+        if (ofDay.isEmpty()) return null
 
-        val section = StudySpotLogic.sectionFor(table, now.toLocalTime()) ?: return null
-
-        // 正在上
-        val ongoing = courses.firstOrNull { it.start_section <= section && section <= it.end_section }
-        if (ongoing != null) {
-            return StudySpotLogic.NextCourse(
-                name = ongoing.name,
-                classroom = ongoing.classroom,
-                endsAt = table.getOrNull(ongoing.end_section - 1)?.endTime,
-            )
-        }
-
-        // 马上要上（课间时 sectionFor 返回的已经是下一节）
-        val start = table.getOrNull(section - 1)?.startTime ?: return null
-        val minutes = Duration.between(now.toLocalTime(), start).toMinutes()
-        if (minutes < 0 || minutes > COMING_SOON_MINUTES) return null
-
-        val coming = courses.firstOrNull { it.start_section == section } ?: return null
-        return StudySpotLogic.NextCourse(
-            name = coming.name,
-            classroom = coming.classroom,
-            endsAt = table.getOrNull(coming.end_section - 1)?.endTime,
+        // ⚠️ 判断本身**只有一份实现**，在 [StudySpotLogic.currentCourseOf]（桌面组件的自习页也调它）。
+        //    这里只负责「把当天的课凑出来」，别把「节次落在区间内 + 10 分钟窗口」再写一遍。
+        return StudySpotLogic.currentCourseOf(
+            courses = ofDay.map {
+                StudySpotLogic.CourseAt(
+                    name = it.name,
+                    classroom = it.classroom,
+                    startSection = it.start_section,
+                    endSection = it.end_section,
+                )
+            },
+            table = table,
+            now = now.toLocalTime(),
         )
     }
 
@@ -170,9 +160,6 @@ internal class DefaultStudySpotRepository @Inject constructor(
     companion object {
         /** 最多拉几栋楼 —— 教室必须逐栋请求，全拉（良乡 30 栋）太重。 */
         const val MAX_BUILDINGS = 8
-
-        /** 多久内开始的课算「马上有课」—— 这时候推荐人去自习是蠢话。 */
-        const val COMING_SOON_MINUTES = 10L
 
         /** 空教室结果的缓存时长。**「有没有课」不缓存**，见类注释。 */
         const val SPOTS_TTL_MS = 10 * 60_000L

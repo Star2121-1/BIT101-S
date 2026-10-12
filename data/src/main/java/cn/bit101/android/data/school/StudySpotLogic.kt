@@ -2,7 +2,9 @@ package cn.bit101.android.data.school
 
 import cn.bit101.api.model.common.ClassroomInfo
 import cn.bit101.android.config.setting.base.TimeTable
+import java.time.Duration
 import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 
 /**
  * 「现在去哪儿自习」的**纯逻辑**（便于单测，取数在调用方）。
@@ -73,6 +75,102 @@ object StudySpotLogic {
         val classroom: String,
         /** 下课后才能去自习 —— 副文案要用 */
         val endsAt: LocalTime? = null,
+        /** 是否**正在上**；`false` = 还没开始，只是快了（[currentCourseOf] 填）。 */
+        val ongoing: Boolean = true,
+        /** 开课钟点（[ongoing] 为 `false` 时用来写「10:00 上 X」）。 */
+        val startsAt: LocalTime? = null,
+    )
+
+    /**
+     * 「正在上 / 马上要上」那一句话。
+     *
+     * ⚠️ **只有这一份实现** —— App 内那张卡的标题与桌面组件自习页的那一行都用它，
+     * 两边不许各写各的措辞（否则迟早一边说「正在上」另一边说「马上要上」）。
+     * ⚠️ 用真实钟点而不是节次号：见 [currentCourseOf] 的说明。
+     */
+    fun courseLine(course: NextCourse): String = if (course.ongoing) {
+        "正在上${course.name}（${course.classroom}）"
+    } else {
+        val at = course.startsAt?.truncatedTo(ChronoUnit.MINUTES)?.toString()
+        if (at == null) "马上要上${course.name}（${course.classroom}）"
+        else "$at 上${course.name}（${course.classroom}）"
+    }
+
+    /**
+     * 判断「此刻算不算有课」所需的最小课程信息。
+     *
+     * ⚠️ 刻意**不与 Room 实体绑定**：App 内（读本地库）与桌面组件（读已过滤的当天课表）
+     * 各自映射过来即可，纯逻辑保持可单测。
+     * ⚠️ [startSection] / [endSection] 是 **1-based 节次**。
+     */
+    data class CourseAt(
+        val name: String,
+        val classroom: String,
+        val startSection: Int,
+        val endSection: Int,
+    )
+
+    /** 「马上有课」的窗口（分钟）。⚠️ App 内与桌面组件共用，别再各写一个 10。 */
+    const val COMING_SOON_MINUTES = 10L
+
+    /**
+     * 当前正在上的课，或 [comingSoonMinutes] 分钟内就要开始的课；都没有则 `null`。
+     *
+     * ⚠️ 这是**唯一一份**「现在算不算有课」的判断 —— App 内那张卡（[DefaultStudySpotRepository]）
+     *    与桌面组件的自习页都调它，别各自再写一遍「节次落在区间内 + 10 分钟窗口」。
+     * ⚠️ [courses] 必须是**当天**的课（调用方负责按星期几 / 周次 / 放假补课过滤）。
+     *
+     * ## ⚠️⚠️ 为什么「正在上」必须按**真实钟点**判，不能按 [sectionFor] 的节次号
+     *
+     * [sectionFor] 的语义是「**课间返回下一节**」（空教室占用判定需要这个语义）。
+     * 早先这里直接拿它当节次用（`start <= section <= end`），于是 **9:40-10:00 的课间
+     * 会把 10:00 那节课判成「正在上」** —— 人还在路上，界面已经在说「正在上 X」。
+     * 这个 bug 由单测 `课间十分钟内要上的课算马上要上` 抓出来（第一版期望值就写错了）。
+     * ⇒ 「正在上」看 `now` 落在 `[开始, 结束]` 内；「马上要上」看距开课的分钟数。
+     */
+    fun currentCourseOf(
+        courses: List<CourseAt>,
+        table: TimeTable,
+        now: LocalTime,
+        comingSoonMinutes: Long = COMING_SOON_MINUTES,
+    ): NextCourse? {
+        // 节次 → 钟点；取不到钟点的课直接跳过（异常数据不该编出一个时间）
+        val timed = courses.mapNotNull { course ->
+            val start = table.getOrNull(course.startSection - 1)?.startTime ?: return@mapNotNull null
+            val end = table.getOrNull(course.endSection - 1)?.endTime ?: return@mapNotNull null
+            TimedCourse(course, start, end)
+        }
+
+        // 1. 正在上：now 落在真实钟点区间内（**不是**节次号比较）
+        timed.firstOrNull { !now.isBefore(it.start) && !now.isAfter(it.end) }
+            ?.let {
+                return NextCourse(
+                    name = it.course.name,
+                    classroom = it.course.classroom,
+                    endsAt = it.end,
+                    ongoing = true,
+                    startsAt = it.start,
+                )
+            }
+
+        // 2. 马上要上：还没开始、且离得最近的那节在窗口内
+        val next = timed.filter { now.isBefore(it.start) }.minByOrNull { it.start } ?: return null
+        if (Duration.between(now, next.start).toMinutes() > comingSoonMinutes) return null
+
+        return NextCourse(
+            name = next.course.name,
+            classroom = next.course.classroom,
+            endsAt = next.end,
+            ongoing = false,
+            startsAt = next.start,
+        )
+    }
+
+    /** [currentCourseOf] 内部用：课 + 它的真实起止钟点。 */
+    private data class TimedCourse(
+        val course: CourseAt,
+        val start: LocalTime,
+        val end: LocalTime,
     )
 
     /** 进行中或 1 小时内的座位预约。 */
@@ -101,11 +199,16 @@ object StudySpotLogic {
      *
      * ⚠️ 组件重绘不打网络，具体数字可能是几小时前的，写上去就是在骗人。
      * 所以组件只说「哪栋楼有空教室」，数字留给 App 内那张卡（现拉现算）。
+     *
+     * ⚠️ **上课中也走「哪栋楼有空教室」这一支**，不说「正在上 X」——
+     *    「正在上什么」是**有时效的断言**，存进快照会在几小时后变成假话
+     *    （组件真刷数据靠 30 分钟周期任务，Doze 下还会被拖到几小时）。
+     *    组件改为**每次重绘用本地课表现算**那一句（见 `WidgetLogic.studyCourseLine`），
+     *    快照只负责「哪栋楼有空教室」这件**需要网络**的事。
      */
     fun coarseTitle(suggestion: Suggestion): String? = when (suggestion.kind) {
         // ⚠️ 必须写 ${it}：Kotlin 的中文也算标识符字符，"$it现在" 会被当成一个名字
-        Kind.FREE_ROOM -> suggestion.buildingName?.let { "${it}现在有空教室" }
-        Kind.IN_CLASS -> suggestion.title
+        Kind.FREE_ROOM, Kind.IN_CLASS -> suggestion.buildingName?.let { "${it}现在有空教室" }
         Kind.HAS_BOOKING -> suggestion.title
     }
 
@@ -171,11 +274,13 @@ object StudySpotLogic {
             val detail = if (best != null && course.endsAt != null) {
                 "${course.endsAt}下课后，${placeName(best.buildingName, best.floor)}有 ${best.freeCount} 间空教室"
             } else {
-                "现在在 ${course.classroom}"
+                "地点：${course.classroom}"
             }
             return Suggestion(
+                // ⚠️ 「正在上」与「马上要上」措辞分开 —— 课间那几分钟人还没进教室，
+                //    说「正在上」是错的。措辞只有 [courseLine] 一份实现（组件也用）。
                 kind = Kind.IN_CLASS,
-                title = "正在上 ${course.name}（${course.classroom}）",
+                title = courseLine(course),
                 detail = detail,
                 buildingName = best?.buildingName,
                 buildingId = best?.buildingId,

@@ -15,6 +15,7 @@ import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.ddl.DdlSource
 import cn.bit101.android.data.school.CourseWeekdayLogic
 import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.data.school.weekdayCn
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -476,10 +477,13 @@ object WidgetLogic {
          */
         planOf: (LocalDate) -> DayPlan? = { null },
         /**
-         * 「现在去哪儿自习」的**一行文案**（已粗化到不含数字）；`null` = 取不到。
+         * 「现在去哪儿自习」的**空教室那一行**（已粗化到不含数字）；`null` = 取不到 / 已过期。
          *
          * ⚠️ 传**字符串**而不是 `Suggestion`：组件重绘不打网络，这份数据只能来自
          * 周期任务 / 手动刷新时写下的快照，而快照里存的就是一句文案。
+         *
+         * ⚠️ **只放需要网络的那一半**（哪栋楼有空教室）。「正在上什么」在本地就能算，
+         * 由 [studyCourseLine] 每次重绘现算 —— 存快照会让它变成几小时后的一句假话。
          */
         studySpotLine: String? = null,
     ): WidgetData = WidgetData(
@@ -499,25 +503,93 @@ object WidgetLogic {
             activityPage(activities, now, loggedIn = eclassLoggedIn),
             seatPage(seat, loggedIn = seatLoggedIn),
             // ⚠️ 顺序必须与 PageKind.entries 一致（页签按索引画、页号按页名存）
-            studyPage(studySpotLine),
+            // ⚠️ 课程那一句**在这里现算**（本地数据，重绘不违规），不读快照
+            studyPage(
+                courseLine = studyCourseLine(
+                    courses = courses,
+                    today = today,
+                    now = now,
+                    firstDay = firstDay,
+                    timeTable = timeTable,
+                    planOf = planOf,
+                ),
+                freeLine = studySpotLine,
+            ),
         )
     )
 
     /**
-     * 「现在去哪儿自习」页 —— **只给一句话，且刻意不含数字**。
+     * 「现在去哪儿自习」页 —— 最多两行，且刻意不含数量。
      *
-     * ⚠️ 组件重绘不打网络（这是铁律），所以「12 间空教室」这种数字可能是几小时前的。
-     * 写上去就是在骗人 ⇒ 用 [StudySpotLogic.coarseTitle]，只说「哪栋楼有空教室」。
+     * 1. **「正在上 / 马上要上 X」** —— 每次重绘用本地课表现算（见 [studyCourseLine]）
+     * 2. **「XX现在有空教室」** —— 来自快照（要网络，见 [StudySpotSnapshot]）
+     *
+     * ⚠️ 组件重绘不打网络（这是铁律），所以第 2 行里「12 间空教室」这种数字可能是几小时前的。
+     * 写上去就是在骗人 ⇒ 用 [StudySpotLogic.coarseTitle] 粗化，只说「哪栋楼有空教室」。
      * 数字留给 App 内「我」页那张卡（现拉现算）。
      *
-     * @param suggestion `null` 时整页走空态 —— 取不到就不给建议。
+     * @param courseLine 本地现算的那一句；`null` = 此刻没课
+     * @param freeLine 快照里的那一句；`null` = 取不到 / 已经过期
      */
-    fun studyPage(line: String?): WidgetPage = WidgetPage(
-        kind = PageKind.STUDY,
-        title = PageKind.STUDY.label,
-        items = if (line.isNullOrBlank()) emptyList() else listOf(WidgetLine(lead = "", main = line)),
-        emptyText = "暂时看不了空教室",
-    )
+    fun studyPage(courseLine: String?, freeLine: String?): WidgetPage {
+        val items = listOfNotNull(
+            courseLine?.takeIf { it.isNotBlank() }?.let { WidgetLine(lead = "", main = it) },
+            freeLine?.takeIf { it.isNotBlank() }?.let { WidgetLine(lead = "", main = it) },
+        )
+        return WidgetPage(
+            kind = PageKind.STUDY,
+            title = PageKind.STUDY.label,
+            items = items,
+            // 两行都没有时才显示（取不到就不给建议）
+            emptyText = "暂时看不了空教室",
+        )
+    }
+
+    /**
+     * 「正在上 / 马上要上」那一行 —— **每次重绘用本地数据现算，不走快照**。
+     *
+     * ## ⚠️ 为什么不存快照
+     *
+     * 「正在上操作系统」是**有时效的断言**，而组件真刷数据靠 30 分钟的周期任务
+     * （Doze 下还会被拖到几小时）⇒ 存快照就会出现「晚上点开显示上午在上什么」。
+     * 「有没有课」本来就全在本地（课表 + 时间表 + 教学调整）⇒ 现算**既准又不打网络**。
+     *
+     * ⚠️ 判断本身**只有一份实现**：[StudySpotLogic.currentCourseOf]（App 内那张卡也调它）。
+     * ⚠️ 用 [pickDay] 拿当天的块 ⇒ 放假 / 补课（[planOf]）与「课都上完了就切明天」
+     *    这两件事都**自动跟课程页一致**，不会各算各的。
+     */
+    fun studyCourseLine(
+        courses: List<CourseScheduleEntity>,
+        today: LocalDate,
+        now: LocalDateTime,
+        firstDay: LocalDate?,
+        timeTable: TimeTable = FALLBACK_TIME_TABLE,
+        planOf: (LocalDate) -> DayPlan? = { null },
+    ): String? {
+        val choice = pickDay(courses, today, now.toLocalTime(), firstDay, timeTable, planOf)
+        // 已经切到明天 ⇒ 没有「正在上」
+        if (choice.isTomorrow) return null
+
+        val ofDay = choice.blocks.mapNotNull { it.course }
+        if (ofDay.isEmpty()) return null
+
+        val course = StudySpotLogic.currentCourseOf(
+            courses = ofDay.map {
+                StudySpotLogic.CourseAt(
+                    name = it.name,
+                    classroom = it.classroom,
+                    startSection = it.start_section,
+                    endSection = it.end_section,
+                )
+            },
+            table = timeTable,
+            now = now.toLocalTime(),
+        ) ?: return null
+
+        // ⚠️ 措辞**复用** App 内那张卡的同一份实现（[StudySpotLogic.courseLine]），
+        //    别在组件里另写一套「正在上 / 马上要上」——两边迟早说不到一块去。
+        return StudySpotLogic.courseLine(course)
+    }
 
     // ---------------------------------------------------------- 登录引导与动作键
 
