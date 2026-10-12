@@ -234,7 +234,7 @@ private fun UserScreenContent(    mainController: MainController,
             // 这是当下最该知道的事，比查余额更即时。
             if (data.own) {
                 item(key = "study-spot") {
-                    StudySpotSection()
+                    StudySpotSection(mainController = mainController)
                     Divider(
                         modifier = Modifier.fillMaxWidth(),
                         thickness = 0.5.dp,
@@ -370,38 +370,54 @@ fun UserScreen(
 /**
  * 「现在去哪儿自习」卡片（仅本人页）。
  *
- * ⚠️ **取不到建议就整张卡不渲染** —— [StudySpotRepository.suggest] 在拿不到空教室数据、
- * 或所有楼都满时返回 null；这时候显示一张空卡是噪音，一条瞎猜的建议更糟。
+ * ⚠️⚠️ **空闲态哪怕一间候选都没查到，也必须出卡** —— 说「现在没课」+「暂未查到空教室」两句真话。
+ * 这里曾经是「取不到就整张卡不渲染」，2026-10-12 真机栽过：取数失败时整块区域**静默消失**，
+ * 界面看起来完全正常（就是少了一块），用户分不清「没查到数据」和「功能坏了」；
+ * 而且详情页那句兜底文案**永远够不着**（详情页唯一的入口就是这张卡）。见 `Plan.hasContent` 的注释。
  * 但**取值期间要显示「正在找空教室…」**，否则就是「半天什么都不出现、然后突然冒出来」。
+ *
+ * ## 为什么是「一排候选」而不是「一个答案」
+ *
+ * 只给唯一最优时，用户看到的是**每天都同一栋楼**（推荐逻辑是确定性的）。
+ * 现在的做法是把候选**排好序**给出来，底部给一个「换一个」——
+ * 切换**纯本地**（候选在取数时就算完了，见 [StudySpotLogic.Plan]），点一下立刻换，
+ * 不会又等一轮网络。顺序本身是有理由的（空教室更多 / 上一节就在这栋楼上），
+ * 所以每次切换都是「另一个合理的选择」，而不是随机掷骰子。
  *
  * ## 点开去哪儿
  *
- * 三种建议各自有该去的地方，都走 `GotoRequest`（＝桌面组件点条目那条路）：
- * 空教室 → 课表页的「空教室」子页签；正在上课 → 课表页；有预约 → 座位页。
+ * 空教室 / 正在上课 → **详情页**（`NavDest.StudySpot`）：先看有哪些地方、各自空几间、
+ * 能待到几点，页底再给「打开空教室页」。
+ * 有预约 → 直接去座位页（没有候选可看，进详情页只是绕路）。
  *
- * ⚠️ 「空教室」不是一条 `NavDest` 路由，而是课表页里的**子页签** —— 所以不能用
- *    `mainController.navigate(...)`，必须 `GotoRequest` + `ScheduleTabs` 下标：
+ * ⚠️ 「空教室」不是一条 `NavDest` 路由，而是课表页里的**子页签** —— 所以详情页底部
+ *    不能用 `mainController.navigate(...)`，必须 `GotoRequest` + `ScheduleTabs` 下标：
  *    `IndexScreen` 消费 route 切底栏页，`ScheduleScreen` 消费 tab 切子页签。
  *    ⚠️ `GotoRequest.request` 的 route 取 `toPageData().value`（`"schedule"`），
  *    **不是** `PageShowOnNav.Schedule.toString()`（那是 NavHost 内部用的另一套）。
  */
 @Composable
-private fun StudySpotSection() {
+private fun StudySpotSection(mainController: MainController) {
     val vm: CampusServiceViewModel = hiltViewModel()
-    val spot by vm.studySpot.collectAsState()
+    val plan by vm.studySpotPlan.collectAsState()
+    val index by vm.studySpotIndex.collectAsState()
     val loading by vm.studySpotLoading.collectAsState()
 
-    val suggestion = spot
-    if (suggestion == null) {
+    val current = plan
+    if (current == null) {
         if (loading) StudySpotLoadingCard()
         return
     }
+
+    // 文案在逻辑层就渲染好了（那里才有时间表与「现在几点」）—— 界面只按下标取一条
+    val card = StudySpotLogic.studySpotCardOf(current, index) ?: return
+    val options = current.options
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 10.dp)
-            .clickable { openStudySpotTarget(suggestion.kind) },
+            .clickable { openStudySpotFromCard(mainController, card.kind) },
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
@@ -426,7 +442,7 @@ private fun StudySpotSection() {
                 )
                 // 可点击的提示：光靠卡片本身「看起来能点」用户不一定敢点
                 Text(
-                    text = studySpotActionHint(suggestion.kind),
+                    text = studySpotActionHint(card.kind),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -440,15 +456,55 @@ private fun StudySpotSection() {
             }
             Spacer(modifier = Modifier.height(5.dp))
             Text(
-                text = suggestion.title,
+                text = card.title,
                 style = MaterialTheme.typography.titleMedium,
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = suggestion.detail,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // ⚠️ 第二行没有内容时**整行不渲染** —— 留一个空行会让卡片看着像坏了
+            card.detail?.let { detail ->
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // 楼层分布 + 空闲时长可能有点长，给两行；再多就截断（用户点进去看完整的）
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // 只有一条候选时不给「换一个」—— 点了没反应比没有更糟
+            if (options.size > 1) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${index + 1}/${options.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    // ⚠️ 「换一个」是**本地**换下标：候选在取数时就算好了，这里不打网络。
+                    //    子级的 clickable 会吃掉点击，所以点它**不会**连带触发卡片的跳转。
+                    Row(
+                        modifier = Modifier
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                            .clickable { vm.cycleStudySpot() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "换一个",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -483,19 +539,32 @@ private fun StudySpotLoadingCard() {
     }
 }
 
-/** 卡片右上角的动作提示 —— 必须与 [openStudySpotTarget] 真的去的地方一致。 */
+/** 卡片右上角的动作提示 —— 必须与点下去真的发生的事一致。 */
 private fun studySpotActionHint(kind: StudySpotLogic.Kind): String = when (kind) {
-    StudySpotLogic.Kind.FREE_ROOM -> "看空教室"
-    StudySpotLogic.Kind.IN_CLASS -> "看课表"
+    // ⚠️ 有预约时**不进详情页**：那一页对「已约好」没有任何可看的候选，
+    //    多一次点击只是绕路 ⇒ 直接去座位页
     StudySpotLogic.Kind.HAS_BOOKING -> "看座位"
+    else -> "看详情"
 }
 
 /**
- * 点开建议卡片 → 跳到对应的页面。
+ * 详情页底部动作键的文案。
+ *
+ * ⚠️ 必须与 [openStudySpotTarget] 真的去的地方一致（两处不许各说各的）。
+ */
+internal fun studySpotActionLabel(kind: StudySpotLogic.Kind): String = when (kind) {
+    StudySpotLogic.Kind.FREE_ROOM -> "打开空教室页"
+    StudySpotLogic.Kind.IN_CLASS -> "打开课表"
+    StudySpotLogic.Kind.HAS_BOOKING -> "打开座位页"
+}
+
+/**
+ * 「看空教室 / 看课表 / 看座位」→ 跳到对应的页面。
  *
  * ⚠️ 三种建议指向三个不同页面，别图省事全跳同一个地方。
+ * ⚠️ **只有这一份实现** —— 卡片（有预约时直接走）与详情页底部的动作键都调它。
  */
-private fun openStudySpotTarget(kind: StudySpotLogic.Kind) {
+internal fun openStudySpotTarget(kind: StudySpotLogic.Kind) {
     when (kind) {
         // 空教室 → 课表页的「空教室」子页签（要看得具体是哪几间）
         StudySpotLogic.Kind.FREE_ROOM -> GotoRequest.request(
@@ -514,6 +583,38 @@ private fun openStudySpotTarget(kind: StudySpotLogic.Kind) {
             PageShowOnNav.Seat.toPageData().value,
         )
     }
+}
+
+/**
+ * 点卡片 → 去哪儿。
+ *
+ * ⚠️ 空教室 / 上课都进**详情页**（先看清有哪些地方、各自空几间），详情页底部再给
+ *    「打开空教室页」；有预约没有候选可看 ⇒ 直接去座位页，不绕这一趟。
+ */
+private fun openStudySpotFromCard(mainController: MainController, kind: StudySpotLogic.Kind) {
+    if (kind == StudySpotLogic.Kind.HAS_BOOKING) openStudySpotTarget(kind)
+    else mainController.navigate(NavDest.StudySpot)
+}
+
+/**
+ * 详情页（**顶层路由**）底部的动作键 → 目标页面。
+ *
+ * ⚠️⚠️ 必须先 `popBackStack()` 再发请求，**不能直接 [openStudySpotTarget]**。
+ *
+ * `GotoRequest.route` 的**唯一消费方是 `IndexScreen`**（它 `LaunchedEffect(pendingGoto)`
+ * 里切底栏页）；而详情页是**顶层**路由 —— 详情页在前台时 `IndexScreen` 根本没在组合，
+ * 请求发出去**没人消费**。
+ *
+ * 真机实测就是：点「打开课表」**页面纹丝不动**（也不报错，也不排队 —— 就是没反应）。
+ * 先退回到有 `IndexScreen` 的那一层，它重新组合时会消费这个请求，才真的跳过去。
+ * （`LaunchedEffect` 以 `pendingGoto` 为 key，所以「先退再发」与「先发再退」两种顺序都成立。）
+ */
+internal fun openStudySpotTargetFromDetail(
+    mainController: MainController,
+    kind: StudySpotLogic.Kind,
+) {
+    mainController.popBackStack()
+    openStudySpotTarget(kind)
 }
 
 /**

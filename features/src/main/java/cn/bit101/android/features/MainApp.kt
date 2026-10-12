@@ -33,6 +33,7 @@ import cn.bit101.android.features.common.nav.composablePoster
 import cn.bit101.android.features.common.nav.composableReport
 import cn.bit101.android.features.common.nav.composableScore
 import cn.bit101.android.features.common.nav.composableSetting
+import cn.bit101.android.features.common.nav.composableStudySpot
 import cn.bit101.android.features.common.nav.composableUser
 import cn.bit101.android.features.common.nav.composableWeb
 import cn.bit101.android.features.common.nav.enterTransition
@@ -50,6 +51,7 @@ import cn.bit101.android.features.setting.SettingScreen
 import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.user.MyFollowListScreen
 import cn.bit101.android.features.user.CampusServiceScreen
+import cn.bit101.android.features.user.StudySpotDetailScreen
 import cn.bit101.android.features.user.UserScreen
 import cn.bit101.android.features.versions.UpdateDialog
 import cn.bit101.android.features.versions.VersionDialog
@@ -182,6 +184,13 @@ internal fun MainApp() {
         composableCampusService(navAnim, navController) {
             Box(modifier = Modifier.navigationBarsPadding()) {
                 CampusServiceScreen(mainController)
+            }
+        }
+
+        // 「现在去哪儿自习」详情页：从「我」页那张卡点进来，把整排候选摊开看
+        composableStudySpot(navAnim, navController) {
+            Box(modifier = Modifier.navigationBarsPadding()) {
+                StudySpotDetailScreen(mainController)
             }
         }
 
