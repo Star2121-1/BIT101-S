@@ -24,6 +24,7 @@ sealed interface NavDestConfig {
             FollowList,
             CampusService,
             Score,
+            StudySpot,
         )
 
         fun fromRoute(route: String?): NavDestConfig? {
@@ -112,6 +113,17 @@ sealed interface NavDestConfig {
      */
     data object Score : NavDestConfig {
         override val route: String = AppRoutes.SCORE
+        override val arguments: List<NamedNavArgument> = listOf()
+    }
+
+    /**
+     * 「现在去哪儿自习」详情页。
+     *
+     * ⚠️ **无参**：候选池由仓库现算（数据都在本机 + 一次缓存好的空教室），
+     *   把「选哪一栋」编码进路由只会让它和真实数据脱钩（换一栋就要换一个路由）。
+     */
+    data object StudySpot : NavDestConfig {
+        override val route: String = "study-spot"
         override val arguments: List<NamedNavArgument> = listOf()
     }
 

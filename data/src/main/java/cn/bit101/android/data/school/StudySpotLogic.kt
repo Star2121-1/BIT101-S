@@ -735,4 +735,86 @@ object StudySpotLogic {
 
     /** 副文案里最多列几层（列太多会把那一行挤爆）。 */
     private const val MAX_FLOOR_PARTS = 3
+
+    // ==================================================== 详情页（点卡片进去看）
+
+    /** 详情页上的一行候选 —— **文案已经渲染好**，界面只管画。 */
+    data class SpotDetailRow(
+        val buildingId: String,
+        /** 地点名（单层点名楼层，多层只说楼）—— 与 [freeCount] **同范围** */
+        val place: String,
+        val freeCount: Int,
+        /** 「10 间空教室」：数字与主语一起给，界面别自己拼 */
+        val countText: String,
+        /** 各层分布 + 能待到几点；`null` = 都没有 */
+        val detail: String?,
+        /** 「你上一节在这栋楼上过课」；`null` = 没有就近依据。**只陈述事实** */
+        val reason: String?,
+        /** 是不是推荐度最高的那一个（界面给它一个「推荐」标记） */
+        val top: Boolean,
+    )
+
+    /**
+     * 「现在去哪儿自习」详情页要显示的全部内容。
+     */
+    data class SpotDetail(
+        val kind: Kind,
+        /** 顶部那一句**事实**（正在上 X / 你 X 在 Y 有预约 / 现在没课） */
+        val headline: String,
+        /** 一句话交代「这一页在说什么、按什么排的」 */
+        val subline: String,
+        val rows: List<SpotDetailRow> = emptyList(),
+        /** 一行都没有时的说明（**只声明「没查到」**）；有行时为 `null` */
+        val emptyHint: String? = null,
+    )
+
+    /** 空闲态详情页一行都没有时的说明。⚠️ 同样只声明「没查到」，不声明「没有空教室」。 */
+    const val NO_CANDIDATE_HINT_NOW = "暂未查到空教室"
+
+    /**
+     * 组装详情页内容。
+     *
+     * ⚠️ 与卡片用的是**同一份** [Plan]（同一时刻、同一批候选）——
+     *    详情页只是「把那一排候选展开看」，不该自己再算一遍，
+     *    否则点进去看到的数和卡片上的对不上（那才是真的说不清）。
+     */
+    fun detailOf(plan: Plan): SpotDetail {
+        val rows = plan.options.mapIndexed { index, option ->
+            SpotDetailRow(
+                buildingId = option.buildingId,
+                place = option.place,
+                freeCount = option.freeCount,
+                countText = "${option.freeCount} 间空教室",
+                // 详情页把「为什么推荐」单独成一行（卡片是挤进同一行的），所以这里去掉 reason
+                detail = listOfNotNull(option.floors, option.until)
+                    .takeIf { it.isNotEmpty() }?.joinToString(" · "),
+                reason = option.reason,
+                top = index == 0,
+            )
+        }
+
+        return when (plan.kind) {
+            Kind.HAS_BOOKING -> SpotDetail(
+                kind = plan.kind,
+                headline = plan.bookingTitle ?: "你有座位预约",
+                subline = plan.bookingDetail.orEmpty(),
+            )
+
+            Kind.IN_CLASS -> SpotDetail(
+                kind = plan.kind,
+                headline = plan.courseTitle ?: "有课",
+                subline = plan.courseEndsAt?.let { "$it 下课后可以去这些地方" } ?: "下课后可以去这些地方",
+                rows = rows,
+                emptyHint = if (rows.isEmpty()) NO_CANDIDATE_HINT else null,
+            )
+
+            Kind.FREE_ROOM -> SpotDetail(
+                kind = plan.kind,
+                headline = "现在没课",
+                subline = if (rows.isEmpty()) "" else "按空教室多少排序",
+                rows = rows,
+                emptyHint = if (rows.isEmpty()) NO_CANDIDATE_HINT_NOW else null,
+            )
+        }
+    }
 }

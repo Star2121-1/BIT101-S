@@ -261,6 +261,20 @@ fun NavGraphBuilder.composableScore(
     )
 }
 
+fun NavGraphBuilder.composableStudySpot(
+    navAnimation: NavAnimation = NavAnimation.none,
+    navController: NavHostController,
+    content: @Composable AnimatedVisibilityScope.(NavBackStackEntry) -> Unit
+) {
+    animatedComposable(
+        route = NavDestConfig.StudySpot.route,
+        arguments = NavDestConfig.StudySpot.arguments,
+        navAnimation = navAnimation,
+        navController = navController,
+        content = content
+    )
+}
+
 fun NavGraphBuilder.composableMessage(
     navAnimation: NavAnimation = NavAnimation.none,
     navController: NavHostController,

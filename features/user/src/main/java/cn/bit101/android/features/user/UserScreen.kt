@@ -234,7 +234,7 @@ private fun UserScreenContent(    mainController: MainController,
             // 这是当下最该知道的事，比查余额更即时。
             if (data.own) {
                 item(key = "study-spot") {
-                    StudySpotSection()
+                    StudySpotSection(mainController = mainController)
                     Divider(
                         modifier = Modifier.fillMaxWidth(),
                         thickness = 0.5.dp,
@@ -384,17 +384,18 @@ fun UserScreen(
  *
  * ## 点开去哪儿
  *
- * 三种建议各自有该去的地方，都走 `GotoRequest`（＝桌面组件点条目那条路）：
- * 空教室 → 课表页的「空教室」子页签；正在上课 → 课表页；有预约 → 座位页。
+ * 空教室 / 正在上课 → **详情页**（`NavDest.StudySpot`）：先看有哪些地方、各自空几间、
+ * 能待到几点，页底再给「打开空教室页」。
+ * 有预约 → 直接去座位页（没有候选可看，进详情页只是绕路）。
  *
- * ⚠️ 「空教室」不是一条 `NavDest` 路由，而是课表页里的**子页签** —— 所以不能用
- *    `mainController.navigate(...)`，必须 `GotoRequest` + `ScheduleTabs` 下标：
+ * ⚠️ 「空教室」不是一条 `NavDest` 路由，而是课表页里的**子页签** —— 所以详情页底部
+ *    不能用 `mainController.navigate(...)`，必须 `GotoRequest` + `ScheduleTabs` 下标：
  *    `IndexScreen` 消费 route 切底栏页，`ScheduleScreen` 消费 tab 切子页签。
  *    ⚠️ `GotoRequest.request` 的 route 取 `toPageData().value`（`"schedule"`），
  *    **不是** `PageShowOnNav.Schedule.toString()`（那是 NavHost 内部用的另一套）。
  */
 @Composable
-private fun StudySpotSection() {
+private fun StudySpotSection(mainController: MainController) {
     val vm: CampusServiceViewModel = hiltViewModel()
     val plan by vm.studySpotPlan.collectAsState()
     val index by vm.studySpotIndex.collectAsState()
@@ -414,7 +415,7 @@ private fun StudySpotSection() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 10.dp)
-            .clickable { openStudySpotTarget(card.kind) },
+            .clickable { openStudySpotFromCard(mainController, card.kind) },
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
@@ -536,19 +537,32 @@ private fun StudySpotLoadingCard() {
     }
 }
 
-/** 卡片右上角的动作提示 —— 必须与 [openStudySpotTarget] 真的去的地方一致。 */
+/** 卡片右上角的动作提示 —— 必须与点下去真的发生的事一致。 */
 private fun studySpotActionHint(kind: StudySpotLogic.Kind): String = when (kind) {
-    StudySpotLogic.Kind.FREE_ROOM -> "看空教室"
-    StudySpotLogic.Kind.IN_CLASS -> "看课表"
+    // ⚠️ 有预约时**不进详情页**：那一页对「已约好」没有任何可看的候选，
+    //    多一次点击只是绕路 ⇒ 直接去座位页
     StudySpotLogic.Kind.HAS_BOOKING -> "看座位"
+    else -> "看详情"
 }
 
 /**
- * 点开建议卡片 → 跳到对应的页面。
+ * 详情页底部动作键的文案。
+ *
+ * ⚠️ 必须与 [openStudySpotTarget] 真的去的地方一致（两处不许各说各的）。
+ */
+internal fun studySpotActionLabel(kind: StudySpotLogic.Kind): String = when (kind) {
+    StudySpotLogic.Kind.FREE_ROOM -> "打开空教室页"
+    StudySpotLogic.Kind.IN_CLASS -> "打开课表"
+    StudySpotLogic.Kind.HAS_BOOKING -> "打开座位页"
+}
+
+/**
+ * 「看空教室 / 看课表 / 看座位」→ 跳到对应的页面。
  *
  * ⚠️ 三种建议指向三个不同页面，别图省事全跳同一个地方。
+ * ⚠️ **只有这一份实现** —— 卡片（有预约时直接走）与详情页底部的动作键都调它。
  */
-private fun openStudySpotTarget(kind: StudySpotLogic.Kind) {
+internal fun openStudySpotTarget(kind: StudySpotLogic.Kind) {
     when (kind) {
         // 空教室 → 课表页的「空教室」子页签（要看得具体是哪几间）
         StudySpotLogic.Kind.FREE_ROOM -> GotoRequest.request(
@@ -567,6 +581,38 @@ private fun openStudySpotTarget(kind: StudySpotLogic.Kind) {
             PageShowOnNav.Seat.toPageData().value,
         )
     }
+}
+
+/**
+ * 点卡片 → 去哪儿。
+ *
+ * ⚠️ 空教室 / 上课都进**详情页**（先看清有哪些地方、各自空几间），详情页底部再给
+ *    「打开空教室页」；有预约没有候选可看 ⇒ 直接去座位页，不绕这一趟。
+ */
+private fun openStudySpotFromCard(mainController: MainController, kind: StudySpotLogic.Kind) {
+    if (kind == StudySpotLogic.Kind.HAS_BOOKING) openStudySpotTarget(kind)
+    else mainController.navigate(NavDest.StudySpot)
+}
+
+/**
+ * 详情页（**顶层路由**）底部的动作键 → 目标页面。
+ *
+ * ⚠️⚠️ 必须先 `popBackStack()` 再发请求，**不能直接 [openStudySpotTarget]**。
+ *
+ * `GotoRequest.route` 的**唯一消费方是 `IndexScreen`**（它 `LaunchedEffect(pendingGoto)`
+ * 里切底栏页）；而详情页是**顶层**路由 —— 详情页在前台时 `IndexScreen` 根本没在组合，
+ * 请求发出去**没人消费**。
+ *
+ * 真机实测就是：点「打开课表」**页面纹丝不动**（也不报错，也不排队 —— 就是没反应）。
+ * 先退回到有 `IndexScreen` 的那一层，它重新组合时会消费这个请求，才真的跳过去。
+ * （`LaunchedEffect` 以 `pendingGoto` 为 key，所以「先退再发」与「先发再退」两种顺序都成立。）
+ */
+internal fun openStudySpotTargetFromDetail(
+    mainController: MainController,
+    kind: StudySpotLogic.Kind,
+) {
+    mainController.popBackStack()
+    openStudySpotTarget(kind)
 }
 
 /**

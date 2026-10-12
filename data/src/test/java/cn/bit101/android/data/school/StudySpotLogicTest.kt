@@ -637,4 +637,104 @@ class StudySpotLogicTest {
         assertEquals(false, empty.hasContent)
         assertNull(StudySpotLogic.studySpotCardOf(empty, 0))
     }
+
+    // ===================================================== 详情页（点卡片进去看）
+
+    /** 详情页把**整排**候选摊开，并且只有一个带「推荐」。 */
+    @Test
+    fun `详情页摊开全部候选`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(8, 20),
+            table = table,
+            course = null,
+            booking = null,
+            buildings = listOf(
+                free("b1", "文萃楼I", 7, floor = 5, ahead = 2),
+                free("b1", "文萃楼I", 5, floor = 3, ahead = 2),
+                free("b2", "综教", 9),
+            ),
+            lastClassroom = "文萃楼I404",
+        )
+        val detail = StudySpotLogic.detailOf(plan)
+
+        assertEquals(StudySpotLogic.Kind.FREE_ROOM, detail.kind)
+        assertEquals("现在没课", detail.headline)
+        assertEquals("按空教室多少排序", detail.subline)
+        assertNull(detail.emptyHint)
+        assertEquals(2, detail.rows.size)
+
+        // 排序：文萃楼I = 12 间 + 同楼加成 3 = 15 > 综教 9
+        val first = detail.rows[0]
+        assertEquals("文萃楼I", first.place)
+        assertEquals(12, first.freeCount)
+        assertEquals("12 间空教室", first.countText)
+        assertEquals("你上一节在文萃楼I上课", first.reason)
+        assertEquals("5 层 7 间 · 3 层 5 间 · 有教室空到 09:40", first.detail)
+        assertEquals(true, first.top)
+
+        assertEquals("综教", detail.rows[1].place)
+        assertEquals(false, detail.rows[1].top)
+        // 「推荐」只标一个 —— 标一排等于没标
+        assertEquals(1, detail.rows.count { it.top })
+    }
+
+    /**
+     * ⚠️ 详情页与卡片必须是**同一份**数据。
+     *
+     * 两边各算一遍迟早对不上（点进去看到的数 ≠ 卡片上的数），那是最难解释的一类 bug。
+     * 这里直接断言「行里的地点 + 数量」拼起来等于卡片标题。
+     */
+    @Test
+    fun `详情页第一行与卡片说的是同一处`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(12, 0),
+            table = table,
+            course = null,
+            booking = null,
+            buildings = listOf(free("b1", "甲楼", 5), free("b2", "乙楼", 4)),
+            lastClassroom = "甲楼101",
+        )
+        val card = StudySpotLogic.studySpotCardOf(plan, 0)!!
+        val first = StudySpotLogic.detailOf(plan).rows.first()
+
+        assertEquals("甲楼现在有 5 间空教室", card.title)
+        assertEquals(card.title, "${first.place}现在有 ${first.countText}")
+        assertEquals(plan.options.size, StudySpotLogic.detailOf(plan).rows.size)
+    }
+
+    /** 有课时头部要说清「几点下课后」；一行候选都没有时给「没查到」而不是留白。 */
+    @Test
+    fun `详情页有课时说清几点下课后`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(8, 20),
+            table = table,
+            course = StudySpotLogic.NextCourse("操作系统", "文萃楼I404", endsAt = LocalTime.of(8, 50)),
+            booking = null,
+            buildings = emptyList(),
+        )
+        val detail = StudySpotLogic.detailOf(plan)
+
+        assertEquals(StudySpotLogic.Kind.IN_CLASS, detail.kind)
+        assertEquals("正在上操作系统（文萃楼I404）", detail.headline)
+        assertEquals("08:50 下课后可以去这些地方", detail.subline)
+        assertTrue(detail.rows.isEmpty())
+        assertEquals(StudySpotLogic.NO_CANDIDATE_HINT, detail.emptyHint)
+    }
+
+    /** 空闲态一行都没有时，说明也**只声明「没查到」**（我们并不知道是不是真没有）。 */
+    @Test
+    fun `详情页空闲态没有候选时也说没查到`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(12, 0),
+            table = table,
+            course = null,
+            booking = null,
+            buildings = listOf(free("b1", "甲楼", 0)),
+        )
+        val detail = StudySpotLogic.detailOf(plan)
+
+        assertEquals("现在没课", detail.headline)
+        assertEquals(StudySpotLogic.NO_CANDIDATE_HINT_NOW, detail.emptyHint)
+        assertTrue("不许断言「没有空教室」", detail.emptyHint?.contains("没有") != true)
+    }
 }

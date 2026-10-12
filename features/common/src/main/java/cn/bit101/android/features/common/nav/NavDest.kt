@@ -88,6 +88,12 @@ sealed interface NavDest {
         override val route = config.route
     }
 
+    /** 「现在去哪儿自习」详情页（从「我」页那张卡点进来）。 */
+    data object StudySpot : NavDest {
+        override val config = NavDestConfig.StudySpot
+        override val route = config.route
+    }
+
     data object Score : NavDest {
         override val config = NavDestConfig.Score
         override val route = config.route
