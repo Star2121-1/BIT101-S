@@ -187,9 +187,14 @@ internal class DefaultStudySpotRepository @Inject constructor(
         val fetched = coroutineScope {
             buildings.take(MAX_BUILDINGS).map { building ->
                 async {
-                    // ⚠️ 一栋楼失败只丢它自己 —— 别的楼照样能给出建议
+                    // ⚠️ 一栋楼失败只丢它自己 —— 别的楼照样能给出建议。
+                    // ⚠️ **空列表也算失败**：真实教学楼不会一间教室都没有，
+                    //    拿到空列表基本就是「会话没就绪 / 被重定向到登录页」。
+                    //    不挡的话会被当成「这栋楼 0 间空闲」**缓存 10 分钟**，
+                    //    表现是「整块推荐消失」，而界面看起来完全正常。
                     runCatching { freeClassroomRepo.getClassroomInfos(building.buildingIndex) }
                         .getOrNull()
+                        ?.takeIf { it.isNotEmpty() }
                         ?.let { BuildingRooms(building, it) }
                 }
             }.awaitAll().filterNotNull()

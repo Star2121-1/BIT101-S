@@ -556,6 +556,36 @@ class StudySpotLogicTest {
         assertTrue("正在上那节就在这栋楼，不该再说「你上一节在…」", card.detail?.contains("你上一节") != true)
     }
 
+    /**
+     * ⚠️⚠️ 有课但**一个候选都没取到**时，副文案必须是「没查到」，不能是「地点：X」。
+     *
+     * 这是**真机上抓到的**：某次逐栋拉空教室**全部失败**，卡片只剩
+     * `正在上计算机系统导论（综教B301）` + `地点：综教B301` —— 同一件事说两遍，
+     * 而**那栋楼其实空着**（去空教室页一查，文萃楼C 有 9 间空着）。
+     *
+     * ⇒ 两件事：
+     * ① 不许把标题里已有的教室再说一遍
+     * ② 降级**不许无声无息** —— 明说「暂未查到」，但**不声明「没有空教室」**
+     *    （我们并不知道：只看了前 8 栋楼）
+     */
+    @Test
+    fun `上课中取不到空教室时明说没查到`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(8, 20),
+            table = table,
+            course = StudySpotLogic.NextCourse("操作系统", "文萃楼I404", endsAt = LocalTime.of(8, 50)),
+            booking = null,
+            buildings = emptyList(),
+        )
+        val card = StudySpotLogic.studySpotCardOf(plan, 0)!!
+
+        assertEquals(StudySpotLogic.Kind.IN_CLASS, card.kind)
+        assertEquals("正在上操作系统（文萃楼I404）", card.title)
+        assertEquals(StudySpotLogic.NO_CANDIDATE_HINT, card.detail)
+        assertTrue("不许把标题里的教室再说一遍", card.detail?.contains("文萃楼I404") != true)
+        assertTrue("不许断言「没有空教室」（我们并不知道）", card.detail?.contains("没有") != true)
+    }
+
     /** 「换一个」= 本地换下标，转一圈回到第一条；越界也不许崩（候选数量刷新时会变）。 */
     @Test
     fun `换一个按下标循环`() {

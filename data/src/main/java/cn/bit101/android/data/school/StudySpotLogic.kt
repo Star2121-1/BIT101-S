@@ -619,6 +619,19 @@ object StudySpotLogic {
     )
 
     /**
+     * 有课、但**一个候选都没取到**时的那句话。
+     *
+     * ⚠️ 为什么不是「地点：X」：标题里已经写着教室了（`正在上操作系统（文萃楼I404）`），
+     *    再说一遍等于什么都没说，用户还会以为功能坏了。
+     * ⚠️ 为什么也不是干脆不显示：**降级不许无声无息** —— 真机上栽过：
+     *    某次逐栋取空教室**全部失败**，卡片只剩标题 + 一句重复的「地点：综教B301」，
+     *    看起来完全正常（同一栋楼其实空着 9 间）。
+     *    这句话只声明「我没查到」，**不声明「没有空教室」** —— 后者我们并不知道
+     *    （只看了前 `MAX_BUILDINGS` 栋，见 `DefaultStudySpotRepository`）。
+     */
+    const val NO_CANDIDATE_HINT = "下课后暂未查到空教室"
+
+    /**
      * 卡片上的第 [index] 个候选取舍（**取模，循环**）。
      *
      * 「换一个」= index + 1 —— **纯本地换下标，不打网络**（候选在取数时就算好了）。
@@ -647,7 +660,7 @@ object StudySpotLogic {
                     listOfNotNull(o.floors, o.until).takeIf { it.isNotEmpty() }?.joinToString(" · ")
                 }
                 val detail = listOfNotNull(head, tail).takeIf { it.isNotEmpty() }?.joinToString(" · ")
-                    ?: plan.coursePlace?.let { "地点：$it" }
+                    ?: NO_CANDIDATE_HINT
                 SpotCard(kind = Kind.IN_CLASS, title = title, detail = detail)
             }
 
