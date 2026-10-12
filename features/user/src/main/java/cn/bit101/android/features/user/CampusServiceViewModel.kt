@@ -44,10 +44,20 @@ internal class CampusServiceViewModel @Inject constructor(
 ) : ViewModel() {
 
     /**
-     * 「现在去哪儿自习」的建议；`null` = 取不到或当下不该给（**不给瞎建议**）。
+     * 「现在去哪儿自习」的完整建议（**排好序的候选列表**）；`null` = 取不到或当下不该给
+     * （**不给瞎建议**）。
      */
-    private val _studySpot = MutableStateFlow<StudySpotLogic.Suggestion?>(null)
-    val studySpot: StateFlow<StudySpotLogic.Suggestion?> = _studySpot.asStateFlow()
+    private val _studySpotPlan = MutableStateFlow<StudySpotLogic.Plan?>(null)
+    val studySpotPlan: StateFlow<StudySpotLogic.Plan?> = _studySpotPlan.asStateFlow()
+
+    /**
+     * 「换一个」选中的第几条候选。
+     *
+     * ⚠️ 换它**不打网络** —— 候选在取数时就算完了（见 `StudySpotRepository.plan`）。
+     *    这个下标纯粹是「显示哪一条」，所以放在这里而不是再走一遍仓库。
+     */
+    private val _studySpotIndex = MutableStateFlow(0)
+    val studySpotIndex: StateFlow<Int> = _studySpotIndex.asStateFlow()
 
     /**
      * 自习建议是否正在取。
@@ -58,6 +68,13 @@ internal class CampusServiceViewModel @Inject constructor(
      */
     private val _studySpotLoading = MutableStateFlow(false)
     val studySpotLoading: StateFlow<Boolean> = _studySpotLoading.asStateFlow()
+
+    /** 切到下一个候选取舍（**本地**，不到最后一条不会绕回第一条之外的地方）。 */
+    fun cycleStudySpot() {
+        val size = _studySpotPlan.value?.options?.size ?: return
+        if (size <= 1) return
+        _studySpotIndex.value = (_studySpotIndex.value + 1) % size
+    }
 
     private val _snapshot = MutableStateFlow<CampusCardSnapshot?>(null)
     val snapshot: StateFlow<CampusCardSnapshot?> = _snapshot.asStateFlow()
@@ -120,7 +137,13 @@ internal class CampusServiceViewModel @Inject constructor(
         viewModelScope.launch {
             _studySpotLoading.value = true
             try {
-                _studySpot.value = runCatching { studySpotRepository.suggest() }.getOrNull()
+                val plan = runCatching { studySpotRepository.plan() }
+                    .getOrNull()
+                    ?.takeIf { it.hasContent }
+                // ⚠️ 换了新数据就把「换一个」的下标收回第一条 —— 否则用户切到第 3 条
+                //    再刷新，会停在一个已无意义的序号上（候选数量可能已经变了）
+                _studySpotIndex.value = 0
+                _studySpotPlan.value = plan
             } finally {
                 _studySpotLoading.value = false
             }

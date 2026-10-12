@@ -370,9 +370,17 @@ fun UserScreen(
 /**
  * 「现在去哪儿自习」卡片（仅本人页）。
  *
- * ⚠️ **取不到建议就整张卡不渲染** —— [StudySpotRepository.suggest] 在拿不到空教室数据、
- * 或所有楼都满时返回 null；这时候显示一张空卡是噪音，一条瞎猜的建议更糟。
+ * ⚠️ **取不到建议就整张卡不渲染** —— 仓库在拿不到空教室数据、或所有楼都满时，
+ * `Plan.hasContent` 为 false；这时候显示一张空卡是噪音，一条瞎猜的建议更糟。
  * 但**取值期间要显示「正在找空教室…」**，否则就是「半天什么都不出现、然后突然冒出来」。
+ *
+ * ## 为什么是「一排候选」而不是「一个答案」
+ *
+ * 只给唯一最优时，用户看到的是**每天都同一栋楼**（推荐逻辑是确定性的）。
+ * 现在的做法是把候选**排好序**给出来，底部给一个「换一个」——
+ * 切换**纯本地**（候选在取数时就算完了，见 [StudySpotLogic.Plan]），点一下立刻换，
+ * 不会又等一轮网络。顺序本身是有理由的（空教室更多 / 上一节就在这栋楼上），
+ * 所以每次切换都是「另一个合理的选择」，而不是随机掷骰子。
  *
  * ## 点开去哪儿
  *
@@ -388,20 +396,25 @@ fun UserScreen(
 @Composable
 private fun StudySpotSection() {
     val vm: CampusServiceViewModel = hiltViewModel()
-    val spot by vm.studySpot.collectAsState()
+    val plan by vm.studySpotPlan.collectAsState()
+    val index by vm.studySpotIndex.collectAsState()
     val loading by vm.studySpotLoading.collectAsState()
 
-    val suggestion = spot
-    if (suggestion == null) {
+    val current = plan
+    if (current == null) {
         if (loading) StudySpotLoadingCard()
         return
     }
+
+    // 文案在逻辑层就渲染好了（那里才有时间表与「现在几点」）—— 界面只按下标取一条
+    val card = StudySpotLogic.studySpotCardOf(current, index) ?: return
+    val options = current.options
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 10.dp)
-            .clickable { openStudySpotTarget(suggestion.kind) },
+            .clickable { openStudySpotTarget(card.kind) },
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
@@ -426,7 +439,7 @@ private fun StudySpotSection() {
                 )
                 // 可点击的提示：光靠卡片本身「看起来能点」用户不一定敢点
                 Text(
-                    text = studySpotActionHint(suggestion.kind),
+                    text = studySpotActionHint(card.kind),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -440,15 +453,55 @@ private fun StudySpotSection() {
             }
             Spacer(modifier = Modifier.height(5.dp))
             Text(
-                text = suggestion.title,
+                text = card.title,
                 style = MaterialTheme.typography.titleMedium,
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = suggestion.detail,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // ⚠️ 第二行没有内容时**整行不渲染** —— 留一个空行会让卡片看着像坏了
+            card.detail?.let { detail ->
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // 楼层分布 + 空闲时长可能有点长，给两行；再多就截断（用户点进去看完整的）
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // 只有一条候选时不给「换一个」—— 点了没反应比没有更糟
+            if (options.size > 1) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${index + 1}/${options.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    // ⚠️ 「换一个」是**本地**换下标：候选在取数时就算好了，这里不打网络。
+                    //    子级的 clickable 会吃掉点击，所以点它**不会**连带触发卡片的跳转。
+                    Row(
+                        modifier = Modifier
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                            .clickable { vm.cycleStudySpot() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "换一个",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -321,4 +321,290 @@ class StudySpotLogicTest {
             ),
         )
     }
+
+    // ============================================ 候选池：聚合 / 排序 / 文案 / 时长
+
+    private fun free(
+        id: String,
+        name: String,
+        count: Int,
+        floor: Int? = null,
+        ahead: Int = 0,
+    ) = StudySpotLogic.BuildingFree(
+        buildingId = id,
+        buildingName = name,
+        freeCount = count,
+        floor = floor,
+        freeSectionsAhead = ahead,
+    )
+
+    /**
+     * ⚠️⚠️ **标题里的名字与数字必须同范围**。
+     *
+     * 服务端给的是**逐层**条目，一栋楼会来好几条。要是直接拿「3 楼那一条」当最优，
+     * 而数字写的是楼的总数，用户跑去 3 楼会发现根本没有那么多 —— 数据是对的，
+     * 界面说的是**另一件事**（「命中对了不代表展示对了」）。
+     */
+    @Test
+    fun `多层楼的标题只说楼名而数量是楼的总数`() {
+        val multi = StudySpotLogic.groupByBuilding(
+            listOf(
+                free("b1", "文萃楼I", 5, floor = 3),
+                free("b1", "文萃楼I", 15, floor = 5),
+            ),
+        ).single()
+
+        assertEquals(20, multi.freeCount)
+        assertEquals(2, multi.floors.size)
+        // 多的那层排前面，用于「单层才点名」的判断
+        assertEquals(5, multi.floors.first().floor)
+        assertEquals("文萃楼I现在有 20 间空教室", StudySpotLogic.candidateTitle(multi))
+
+        // 只有一层有空时**才**点名楼层 —— 此时楼层数 = 楼的总数，两者范围一致
+        val single = StudySpotLogic.groupByBuilding(listOf(free("b1", "文萃楼I", 12, floor = 3))).single()
+        assertEquals("文萃楼I 3 楼现在有 12 间空教室", StudySpotLogic.candidateTitle(single))
+    }
+
+    /** 全满的楼不进候选（没什么可去的）。 */
+    @Test
+    fun `全满的楼不进候选`() {
+        assertTrue(StudySpotLogic.rank(listOf(free("b1", "甲楼", 0))).isEmpty())
+        // 有空的楼照样在
+        assertEquals(1, StudySpotLogic.rank(listOf(free("b1", "甲楼", 0), free("b2", "乙楼", 1))).size)
+    }
+
+    /**
+     * ⚠️ 就近加成**必须温和**：太大就会出现「近但只剩 2 间」压过「远但有 12 间」——
+     * 那是拿一个没根据的前提（人愿意为了近去挤一间几乎满的教室）替用户做决定。
+     */
+    @Test
+    fun `就近加成不会压过空教室明显更多的楼`() {
+        val farWins = StudySpotLogic.rank(
+            buildings = listOf(free("b1", "文萃楼I", 2), free("b2", "综教", 12)),
+            lastClassroom = "文萃楼I404",
+        )
+        assertEquals("综教", farWins.first().buildingName)
+
+        // 差得不多（3 间以内）时，同楼的那个胜出
+        val nearWins = StudySpotLogic.rank(
+            buildings = listOf(free("b1", "文萃楼I", 5), free("b2", "综教", 7)),
+            lastClassroom = "文萃楼I404",
+        )
+        assertEquals("文萃楼I", nearWins.first().buildingName)
+        assertEquals(true, nearWins.first().matchLastClass)
+        assertEquals(false, nearWins[1].matchLastClass)
+    }
+
+    /**
+     * ⚠️ 排序**必须确定**：并列时不能靠输入顺序（输入顺序来自并发请求，每次都可能不同），
+     * 否则同一份数据两次排序给出不同的第一条，卡片上的推荐会自己跳。
+     *
+     * ⚠️ 并列时按楼名排 —— 那只是「**确定**」，不是「更好听」：
+     *    Kotlin 的字符串比较是 UTF-16 码点序，`乙`(U+4E59) < `甲`(U+7532)，
+     *    所以并列时「乙楼」在前。**别把它当成有意义的排序**去改。
+     */
+    @Test
+    fun `并列时候选顺序稳定`() {
+        val a = StudySpotLogic.rank(listOf(free("b1", "乙楼", 5), free("b2", "甲楼", 5)))
+        val b = StudySpotLogic.rank(listOf(free("b2", "甲楼", 5), free("b1", "乙楼", 5)))
+
+        assertEquals(listOf("乙楼", "甲楼"), a.map { it.buildingName })
+        assertEquals(a.map { it.buildingName }, b.map { it.buildingName })
+    }
+
+    /** 教室名认楼要取**最长**前缀，否则「文萃楼I」会被认成隔壁的「文萃楼」。 */
+    @Test
+    fun `教室名认楼取最长前缀`() {
+        val cs = StudySpotLogic.rank(listOf(free("b1", "文萃楼", 3), free("b2", "文萃楼I", 3)))
+
+        assertEquals("文萃楼I", StudySpotLogic.buildingOf("文萃楼I404", cs))
+        assertEquals("文萃楼", StudySpotLogic.buildingOf("文萃楼H101", cs))
+        assertNull(StudySpotLogic.buildingOf("综合教学楼B301", cs))
+        assertNull(StudySpotLogic.buildingOf(null, cs))
+    }
+
+    /**
+     * ⚠️ 「上一节课的教室」有**时限**：上午 10 点就上完的课，下午拿它说「你在那儿附近」
+     * 就是瞎猜。超了窗口返回 null ⇒ 不做这次推断。
+     */
+    @Test
+    fun `上一节课的教室只在时限内才算数`() {
+        val courses = listOf(courseAt("操作系统", "文萃楼I404", 3, 3))  // 10:00-10:50
+
+        // 刚下课 5 分钟：认
+        assertEquals("文萃楼I404", StudySpotLogic.recentClassroomOf(courses, table, LocalTime.of(10, 55)))
+        // 正好在窗口边缘：还认
+        assertEquals("文萃楼I404", StudySpotLogic.recentClassroomOf(courses, table, LocalTime.of(12, 20)))
+        // 超过 90 分钟：不认（宁可给普通的「空教室最多」，也不给基于错前提的「就近」）
+        assertNull(StudySpotLogic.recentClassroomOf(courses, table, LocalTime.of(12, 30)))
+        // 还在上课（没有「上完」的课）
+        assertNull(StudySpotLogic.recentClassroomOf(courses, table, LocalTime.of(10, 20)))
+        // 取最近上完的那节
+        assertEquals(
+            "文萃楼I404",
+            StudySpotLogic.recentClassroomOf(
+                courses = listOf(courseAt("高数", "综教B301", 1, 1), courseAt("操作系统", "文萃楼I404", 3, 3)),
+                table = table,
+                now = LocalTime.of(10, 55),
+            ),
+        )
+    }
+
+    @Test
+    fun `连续空闲节数`() {
+        // 第 3 节占用 ⇒ 从第 1 节起只能连空 2 节
+        assertEquals(2, StudySpotLogic.freeSectionsAhead("3", 1, 3))
+        // 从第 3 节起算：第 3 节就占用 ⇒ 0
+        assertEquals(0, StudySpotLogic.freeSectionsAhead("1,2,3", 3, 3))
+        // null / 空串 = 全天空闲，不是数据缺失
+        assertEquals(3, StudySpotLogic.freeSectionsAhead(null, 1, 3))
+        assertEquals(3, StudySpotLogic.freeSectionsAhead("", 1, 3))
+    }
+
+    /**
+     * 「能待多久」的措辞是「**有教室**空到 …」—— 它的来源是**各间教室里连续空得最久的那个**，
+     * 只保证「至少有 1 间能一路坐到底」，**不保证**整栋楼/整层都空着。
+     * 同一份数据换个主语，正确性就变了（写成「（这栋楼）空到 20:55」就是假的）。
+     */
+    @Test
+    fun `空闲时长文案`() {
+        // 8:20 在第 1 节（8:00-8:50），连空 2 节 ⇒ 到第 2 节结束 9:40
+        assertEquals("有教室空到 09:40", StudySpotLogic.freeUntilText(table, LocalTime.of(8, 20), 2))
+        // 连空节数超出作息表 ⇒ 截到最后一节，不能因为「后面没定义」就不给结论
+        assertEquals("有教室空到 10:50", StudySpotLogic.freeUntilText(table, LocalTime.of(8, 20), 99))
+        // 算不出来（0）⇒ 不做断言
+        assertNull(StudySpotLogic.freeUntilText(table, LocalTime.of(8, 20), 0))
+        // 当天课都上完了 ⇒ 没有「到几点」这回事
+        assertNull(StudySpotLogic.freeUntilText(table, LocalTime.of(22, 0), 3))
+        // 连时间表都没有
+        assertNull(StudySpotLogic.freeUntilText(emptyList(), LocalTime.of(8, 20), 3))
+    }
+
+    /**
+     * ⚠️⚠️ 空闲时长要按**到达时刻**算，不是「现在」。
+     *
+     * 正在上课的人**到不了** —— 拿「现在这一节」算出来的那个数是他在教室里的最后几分钟，
+     * 跟他下课之后去哪儿毫无关系。
+     */
+    @Test
+    fun `空闲时长按到达时刻算`() {
+        // 比上面那张表多一节 13:20-14:10，这样「下课之后」才落到一个真实节次上
+        val t = table + TimeTableItem(LocalTime.of(13, 20), LocalTime.of(14, 10))
+
+        // 10:20 还在第 3 节里：连空 1 节 = 到 10:50（下课那一刻本身）
+        assertEquals("有教室空到 10:50", StudySpotLogic.freeUntilText(t, LocalTime.of(10, 20), 1))
+        // 10:50 下课后到达：那已经是第 4 节，能到 14:10 —— 这才是有用的那个数
+        assertEquals("有教室空到 14:10", StudySpotLogic.freeUntilText(t, LocalTime.of(10, 50), 1))
+
+        // [planOf] 的 `at` 必须是同一个时刻，否则标题说「下课后」、时长却按现在算
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(10, 50),
+            table = t,
+            course = null,
+            booking = null,
+            buildings = listOf(free("b1", "文萃楼I", 3, floor = 3, ahead = 1)),
+        )
+        val card = StudySpotLogic.studySpotCardOf(plan, 0)!!
+        assertEquals("文萃楼I 3 楼现在有 3 间空教室", card.title)
+        assertEquals("有教室空到 14:10", card.detail)
+    }
+
+    /** 空闲态卡片：标题 + 「为什么推荐 / 各层分布 / 还能空多久」。 */
+    @Test
+    fun `空闲态卡片把就近理由与楼层分布说清楚`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(8, 20),
+            table = table,
+            course = null,
+            booking = null,
+            buildings = listOf(
+                free("b1", "文萃楼I", 5, floor = 3, ahead = 2),
+                free("b1", "文萃楼I", 7, floor = 5, ahead = 1),
+            ),
+            lastClassroom = "文萃楼I404",
+        )
+        val card = StudySpotLogic.studySpotCardOf(plan, 0)!!
+
+        assertEquals(StudySpotLogic.Kind.FREE_ROOM, card.kind)
+        assertEquals("文萃楼I现在有 12 间空教室", card.title)
+        // ⚠️ 理由只陈述**事实**（课表上写着「上一节在文萃楼I」），不说「你就在附近」那种推论
+        assertEquals(
+            "你上一节在文萃楼I上课 · 5 层 7 间 · 3 层 5 间 · 有教室空到 09:40",
+            card.detail,
+        )
+    }
+
+    /** 上课中的卡片：说清「几点下课后去哪儿」，且**不重复**说上一节在哪上。 */
+    @Test
+    fun `上课中卡片说下课后去哪儿`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(8, 20),
+            table = table,
+            course = StudySpotLogic.NextCourse(
+                name = "操作系统",
+                classroom = "文萃楼I404",
+                endsAt = LocalTime.of(8, 50),
+            ),
+            booking = null,
+            buildings = listOf(free("b1", "文萃楼I", 12, floor = 3)),
+            lastClassroom = "文萃楼I404",
+        )
+        val card = StudySpotLogic.studySpotCardOf(plan, 0)!!
+
+        assertEquals("正在上操作系统（文萃楼I404）", card.title)
+        assertEquals("08:50 下课后 · 去文萃楼I 3 楼（12 间空）", card.detail)
+        assertTrue("正在上那节就在这栋楼，不该再说「你上一节在…」", card.detail?.contains("你上一节") != true)
+    }
+
+    /** 「换一个」= 本地换下标，转一圈回到第一条；越界也不许崩（候选数量刷新时会变）。 */
+    @Test
+    fun `换一个按下标循环`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(12, 0),
+            table = table,
+            course = null,
+            booking = null,
+            buildings = listOf(free("b1", "甲楼", 5), free("b2", "乙楼", 4), free("b3", "丙楼", 3)),
+        )
+
+        val titles = (0..3).map { StudySpotLogic.studySpotCardOf(plan, it)?.title }
+        assertEquals(3, titles.distinct().size)
+        // 转一圈回到第一条
+        assertEquals(titles[0], titles[3])
+        // 越界的下标（旧下标 + 刷新后候选变短）靠取模兜住 —— 不许崩
+        assertEquals(titles[1], StudySpotLogic.studySpotCardOf(plan, 7)?.title)   // 7 % 3 = 1
+        assertEquals(titles[2], StudySpotLogic.studySpotCardOf(plan, -1)?.title)  // 负数也要绕回
+    }
+
+    /** 「有预约」压过「空教室」：已经安排好了，别再推荐别的地方。 */
+    @Test
+    fun `有预约时不给空教室候选`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(12, 0),
+            table = table,
+            course = null,
+            booking = StudySpotLogic.Booking("文萃楼I404", "13:20"),
+            buildings = listOf(free("b1", "甲楼", 5)),
+        )
+
+        assertEquals(StudySpotLogic.Kind.HAS_BOOKING, plan.kind)
+        assertTrue(plan.options.isEmpty())
+        val card = StudySpotLogic.studySpotCardOf(plan, 0)!!
+        assertEquals("你 13:20 在 文萃楼I404 有座位预约", card.title)
+        assertEquals("已约好，直接去就行", card.detail)
+    }
+
+    /** 什么都取不到（全满）时 `hasContent` 为 false ⇒ 整张卡不渲染，另一条路照常给。 */
+    @Test
+    fun `没有任何内容时不显示卡片`() {
+        val empty = StudySpotLogic.planOf(
+            at = LocalTime.of(12, 0),
+            table = table,
+            course = null,
+            booking = null,
+            buildings = listOf(free("b1", "甲楼", 0)),
+        )
+        assertEquals(false, empty.hasContent)
+        assertNull(StudySpotLogic.studySpotCardOf(empty, 0))
+    }
 }
