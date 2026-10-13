@@ -21,7 +21,9 @@ import cn.bit101.android.features.notify.NetFlowChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -97,8 +99,19 @@ internal class CampusServiceViewModel @Inject constructor(
      *    取不到数据时**不动**，数据没变时**不收回下标**。
      */
     fun refreshStudySpot() {
+        // ⚠️ 先撤掉排队中的重试：外部（resume / 手动刷新）已经触发了一次新的取数，
+        //    再叠一条重试链就会变成「一次刷新放大成好几次请求」。
+        studySpotRetryJob?.cancel()
+        studySpotRetryJob = null
+        studySpotRetries = 0
         viewModelScope.launch { loadStudySpot() }
     }
+
+    /** 已经为重试等过几次（见 [StudySpotLogic.retryDelayMillis]）。 */
+    private var studySpotRetries = 0
+
+    /** 排队中的那次重试；换页/重新取数时要撤掉，别叠链。 */
+    private var studySpotRetryJob: Job? = null
 
     /** 取一次自习建议并落到界面上 —— **唯一实现**，[refresh] 与 [refreshStudySpot] 都走它。 */
     private suspend fun loadStudySpot() {
@@ -107,11 +120,29 @@ internal class CampusServiceViewModel @Inject constructor(
             val fresh = runCatching { studySpotRepository.plan() }
                 .getOrNull()
                 ?.takeIf { it.hasContent }
-            val update = StudySpotLogic.planUpdate(_studySpotPlan.value, fresh) ?: return
-            if (update.resetIndex) _studySpotIndex.value = 0
-            _studySpotPlan.value = update.plan
+            StudySpotLogic.planUpdate(_studySpotPlan.value, fresh)?.let { update ->
+                if (update.resetIndex) _studySpotIndex.value = 0
+                _studySpotPlan.value = update.plan
+            }
         } finally {
             _studySpotLoading.value = false
+        }
+
+        // ⚠️ 取到空候选就排一次重试 —— 最常见的原因**不是「真没有空教室」**，而是
+        //    **冷启动时会话还没就绪**（真机取证 2026-10-13 21:09：卡片说「暂未查到空教室」，
+        //    同一屏的一卡通写着「未登录」；几分钟后两者都正常了）。
+        //    取数本来只在进组合时发生一次，没有这条就再也不会自己好 —— 那张卡会一直空着。
+        // ⚠️ 放在 finally **之后**：重试等待期间不该让界面一直显示「正在取」。
+        // ⚠️ 策略（等多久、几次）在 [StudySpotLogic.retryDelayMillis]，那边有单测。
+        val delayMs = StudySpotLogic.retryDelayMillis(_studySpotPlan.value, studySpotRetries)
+        if (delayMs == null) {
+            studySpotRetries = 0
+        } else {
+            studySpotRetries += 1
+            studySpotRetryJob = viewModelScope.launch {
+                delay(delayMs)
+                loadStudySpot()
+            }
         }
     }
 

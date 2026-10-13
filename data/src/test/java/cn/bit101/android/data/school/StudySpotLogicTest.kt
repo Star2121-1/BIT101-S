@@ -1248,9 +1248,16 @@ class StudySpotLogicTest {
      *   另外 `CampusOsmSurveyTest` 会从 OSM 那边反向盯着缺了哪些楼。
      */
     @Test
-    fun `接口返回的楼名都能认出坐标 而且认到对的地点`() {
+    fun `接口的 30 栋楼名都能认到对的地点`() {
         // 接口楼名 → 它应该被认成哪个地点
+        //
+        // ★ 这是**空教室接口在良乡登记的 30 栋楼**（2026-10-13 真机滚屏 dump 全收；
+        //   界面自称「30 栋教学楼 · 默认」，数对得上。取证
+        //   `.workbuddy/screenshots/v116-验收-2026-10-13/`）。
+        //   ⚠️ 这份清单原来是 15 条 —— 因为 UI dump 只看得见屏幕上那几行，
+        //   而漏掉的「综合教学楼大楼A/B」正好在折叠之下。**要全收，别只抄眼前几行。**
         val realBuildingNames = mapOf(
+            // 文萃楼群：接口只登记了这些分区（**A / D / K 没有**；表里收着它们是无害的冗余）
             "文萃楼" to "文萃楼",
             "文萃楼B" to "文萃楼B",
             "文萃楼C" to "文萃楼C",
@@ -1267,6 +1274,22 @@ class StudySpotLogicTest {
             "综合教学楼大楼A" to "综合教学大楼",
             "综合教学楼大楼B" to "综合教学大楼",
             "理科教学大楼" to "理科教学楼",
+            "理学楼A" to "理学楼A",
+            "理学楼B" to "理学楼B",
+            "理学楼C" to "理学楼C",
+            "丹枫园C" to "丹枫园C",
+            // ⚠️「工训楼」与表里的「工程训练中心」互不为子串 —— 凭什么说是同一栋，见坐标表注释
+            "工训楼" to "工程训练中心",
+            "化学实验中心" to "化学实验中心",
+            "良乡工业生态楼" to "工业生态楼",
+            // ⚠️ 下面两栋不收就会命中**中关村**同名的别名（「图书馆」「体育馆」）⇒ 跨校区错配
+            "良乡图书馆" to "良乡图书馆",
+            "体育馆（良乡）" to "文化体育中心",
+            "文博中心" to "文博中心",
+            "物理实验中心" to "物理实验中心",
+            "学生服务中心" to "学生服务中心",
+            "至善园" to "至善园",
+            "前沿交叉大楼" to "前沿交叉大楼",
         )
 
         val wrong = realBuildingNames.mapNotNull { (raw, expected) ->
@@ -1277,6 +1300,19 @@ class StudySpotLogicTest {
         assertTrue(
             "这些接口楼名认不到对的地点（要给 CampusLocations 补别名，别改这里的期望值）：$wrong",
             wrong.isEmpty(),
+        )
+
+        // ⚠️ 接口**登记了**但表里**刻意不收**的 —— 它们认不出才是对的。
+        //    把这一栏写出来，是为了让「漏收」与「故意不收」不会混成同一件事：
+        //    上面那份清单是「必须认出来」，这一份是「必须认不出来」。
+        val notCollected = setOf(
+            // 非教学楼：接口登记它是因为医院也有几间房，但没人会去那儿自习
+            "良乡校医院",
+        )
+        val unexpected = notCollected.filter { CampusLocations.match(it) != null }
+        assertTrue(
+            "这些楼名本来不该认出来（认出来了说明别名收得太宽，可能吞掉别人的楼）：$unexpected",
+            unexpected.isEmpty(),
         )
     }
 
@@ -1310,5 +1346,48 @@ class StudySpotLogicTest {
 
         // 5. 手上没有 ⇒ 填上，并收回下标
         assertEquals(true, StudySpotLogic.planUpdate(current = null, fresh = old)?.resetIndex)
+    }
+
+    /**
+     * ⚠️ **房间号至少两位** —— 一位数的「房间号」不是房间号，是别的字的**残渣**。
+     *
+     * 真机实证（2026-10-13）：综教B 名下有个在线考试占位房 `线上考试2`，以前「线上考试」
+     * 四字被丢掉只剩 `2` ⇒ 界面上成了「综合教学楼大楼B 2」，**看着像一间真房间**
+     * （而那房间根本不是自习室）。
+     */
+    @Test
+    fun `房间号至少两位 不然退回原教室名`() {
+        // 照旧：正常教室名照常拆出房间号（含两位的）
+        assertEquals("B301", StudySpotLogic.roomLabelOf("综教B301", "综合教学大楼"))
+        assertEquals("501a", StudySpotLogic.roomLabelOf("文萃楼C501a", "文萃楼C"))
+        assertEquals("125", StudySpotLogic.roomLabelOf("文萃楼H125良乡二号机房", "文萃楼H"))
+        assertEquals("A2", StudySpotLogic.roomLabelOf("综教A2", "综合教学大楼"))
+
+        // ⚠️ 只有一位数字 ⇒ **宁可退回原教室名**，也不把它当房间号显示
+        assertEquals("线上考试2", StudySpotLogic.roomLabelOf("线上考试2", "综合教学楼大楼B"))
+    }
+
+    /**
+     * ⚠️ **空候选要自动重试，但次数有限**。
+     *
+     * 由来：真机取证 2026-10-13 21:09 —— 冷启动卡片「暂未查到空教室」、同一屏一卡通
+     * 「未登录」⇒ 会话没就绪，而取数只在进组合时发生一次 ⇒ 那张卡会一直空着。
+     */
+    @Test
+    fun `空候选才重试 且次数有限`() {
+        val ok = freePlan("文萃楼C 501a")
+
+        // 有候选 ⇒ 不重试（哪怕已经重试过很多次）
+        assertNull(StudySpotLogic.retryDelayMillis(ok, attempt = 0))
+        assertNull(StudySpotLogic.retryDelayMillis(ok, attempt = 5))
+
+        // 没取到 / 取到空的 ⇒ 头两次给间隔
+        assertTrue(StudySpotLogic.retryDelayMillis(null, attempt = 0) != null)
+        assertTrue(StudySpotLogic.retryDelayMillis(freePlan(), attempt = 0) != null)
+        assertTrue(StudySpotLogic.retryDelayMillis(freePlan(), attempt = 1) != null)
+
+        // ⚠️ 之后**不再试**：空候选也可能是真的（那一节所有教室都有人），
+        //    无限重试就是拿电池和流量打水漂
+        assertNull(StudySpotLogic.retryDelayMillis(freePlan(), attempt = 2))
     }
 }

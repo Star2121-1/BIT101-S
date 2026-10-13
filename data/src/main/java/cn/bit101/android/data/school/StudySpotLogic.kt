@@ -659,6 +659,15 @@ object StudySpotLogic {
             return RoomParts(classroomName.ifBlank { rest }, kind = null)
         }
         val label = tail.takeWhile { it.isAsciiLetterOrDigit() }
+        // ⚠️⚠️ **房间号至少两位**，否则退回原教室名 —— 一位数的「房间号」不是房间号，
+        //    是**别的字的残渣**。真机实证（2026-10-13）：综教B 名下有个在线考试占位房
+        //    `线上考试2`，「线上考试」四字被上面那步丢掉，只剩 `2` ⇒ 界面上成了
+        //    「综合教学楼大楼B 2」，**看着像一间真房间**（而那房间根本不是自习室）。
+        //    退回原串后显示成「综合教学楼大楼B 线上考试2」，一眼能看出它是什么。
+        //    （与 [floorOf] 同一个取向：那边也只认 3/4 位数字，一位数一律不认。）
+        if (label.length < 2) {
+            return RoomParts(classroomName.ifBlank { rest }, kind = null)
+        }
         val kind = tail.substring(label.length)
             .trim { it.isWhitespace() || it == '-' || it == '_' }
             .takeIf { it.isNotBlank() }
@@ -881,6 +890,33 @@ object StudySpotLogic {
 
     /** [planUpdate] 的结果：换成哪一份、要不要把「换一个」的下标收回第一条。 */
     data class PlanUpdate(val plan: Plan, val resetIndex: Boolean)
+
+    /**
+     * 取到**空候选**时，下一次重试要等多久（毫秒）；`null` = 不再重试。
+     *
+     * ## ⚠️ 为什么要重试
+     *
+     * 「取到空候选」最常见的**不是**「真的没有空教室」，而是**冷启动时会话还没就绪**。
+     * 真机取证（2026-10-13 21:09，v1.11.3）：卡片写着「暂未查到空教室」，而**同一屏**的
+     * 一卡通写着「未登录，进详情页登录」—— 几分钟后一卡通就有余额、卡片也有数据了。
+     *
+     * 而取数**只在进组合时发生一次**，之后没有任何机制再试 ⇒ 那张卡会一直空着，
+     * 直到用户自己去空教室页逛一圈（把会话带起来）、手动点刷新、或切后台再回来。
+     *
+     * ## ⚠️ 为什么是「有限次 + 递增」
+     *
+     * 空候选也可能是**真的**（那一节所有教室都有人）。无限重试就是拿电池和流量打水漂。
+     * 所以只试 [RETRY_DELAYS_MS] 这么几次，之后安静地显示「暂未查到空教室」——
+     * 那句话在有重试进行中时也**恰好是实话**（「暂未」＝还没查到，不是「没有」）。
+     *
+     * @param attempt 已经重试过几次（0 = 还没重试过）
+     */
+    fun retryDelayMillis(plan: Plan?, attempt: Int): Long? =
+        if (plan != null && plan.options.isNotEmpty()) null
+        else RETRY_DELAYS_MS.getOrNull(attempt)
+
+    /** 重试间隔：第 1 次等 15 秒，第 2 次等 30 秒，之后不再试。 */
+    private val RETRY_DELAYS_MS = longArrayOf(15_000L, 30_000L)
 
     /**
      * 卡片要显示的两行。
