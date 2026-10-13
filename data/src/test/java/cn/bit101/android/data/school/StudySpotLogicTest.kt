@@ -656,7 +656,13 @@ class StudySpotLogicTest {
         assertEquals("理科教学楼", CampusLocations.match("理科楼")?.name)
         // ⚠️ 别把隔壁的「综合教学大楼」吞进来（两边都带「教学大楼」四个字）
         assertEquals("综合教学大楼", CampusLocations.match("综教B301")?.name)
-        assertEquals("综合教学大楼", CampusLocations.match("综合教学大楼A")?.name)
+        // ⚠️⚠️ 这里**必须写接口的真实楼名**：「综合教学楼大楼A / B」
+        //    （2026-10-13 真机 dump 核实：空教室页楼列表第 13/14 项就是它们）。
+        //    旧断言写的是「综合教学大楼A」—— 那个写法**在真实数据里根本不存在**
+        //    （比真名少一个「楼」字）⇒ 测试全绿，而这栋楼在真机上**永远算不出距离**、
+        //    也永远不被认成「用户自己的楼」。这正是铁律 0.7：期望值按想当然写死的假通过。
+        assertEquals("综合教学大楼", CampusLocations.match("综合教学楼大楼A")?.name)
+        assertEquals("综合教学大楼", CampusLocations.match("综合教学楼大楼B")?.name)
         // 理学楼也不该被吞（那是南邻的另一组三栋楼）
         assertEquals("理学楼A", CampusLocations.match("理学楼A305")?.name)
     }
@@ -1124,5 +1130,117 @@ class StudySpotLogicTest {
         assertEquals("现在没课", detail.headline)
         assertEquals(StudySpotLogic.NO_CANDIDATE_HINT_NOW, detail.emptyHint)
         assertTrue("不许断言「没有空教室」", detail.emptyHint?.contains("没有") != true)
+    }
+
+    // ============================================ 2026-10-13 自检修掉的三处
+
+    /**
+     * ⚠️⚠️ **认楼不能只比前缀** —— 「理教楼406」与接口楼名「理科教学大楼」前缀
+     * **一对都认不出来**，只有坐标表的别名能把两边映射到同一个地点。
+     *
+     * `DefaultStudySpotRepository.pickBuildings` 的注释里已经因为同一个原因栽过一次
+     * （用户正在理科教学楼上课，推荐里一间理科教学楼的教室都没有），
+     * 可 [StudySpotLogic.buildingOf] 当时**仍然只比前缀** ⇒
+     * 楼级那条路（[StudySpotLogic.rank] 的「同楼加成」）对这些楼**从来没生效过**。
+     */
+    @Test
+    fun `认楼要认得两种叫法而不只是前缀`() {
+        val cs = StudySpotLogic.rank(
+            listOf(free("b1", "理科教学大楼", 9), free("b2", "综合教学楼大楼B", 7)),
+        )
+
+        // 前缀比对一对都认不出来，别名表认得出来
+        assertEquals("理科教学大楼", StudySpotLogic.buildingOf("理教楼406", cs))
+        assertEquals("综合教学楼大楼B", StudySpotLogic.buildingOf("综教B301", cs))
+        // 认不出来的楼仍然返回 null（**不猜**）—— 「前沿楼」不在坐标表里
+        assertNull(StudySpotLogic.buildingOf("前沿楼101", cs))
+        // 取最长前缀那条老规矩不能被别名路径弄丢
+        val cs2 = StudySpotLogic.rank(listOf(free("b1", "文萃楼", 3), free("b2", "文萃楼I", 3)))
+        assertEquals("文萃楼I", StudySpotLogic.buildingOf("文萃楼I404", cs2))
+    }
+
+    /**
+     * ⚠️ **没有参考点时不许说「离你多近排的」**。
+     *
+     * 那时打分全靠时长、排序退化成「这栋楼空几间」，距离**根本没参与**。
+     * 副标题是一句对用户的**承诺**，承诺一个不在场的依据正是铁律 0.4 要防的事
+     * （真机实测：夜里 00:2x 打开，候选按「这栋楼还有 N 间」降序，而副标题还写着「离你多近」）。
+     */
+    @Test
+    fun `没有参考点时副标题不提距离`() {
+        val rooms = listOf(
+            room("b1", "文萃楼I", "文萃楼I302", floor = 3, ahead = 3, inBuilding = 2),
+            room("b2", "文萃楼H", "文萃楼H102", floor = 1, ahead = 2, inBuilding = 1),
+        )
+
+        val noRef = StudySpotLogic.detailOf(
+            StudySpotLogic.planOf(
+                at = LocalTime.of(8, 20), table = table,
+                course = null, booking = null, rooms = rooms,
+            ),
+        )
+        assertEquals("按能待多久、这栋楼空几间排的", noRef.subline)
+        // 反向守卫：一行都不许出现距离文案（否则「没有参考点」这个前提就被破坏了）
+        assertTrue(noRef.rows.none { it.detail?.contains("那栋楼") == true })
+
+        // 有参考点时距离**真的**参与了打分（同楼加成）⇒ 那句话才成立
+        val withRef = StudySpotLogic.detailOf(
+            StudySpotLogic.planOf(
+                at = LocalTime.of(8, 20), table = table,
+                course = null, booking = null, rooms = rooms,
+                reference = StudySpotLogic.Reference("文萃楼I404", "你上一节课"),
+            ),
+        )
+        assertEquals("按能待多久、离你多近排的", withRef.subline)
+    }
+
+    /**
+     * ⚠️ **「能待到什么时候」的三态在卡片与详情页必须同一优先级**。
+     *
+     * 曾经：详情页那行说「空闲到明天」，而卡片对**同一间**教室要么说「（空到 20:55）」、
+     * 要么干脆不提 —— 同一份数据两种说法，用户会以为出了两个错（铁律 0.1）。
+     * 这里钉住「正在上今天最后一节课」这个场景。
+     */
+    @Test
+    fun `上课中且今天没课了时卡片也说空闲到明天`() {
+        val plan = StudySpotLogic.planOf(
+            at = LocalTime.of(10, 50),   // 最后一节 10:00-10:50 刚好下课
+            table = table,
+            course = StudySpotLogic.NextCourse(
+                "操作系统", "文萃楼I404", endsAt = LocalTime.of(10, 50),
+            ),
+            booking = null,
+            rooms = listOf(room("b1", "文萃楼I", "文萃楼I302", floor = 3, ahead = 3, inBuilding = 2)),
+        )
+        val card = StudySpotLogic.studySpotCardOf(plan, 0)!!
+        val row = StudySpotLogic.detailOf(plan).rows.first()
+
+        assertEquals(StudySpotLogic.DAY_OVER_TEXT, row.untilText)
+        assertTrue(
+            "卡片也要说「空闲到明天」，实际是：${card.detail}",
+            card.detail?.contains(StudySpotLogic.DAY_OVER_TEXT) == true,
+        )
+    }
+
+    /**
+     * ⚠️⚠️ **回归守卫：接口的真实楼名必须全都能认出坐标**。
+     *
+     * 清单是**真机抓的**（2026-10-13，良乡空教室页楼列表的前 15 项；其余在折叠之下）。
+     * 加这条是因为刚栽过一次：别名表里没有接口真名「综合教学楼大楼」，
+     * 而单测断言的却是「综合教学大楼A」这个**真实数据里不存在的写法** ——
+     * 测试全绿，那栋楼在真机上却永远算不出距离（铁律 0.7：期望值按想当然写死）。
+     *
+     * ⇒ 以后**新增楼名前先跑这条**；认不出就说明 `CampusLocations` 要补别名，
+     *   **别改测试的期望值**。
+     */
+    @Test
+    fun `接口返回的楼名都能认出坐标`() {
+        val realBuildingNames = listOf(
+            "文萃楼", "文萃楼B", "文萃楼C", "文萃楼E", "文萃楼F", "文萃楼G",
+            "文萃楼H", "文萃楼I", "文萃楼J", "文萃楼L", "文萃楼M",
+            "文萃楼圆形报告厅", "综合教学楼大楼A", "综合教学楼大楼B", "理科教学大楼",
+        )
+        val unknown = realBuildingNames.filter { CampusLocations.match(it) == null }
+        assertTrue("这些接口楼名认不出坐标（要给 CampusLocations 补别名）：$unknown", unknown.isEmpty())
     }
 }

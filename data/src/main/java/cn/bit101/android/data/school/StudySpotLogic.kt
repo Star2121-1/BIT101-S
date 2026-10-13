@@ -389,10 +389,24 @@ object StudySpotLogic {
      */
     fun buildingOf(classroom: String?, candidates: List<Candidate>): String? {
         if (classroom.isNullOrBlank()) return null
-        return candidates
+
+        // 1. 前缀**最精确**（能区分「文萃楼I」与「文萃楼」）—— 先试它
+        candidates
             .map { it.buildingName }
             .filter { it.isNotBlank() && classroom.startsWith(it) }
             .maxByOrNull { it.length }
+            ?.let { return it }
+
+        // 2. ⚠️ 前缀认不出时走坐标表的**别名**。
+        //    「理教楼406」与接口楼名「理科教学大楼」前缀**一对都认不出来** ——
+        //    `DefaultStudySpotRepository.pickBuildings` 的注释里已经因为同一个原因栽过一次
+        //    （用户正在理科教学楼上课，推荐里一间理科教学楼的教室都没有）。
+        //    只有别名表能把「课表写法」和「接口楼名」映射到同一个地点。
+        //    ⚠️ 比对的是**匹配到的地点名**，不是字符串 —— 所以「综教B301」也能认到「综合教学楼大楼B」。
+        val here = CampusLocations.match(classroom)?.name ?: return null
+        return candidates
+            .firstOrNull { CampusLocations.match(it.buildingName)?.name == here }
+            ?.buildingName
     }
 
     /**
@@ -968,7 +982,13 @@ object StudySpotLogic {
                     buildString {
                         plan.courseEndsAt?.let { at -> append("$at 下课后 · ") }
                         append("去${it.place}")
-                        it.untilAt?.let { at -> append("（空到 $at）") }
+                        // ⚠️ 这里的三态必须与 [SpotOption.title] / [detailOf] 的行文案**同优先级** ——
+                        //    否则同一间教室，卡片说「（空到 20:55）」而详情页说「空闲到明天」，
+                        //    用户会以为出了两个错（铁律 0.1：两边该一致处必须一致）。
+                        when {
+                            it.dayOver -> append("（$DAY_OVER_TEXT）")
+                            else -> it.untilAt?.let { at -> append("（空到 $at）") }
+                        }
                     }
                 }
                 val tail = option?.let { o -> o.detail?.takeIf { it.isNotBlank() } }
@@ -1134,13 +1154,24 @@ object StudySpotLogic {
                 emptyHint = if (rows.isEmpty()) NO_CANDIDATE_HINT else null,
             )
 
-            Kind.FREE_ROOM -> SpotDetail(
-                kind = plan.kind,
-                headline = FREE_HEADLINE,
-                subline = if (rows.isEmpty()) "" else "按能待多久、离你多近排的",
-                rows = rows,
-                emptyHint = if (rows.isEmpty()) NO_CANDIDATE_HINT_NOW else null,
-            )
+            Kind.FREE_ROOM -> {
+                // ⚠️ 副标题是**对用户的一句承诺**，必须说真话：距离**只有**在有参考点
+                //    且楼名认得出坐标时才参与打分（[RoomCandidate.score] 里只是一档加成）。
+                //    无参考点（晚上 / 凌晨）时打分全是 0 ⇒ 排序退化成「这栋楼空几间」，
+                //    这时候还说「离你多近排的」就是在承诺一个**不在场的依据**（铁律 0.4）。
+                val byDistance = plan.options.any { it.distance != null }
+                SpotDetail(
+                    kind = plan.kind,
+                    headline = FREE_HEADLINE,
+                    subline = when {
+                        rows.isEmpty() -> ""
+                        byDistance -> "按能待多久、离你多近排的"
+                        else -> "按能待多久、这栋楼空几间排的"
+                    },
+                    rows = rows,
+                    emptyHint = if (rows.isEmpty()) NO_CANDIDATE_HINT_NOW else null,
+                )
+            }
         }
     }
 }
