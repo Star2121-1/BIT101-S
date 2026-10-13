@@ -323,14 +323,18 @@ object WidgetLogic {
         // ⚠️ 教学安排调整（放假 / 补课）**必须在这里生效**，否则组件与 App 内课表页
         //    说的是两回事：10/10（周六）按周四课表上课，组件却显示「今天没课」——
         //    用户会拿它当出门依据，这比不显示更糟。
-        val thatDay = when (plan) {
-            // 放假：那天的课不作数 ⇒ 交给 buildDayBlocks 给出「全天空闲」，
-            //      上面那行说明会写清是「放假」而不是「本来就没事」
-            DayPlan.NoClass -> emptyList()
-            // 补课：装的是**被指定那天**的课表，不是这天自己的
-            is DayPlan.MakeUp -> courses.filter { it.weekday == plan.targetWeekday }
-            null -> courses.filter { it.weekday == date.dayOfWeek.value }
-        }
+        //
+        // ⚠️ 判断**必须走 [CourseWeekdayLogic.effectiveWeekday]** —— 提醒、自习推荐、
+        //    组件、课表页只能是同一套。这里曾经自写过一份等价的 when（放假→空 /
+        //    补课→被指定那天 / 否则当天星期几），而 data 层那份**一条单测都没有**：
+        //    两边各写一份的判断，改了一边另一边不会红（铁律 0.1b）。
+        //    ⇒ 现在两边共用同一个函数，只有一处可改。
+        //    传 `{ plan }` 而不是 `planOf`：传进来的 [plan] 本来就是**这一天**的安排。
+        //    返回 null（放假）= 那天的课不作数 ⇒ 交给 [buildDayBlocks] 给出「全天空闲」，
+        //    上面那行说明会写清是「放假」而不是「本来就没事」。
+        val weekday = CourseWeekdayLogic.effectiveWeekday(date) { plan }
+        val thatDay = if (weekday == null) emptyList()
+        else courses.filter { it.weekday == weekday }
 
         return buildDayBlocks(
             thatDay.filter { week <= 0 || weeksContains(it.weeks, week) }
