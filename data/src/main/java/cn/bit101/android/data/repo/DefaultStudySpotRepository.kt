@@ -246,6 +246,21 @@ internal class DefaultStudySpotRepository @Inject constructor(
         buildings: List<BuildingInfo>,
         ownClassrooms: Set<String>,
     ): List<BuildingInfo> {
+        // ⚠️ **排障通道**：接口楼名认不出坐标，等于那栋楼永远算不出距离、也永远不被
+        //    认成「用户自己的楼」（别名表漏了它）。一次真机运行就能从这条日志拿到
+        //    **全量**未知楼名，不用再靠 UI dump 猜 —— dump 只能看到屏幕上那十几行，
+        //    而漏掉的可能正好在折叠之下（2026-10-13 的「综合教学楼大楼A/B」就是这么漏的）。
+        //
+        // ⚠️ 必须放在**下面那句提前 return 之前**：楼少的时候正是最想看到这条的时候，
+        //    放后面等于「有数据才打印」（本轮刚在别处栽过这种吞掉整段的写法）。
+        // ⚠️ 开发机 NP05J 的 logcat 被压着读不到，所以这条是**给正常机器/换机时**用的；
+        //    它不是给用户看的功能，别升级成 UI 文案。
+        buildings.map { it.buildingName }
+            .filter { it.isNotBlank() && CampusLocations.match(it) == null }
+            .distinct()
+            .takeIf { it.isNotEmpty() }
+            ?.let { Log.w(TAG, "这些接口楼名认不出坐标（要给 CampusLocations 补别名）：$it") }
+
         if (buildings.size <= MAX_BUILDINGS) return buildings
 
         // 用户自己的楼 = 他那几个教室匹配出的地点，与楼名匹配出的地点**同一个**

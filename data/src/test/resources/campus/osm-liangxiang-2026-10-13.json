@@ -1,0 +1,539 @@
+{
+  "source": {
+    "provider": "OpenStreetMap / Overpass API",
+    "area": "relation/12485117 北京理工大学良乡校区",
+    "query": "[out:json][timeout:90];area(3612485117)->.a;way(area.a)[\"building\"][\"name\"];out center tags;",
+    "fetched": "2026-10-13",
+    "note": "x/y 按 App 的 Web-Mercator 归一化公式换算（与 CampusLocations 同一套），坐标来源与 App 表一致；b 这一列是 OSM 原始 building tag，不做加工"
+  },
+  "buildings": [
+    {
+      "name": "东食堂",
+      "x": 0.822687,
+      "y": 0.379542,
+      "osmWayId": 948681341,
+      "building": "yes",
+      "levels": 3
+    },
+    {
+      "name": "丹枫A",
+      "x": 0.822671,
+      "y": 0.379536,
+      "osmWayId": 309155731,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "丹枫B",
+      "x": 0.822671,
+      "y": 0.379534,
+      "osmWayId": 309155732,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "丹枫C",
+      "x": 0.822674,
+      "y": 0.379534,
+      "osmWayId": 309155733,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "亭",
+      "x": 0.822673,
+      "y": 0.379543,
+      "osmWayId": 1167713982,
+      "building": "yes",
+      "levels": null
+    },
+    {
+      "name": "信创楼-A",
+      "x": 0.822696,
+      "y": 0.37956,
+      "osmWayId": 1424328916,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "先进结构技术研究院",
+      "x": 0.822682,
+      "y": 0.379568,
+      "osmWayId": 674603546,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "动力中心",
+      "x": 0.822676,
+      "y": 0.379533,
+      "osmWayId": 1085256827,
+      "building": "industrial",
+      "levels": null
+    },
+    {
+      "name": "化学实验中心",
+      "x": 0.822679,
+      "y": 0.379568,
+      "osmWayId": 298138788,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "北京理工大学学生服务中心",
+      "x": 0.822671,
+      "y": 0.379551,
+      "osmWayId": 309042969,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "北校区邮政驿站",
+      "x": 0.82267,
+      "y": 0.379536,
+      "osmWayId": 975684645,
+      "building": "yes",
+      "levels": null
+    },
+    {
+      "name": "北食堂",
+      "x": 0.822676,
+      "y": 0.379554,
+      "osmWayId": 938864196,
+      "building": "yes",
+      "levels": null
+    },
+    {
+      "name": "南食堂",
+      "x": 0.822671,
+      "y": 0.379571,
+      "osmWayId": 975684643,
+      "building": "yes",
+      "levels": null
+    },
+    {
+      "name": "博士后公寓",
+      "x": 0.822698,
+      "y": 0.379541,
+      "osmWayId": 1079724562,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "博士后公寓",
+      "x": 0.822695,
+      "y": 0.37954,
+      "osmWayId": 1079724563,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "博雅园-学生公寓",
+      "x": 0.822675,
+      "y": 0.379575,
+      "osmWayId": 298138787,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "圆形教学楼",
+      "x": 0.822687,
+      "y": 0.379551,
+      "osmWayId": 948990873,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "大学生活动中心",
+      "x": 0.822675,
+      "y": 0.379556,
+      "osmWayId": 938864194,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "工业生态楼",
+      "x": 0.82268,
+      "y": 0.379575,
+      "osmWayId": 975684642,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "工业生态楼二期",
+      "x": 0.822682,
+      "y": 0.379573,
+      "osmWayId": 1451318490,
+      "building": "yes",
+      "levels": null
+    },
+    {
+      "name": "工程训练中心",
+      "x": 0.822688,
+      "y": 0.379575,
+      "osmWayId": 975684641,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "报告厅、演艺厅",
+      "x": 0.822683,
+      "y": 0.379549,
+      "osmWayId": 298568795,
+      "building": "yes",
+      "levels": null
+    },
+    {
+      "name": "文化体育中心",
+      "x": 0.822697,
+      "y": 0.379554,
+      "osmWayId": 938855388,
+      "building": "yes",
+      "levels": null
+    },
+    {
+      "name": "文博中心",
+      "x": 0.822696,
+      "y": 0.379549,
+      "osmWayId": 1325613041,
+      "building": "yes",
+      "levels": 3
+    },
+    {
+      "name": "文萃楼A",
+      "x": 0.82269,
+      "y": 0.379552,
+      "osmWayId": 948990874,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼B",
+      "x": 0.822689,
+      "y": 0.379554,
+      "osmWayId": 938855384,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼C",
+      "x": 0.822689,
+      "y": 0.379555,
+      "osmWayId": 1085938340,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼D",
+      "x": 0.822688,
+      "y": 0.379555,
+      "osmWayId": 975677960,
+      "building": "university",
+      "levels": 2
+    },
+    {
+      "name": "文萃楼E",
+      "x": 0.822687,
+      "y": 0.379555,
+      "osmWayId": 1085938341,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼F",
+      "x": 0.822688,
+      "y": 0.379553,
+      "osmWayId": 948990869,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼G",
+      "x": 0.822687,
+      "y": 0.379554,
+      "osmWayId": 948990868,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼H",
+      "x": 0.822687,
+      "y": 0.379549,
+      "osmWayId": 948990870,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼I",
+      "x": 0.822688,
+      "y": 0.379549,
+      "osmWayId": 948990872,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼J",
+      "x": 0.822687,
+      "y": 0.379548,
+      "osmWayId": 1085938342,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼K",
+      "x": 0.822688,
+      "y": 0.379548,
+      "osmWayId": 975677959,
+      "building": "university",
+      "levels": 2
+    },
+    {
+      "name": "文萃楼L",
+      "x": 0.822689,
+      "y": 0.379548,
+      "osmWayId": 1085938343,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "文萃楼M",
+      "x": 0.822689,
+      "y": 0.379549,
+      "osmWayId": 948990871,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "校医院",
+      "x": 0.822676,
+      "y": 0.379548,
+      "osmWayId": 298140461,
+      "building": "hospital",
+      "levels": null
+    },
+    {
+      "name": "槐泽A",
+      "x": 0.822683,
+      "y": 0.379535,
+      "osmWayId": 948681328,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "槐泽B",
+      "x": 0.822682,
+      "y": 0.379533,
+      "osmWayId": 948681327,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "槐泽C",
+      "x": 0.822679,
+      "y": 0.379533,
+      "osmWayId": 948681326,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "民族食堂",
+      "x": 0.822674,
+      "y": 0.379554,
+      "osmWayId": 938864195,
+      "building": "yes",
+      "levels": null
+    },
+    {
+      "name": "热力站",
+      "x": 0.822671,
+      "y": 0.379567,
+      "osmWayId": 674605387,
+      "building": "industrial",
+      "levels": null
+    },
+    {
+      "name": "物理实验中心",
+      "x": 0.822679,
+      "y": 0.379564,
+      "osmWayId": 674603545,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "理学楼A",
+      "x": 0.822682,
+      "y": 0.379565,
+      "osmWayId": 309155273,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "理学楼B",
+      "x": 0.822682,
+      "y": 0.379564,
+      "osmWayId": 309155274,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "理学楼C",
+      "x": 0.822682,
+      "y": 0.379562,
+      "osmWayId": 309155275,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "理科教学楼",
+      "x": 0.822681,
+      "y": 0.37956,
+      "osmWayId": 309382334,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "甘棠A",
+      "x": 0.822689,
+      "y": 0.379545,
+      "osmWayId": 948681343,
+      "building": "university",
+      "levels": 10
+    },
+    {
+      "name": "甘棠B",
+      "x": 0.822687,
+      "y": 0.379545,
+      "osmWayId": 948681342,
+      "building": "university",
+      "levels": 10
+    },
+    {
+      "name": "甘棠C",
+      "x": 0.822687,
+      "y": 0.379539,
+      "osmWayId": 948681339,
+      "building": "university",
+      "levels": 10
+    },
+    {
+      "name": "甘棠D",
+      "x": 0.822689,
+      "y": 0.379539,
+      "osmWayId": 948681340,
+      "building": "university",
+      "levels": 10
+    },
+    {
+      "name": "疏桐园-学生公寓-A",
+      "x": 0.822671,
+      "y": 0.379565,
+      "osmWayId": 298137839,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "疏桐园-学生公寓-B",
+      "x": 0.822671,
+      "y": 0.379564,
+      "osmWayId": 298137838,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "疏桐园-学生公寓-C",
+      "x": 0.822671,
+      "y": 0.379562,
+      "osmWayId": 298137837,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "疏桐园-学生公寓-D",
+      "x": 0.822671,
+      "y": 0.379561,
+      "osmWayId": 298137836,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "疏桐园-学生公寓-E",
+      "x": 0.822671,
+      "y": 0.379559,
+      "osmWayId": 298137835,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "综合教学大楼",
+      "x": 0.822681,
+      "y": 0.379549,
+      "osmWayId": 298568796,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "至善园",
+      "x": 0.822671,
+      "y": 0.379574,
+      "osmWayId": 298137844,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "行政楼",
+      "x": 0.822682,
+      "y": 0.379552,
+      "osmWayId": 309048101,
+      "building": "university",
+      "levels": null
+    },
+    {
+      "name": "锅炉房",
+      "x": 0.822698,
+      "y": 0.379546,
+      "osmWayId": 948990881,
+      "building": "industrial",
+      "levels": null
+    },
+    {
+      "name": "锅炉房",
+      "x": 0.822674,
+      "y": 0.379548,
+      "osmWayId": 975684644,
+      "building": "yes",
+      "levels": null
+    },
+    {
+      "name": "静园-学生公寓-A",
+      "x": 0.822672,
+      "y": 0.379555,
+      "osmWayId": 298138789,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "静园-学生公寓-B",
+      "x": 0.822672,
+      "y": 0.379554,
+      "osmWayId": 298138790,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "静园-学生公寓-C",
+      "x": 0.822672,
+      "y": 0.379549,
+      "osmWayId": 298568801,
+      "building": "apartments",
+      "levels": null
+    },
+    {
+      "name": "静园-学生公寓-D",
+      "x": 0.822672,
+      "y": 0.379548,
+      "osmWayId": 298568803,
+      "building": "apartments",
+      "levels": null
+    }
+  ]
+}
