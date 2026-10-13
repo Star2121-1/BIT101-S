@@ -848,6 +848,41 @@ object StudySpotLogic {
     }
 
     /**
+     * 重算之后要怎么落到界面上 —— 抽成纯函数，好写单测。
+     *
+     * ## 为什么会有「重算」这件事
+     *
+     * [Plan] 里的文字（「正在上 X」「空到 20:55」「空闲到明天」）是**取数那一刻**按当时的
+     * 节次渲染好的**字符串**。页面不动就不会重算 —— 而「切后台一会儿再回来」**不会**
+     * 重新进组合（`LaunchedEffect(Unit)` 不重跑）⇒ 卡片会继续说几分钟到几小时前的话。
+     *
+     * ⚠️ 通律：**缓存里别放与当前时间/节次相关的东西**（桌面组件的快照栽过同一条）。
+     *    这里做不到零缓存（空教室要逐栋请求），所以退一步：**在会变的那一刻重算**。
+     *
+     * ## 两条不能只看「新来的那份」的规矩
+     *
+     * 1. **重算拿不到 ⇒ 什么都不动**：`null` 的含义是「连时间表都拿不到」，
+     *    不是「以前那份错了」。而把有内容的卡换成空白，正是 v1.11.2 修过的静默消失。
+     * 2. **候选从「有」变成「空」⇒ 不动**：「取不到」与「真的没有」长得一模一样
+     *    （网络失败、会话没就绪都会给空列表），拿它换掉是净损失。
+     *
+     * ⇒ 两条都是同一个取向：**宁可用略微过期的真话，也不要拿一次失败的取数把界面变差**。
+     *
+     * @return `null` = 保持现状（别动 plan，也别动下标）
+     */
+    fun planUpdate(current: Plan?, fresh: Plan?): PlanUpdate? {
+        if (fresh == null) return null
+        if (current == null) return PlanUpdate(fresh, resetIndex = true)
+        if (fresh.options.isEmpty() && current.options.isNotEmpty()) return null
+        // ⚠️ **只有真的变了**才把「换一个」的下标收回第一条 —— 否则用户停在候选第 3 条、
+        //    切个后台回来就被弹回第 1 条：数据没变，位置却没了
+        return PlanUpdate(fresh, resetIndex = fresh != current)
+    }
+
+    /** [planUpdate] 的结果：换成哪一份、要不要把「换一个」的下标收回第一条。 */
+    data class PlanUpdate(val plan: Plan, val resetIndex: Boolean)
+
+    /**
      * 卡片要显示的两行。
      *
      * ⚠️ `detail` 可为 `null`（没话可说时**不占那一行**），界面据此决定要不要渲染第二行。

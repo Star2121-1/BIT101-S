@@ -76,6 +76,45 @@ internal class CampusServiceViewModel @Inject constructor(
         _studySpotIndex.value = (_studySpotIndex.value + 1) % size
     }
 
+    /**
+     * **只重算**「自习建议」—— 一卡通 / 校园网 / 借阅都不动。
+     *
+     * ## 什么时候必须调它：**跨过了节次边界**之后
+     *
+     * 卡片上那句「正在上 X」「空到 20:55」「空闲到明天」是**取数那一刻**按当时的节次
+     * 渲染好的**字符串**。而 `init` 与 `LaunchedEffect(Unit)` 都只在**进组合**时跑 ——
+     * **「切后台一会儿再回来」不会重新进组合**（`LaunchedEffect(Unit)` 的 key 是 `Unit`，
+     * 不随 resume 重跑）⇒ 卡片会继续说几分钟到几小时前的话。
+     *
+     * ⚠️ 通律：**缓存里别放与当前时间/节次相关的东西**（桌面组件的快照栽过同一条）。
+     *    这里做不到零缓存（空教室要逐栋请求），所以退一步：**在会变的那一刻重算**。
+     *
+     * ⚠️ **不打网络**：10 分钟 TTL 内 [cn.bit101.android.data.repo.DefaultStudySpotRepository]
+     *    命中的是「楼 → 原始教室列表」缓存，重算只是读库 + 纯计算。
+     *    过期了才真的重新逐栋请求 —— 那也正是我们想要的（顺便刷新了数据）。
+     *
+     * ⚠️ 换不换、要不要把「换一个」的下标收回，判在 [StudySpotLogic.planUpdate]（纯函数、有单测）：
+     *    取不到数据时**不动**，数据没变时**不收回下标**。
+     */
+    fun refreshStudySpot() {
+        viewModelScope.launch { loadStudySpot() }
+    }
+
+    /** 取一次自习建议并落到界面上 —— **唯一实现**，[refresh] 与 [refreshStudySpot] 都走它。 */
+    private suspend fun loadStudySpot() {
+        _studySpotLoading.value = true
+        try {
+            val fresh = runCatching { studySpotRepository.plan() }
+                .getOrNull()
+                ?.takeIf { it.hasContent }
+            val update = StudySpotLogic.planUpdate(_studySpotPlan.value, fresh) ?: return
+            if (update.resetIndex) _studySpotIndex.value = 0
+            _studySpotPlan.value = update.plan
+        } finally {
+            _studySpotLoading.value = false
+        }
+    }
+
     private val _snapshot = MutableStateFlow<CampusCardSnapshot?>(null)
     val snapshot: StateFlow<CampusCardSnapshot?> = _snapshot.asStateFlow()
 
@@ -132,22 +171,11 @@ internal class CampusServiceViewModel @Inject constructor(
 
     fun refresh() {
         if (_loading.value) return
-        // ⚠️ 自习建议**单独起一个协程**：它要逐栋拉空教室（最多 8 栋），
-        //    不该拖慢一卡通 / 校园网这些秒回的数据
-        viewModelScope.launch {
-            _studySpotLoading.value = true
-            try {
-                val plan = runCatching { studySpotRepository.plan() }
-                    .getOrNull()
-                    ?.takeIf { it.hasContent }
-                // ⚠️ 换了新数据就把「换一个」的下标收回第一条 —— 否则用户切到第 3 条
-                //    再刷新，会停在一个已无意义的序号上（候选数量可能已经变了）
-                _studySpotIndex.value = 0
-                _studySpotPlan.value = plan
-            } finally {
-                _studySpotLoading.value = false
-            }
-        }
+        // ⚠️ 自习建议**单独起一个协程**：它要逐栋拉空教室（最多 16 栋），
+        //    不该拖慢一卡通 / 校园网这些秒回的数据。
+        //    ⚠️ 走同一个方法 —— 「取数 → 判要不要换 → 落状态」只有一份实现，
+        //       别在这里再写一遍（下标收不收回的规矩就在里面）。
+        refreshStudySpot()
         viewModelScope.launch {
             _loading.value = true
             try {

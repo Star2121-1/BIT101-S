@@ -19,6 +19,14 @@ class StudySpotLogicTest {
 
     private fun classroom(name: String, busy: String?) = ClassroomInfo(classroomName = name, busyTimeStr = busy)
 
+    /** 空闲态的 [StudySpotLogic.Plan]，候选就是给的这几个地点。 */
+    private fun freePlan(vararg places: String) = StudySpotLogic.Plan(
+        kind = StudySpotLogic.Kind.FREE_ROOM,
+        options = places.map {
+            StudySpotLogic.SpotOption(buildingId = "b1", buildingName = "文萃楼C", place = it)
+        },
+    )
+
     /** 节次判定：上课中取当前节，课间取**下一节**（课间十分钟不该推荐人去自习）。 */
     @Test
     fun `节次判定`() {
@@ -1270,5 +1278,37 @@ class StudySpotLogicTest {
             "这些接口楼名认不到对的地点（要给 CampusLocations 补别名，别改这里的期望值）：$wrong",
             wrong.isEmpty(),
         )
+    }
+
+    /**
+     * ⚠️ **重算的落库规矩** —— 什么时候换掉手上那份建议、什么时候动「换一个」的下标。
+     *
+     * 合起来是一句话：**宁可用略微过期的真话，也不要拿一次失败的取数把界面变差**。
+     * （本轮修的是「切后台回来卡片还说几分钟前的话」，但不能顺手引入新伤。）
+     */
+    @Test
+    fun `重算的落库规矩`() {
+        val old = freePlan("文萃楼C 501a", "文萃楼C 501b")
+
+        // 1. 重算拿不到（连时间表都没有）⇒ 什么都不动。
+        //    卡片消失比文案旧更糟 —— v1.11.2 修的就是「取不到数时卡片静默消失」
+        assertNull(StudySpotLogic.planUpdate(current = old, fresh = null))
+
+        // 2. 重算没拿到候选（网络失败 / 会话没就绪），而手上这份有 ⇒ 不动。
+        //    「取不到」与「真的没有」长得一模一样，换掉是净损失
+        assertNull(StudySpotLogic.planUpdate(current = old, fresh = freePlan()))
+
+        // 3. 数据没变 ⇒ 幂等地换，但**不收回下标**
+        //    —— 用户停在候选第 2 条，切个后台回来不该被弹回第 1 条（数据没变，位置却没了）
+        val same = StudySpotLogic.planUpdate(current = old, fresh = freePlan("文萃楼C 501a", "文萃楼C 501b"))
+        assertEquals(false, same?.resetIndex)
+        assertEquals(old, same?.plan)
+
+        // 4. 数据真的变了 ⇒ 收回下标（候选数量/顺序都可能变了，停在旧序号上没有意义）
+        val changed = StudySpotLogic.planUpdate(current = old, fresh = freePlan("文萃楼C 501a"))
+        assertEquals(true, changed?.resetIndex)
+
+        // 5. 手上没有 ⇒ 填上，并收回下标
+        assertEquals(true, StudySpotLogic.planUpdate(current = null, fresh = old)?.resetIndex)
     }
 }

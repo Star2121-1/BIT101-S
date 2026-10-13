@@ -48,11 +48,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import cn.bit101.android.config.setting.base.PageShowOnNav
 import cn.bit101.android.config.setting.base.ScheduleTabs
 import cn.bit101.android.config.setting.base.toPageData
@@ -402,6 +405,25 @@ private fun StudySpotSection(mainController: MainController) {
     val plan by vm.studySpotPlan.collectAsState()
     val index by vm.studySpotIndex.collectAsState()
     val loading by vm.studySpotLoading.collectAsState()
+
+    // ⚠️ 卡片会「说话过时」：上面那些字（「正在上 X」「空到 20:55」「空闲到明天」）是
+    //    **取数那一刻**按当时节次渲染好的**字符串**，只在**进组合**时才重算（VM 的 init、
+    //    或切底栏来回重新进组合）—— 而**「切后台一会儿再回来」不会重新进组合**
+    //    （`LaunchedEffect(Unit)` 的 key 是 `Unit`，不随 resume 重跑）
+    //    ⇒ 卡片会继续说几分钟到几小时前的话。
+    //    ⇒ 补一次「回到前台就重算」：10 分钟 TTL 内**不打网络**（见 ViewModel.refreshStudySpot）。
+    //
+    // ⚠️ 为什么不做「每分钟轮询」：真正的过时点是**节次边界**，而 resume 已经覆盖了
+    //    用户能看到的绝大多数情况（停在同一页跨过一整节是少数）；每分钟读一次库
+    //    换不来对应的收益。真要做，判据也该是「节次变了」而不是「时间过了」。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) vm.refreshStudySpot()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val current = plan
     if (current == null) {

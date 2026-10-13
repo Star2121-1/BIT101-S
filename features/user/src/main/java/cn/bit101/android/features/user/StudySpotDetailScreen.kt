@@ -29,14 +29,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.features.common.MainController
 
@@ -48,13 +52,20 @@ import cn.bit101.android.features.common.MainController
  * 卡片上只能显示一条（位置很金贵），而「换一个」是顺序切换 —— 想同时比较几处、
  * 或者想看清「各层空几间 / 能待到几点」，卡片那两行装不下。
  *
- * ## ⚠️ 与卡片**共用同一份** [StudySpotLogic.Plan]
+ * ## ⚠️ 与卡片**不共用** [StudySpotLogic.Plan]（但共用同一份缓存）
  *
  * 这一页**不重算**任何东西：文案、排序、数字都是取数时那一份（见 [StudySpotLogic.detailOf]）。
  * 自己再算一遍必然会和卡片上的数对不上 —— 而「同一个功能两个地方说法不同」是最难解释的 bug。
  *
- * ⚠️ 取数走的是**同一个**仓库，它缓存的只是「各楼原始教室列表」，
- *    所以从卡片点进来通常**不会再打网络**（除非距上次取数超过缓存时长）。
+ * ⚠️⚠️ 但有一点要说准（2026-10-13 核实后改的）：本页注册在**外层 NavHost**
+ *    （`composableStudySpot`），而卡片那一节在 `IndexScreen` **内层** NavHost 的
+ *    `Mine` 路由里 ⇒ 两者是**两个不同的 [CampusServiceViewModel] 实例**，
+ *    **各自算各自的 Plan**。
+ *    ⇐ 于是「两处显示的时刻可能不一样」是**结构性的**，不是偶发：
+ *    所以两处都要在回到前台时重算（见下面那个 ON_RESUME 观察者）。
+ *
+ * ⚠️ 真正共享的是**单例仓库**（`@Singleton DefaultStudySpotRepository`）：它缓存的只是
+ *    「各楼原始教室列表」，所以从卡片点进来通常**不会再打网络**（除非距上次取数超过缓存时长）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,6 +80,19 @@ fun StudySpotDetailScreen(
     // 从别的地方（空教室页等）回来时会重新进入组合，但 VM 保留、init 不会重跑 ⇒ 补一次刷新。
     // 首次进入时 init 已发起请求，会被 VM 里的守卫挡掉（不会打两轮）。
     LaunchedEffect(Unit) { vm.refresh() }
+
+    // ⚠️ 与「我」页那张卡同一个道理：这一排「空到 20:55」也是**取数那一刻**渲染好的字符串，
+    //    **「切后台一会儿再回来」不会重新进组合**（上面那句 `LaunchedEffect(Unit)` 不重跑）
+    //    ⇒ 回到前台补一次重算（10 分钟 TTL 内不打网络）。
+    //    ⚠️ 只重算自习建议，**不调 refresh()** —— 回个前台就去重拉一卡通 / 校园网没必要。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) vm.refreshStudySpot()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val detail = plan?.let { StudySpotLogic.detailOf(it) }
 
