@@ -27,8 +27,10 @@ internal class SettingDataStore @Inject constructor(
     val settingRotate = PreferencesDataStoreItem(SETTING_ROTATE, false, preferences.SETTING_DATASTORE)
 
     // 是否自动适配系统主题
+    // P1（R3）：默认值 true → false —— 动态取色会整体覆盖《一格 GRID》token 色板，
+    // 新 UI 线默认走规范色；用户仍可在设置里手动打开（存过值的用户不受影响）。
     private val SETTING_DYNAMIC_THEME = booleanPreferencesKey("setting_dynamic_theme")
-    val settingDynamicTheme = PreferencesDataStoreItem(SETTING_DYNAMIC_THEME, true, preferences.SETTING_DATASTORE)
+    val settingDynamicTheme = PreferencesDataStoreItem(SETTING_DYNAMIC_THEME, false, preferences.SETTING_DATASTORE)
 
     // 忽略更新版本
     private val SETTING_IGNORE_VERSION = longPreferencesKey("setting_ignore_version")

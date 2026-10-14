@@ -48,6 +48,9 @@ dependencies {
     ksp "com.google.dagger:hilt-android-compiler:${versions.hilt}"
 
     implementation project(':features:common')
+    // 《一格 GRID》token 层（P1）：M3 装不下的语义词 / 12 色板 / 数字排版档走 LocalGridTokens
+    // （features/theme/GridTokens.kt）。theme 只依赖 common，方向不成环。
+    implementation project(':features:theme')
     // 网费不足提醒：取到校园网数据时立刻判（见 CampusServiceViewModel）
     implementation project(':features:notify')
 }

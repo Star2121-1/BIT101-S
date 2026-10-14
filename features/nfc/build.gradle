@@ -47,6 +47,9 @@ dependencies {
     implementation project(':config')
 
     implementation project(':features:common')
+    // 《一格 GRID》token 层（P1）：M3 装不下的语义词 / 12 色板 / 数字排版档走 LocalGridTokens
+    // （features/theme/GridTokens.kt）。theme 只依赖 common，方向不成环。
+    implementation project(':features:theme')
 
     // hilt
     implementation "androidx.hilt:hilt-navigation-compose:1.1.0"

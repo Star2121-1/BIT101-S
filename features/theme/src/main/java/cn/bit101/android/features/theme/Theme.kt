@@ -20,6 +20,7 @@ import androidx.lifecycle.ViewModel
 import cn.bit101.android.config.setting.base.DarkThemeMode
 import cn.bit101.android.config.setting.base.ThemeSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 
@@ -110,7 +111,7 @@ fun BIT101Theme(
     val vm: ThemeViewModel = hiltViewModel()
 
     val dynamicColor =
-        if (vm.dynamicThemeFlow.collectAsState(initial = false).value)
+        if (vm.dynamicThemeFlow.collectAsState(initial = vm.dynamicThemeInitial).value)
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
         else false
 
@@ -137,10 +138,14 @@ fun BIT101Theme(
 
     CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
         CompositionLocalProvider(LocalThemeIsDark provides useDarkTheme) {
-            MaterialTheme(
-                colorScheme = colors,
-                content = content
-            )
+            CompositionLocalProvider(
+                LocalGridTokens provides if (useDarkTheme) darkGridTokens else lightGridTokens
+            ) {
+                MaterialTheme(
+                    colorScheme = colors,
+                    content = content
+                )
+            }
         }
     }
 }
@@ -149,6 +154,19 @@ fun BIT101Theme(
 internal class ThemeViewModel @Inject constructor(
     themeSettings: ThemeSettings
 ) : ViewModel() {
+    /**
+     * 动态取色的**首帧初值** —— 取持久化值，不写死 false。
+     *
+     * 为什么值得多等一次读盘：`collectAsState(initial = …)` 的 initial 就是用户看到的**第一帧**。
+     * 写死 false 时，「开启动态取色」的用户会先看到一帧静态配色、再跳成壁纸色
+     * （P1 之前默认值是 true，这类用户不少）。DataStore 首读只有一次、且发生在 splash 背后
+     * （MainActivity 的 `setKeepOnScreenCondition` 会挡到 STARTED），同步等这一次是划算的。
+     * 读失败（文件损坏等）退回 false，与新默认值一致。
+     */
+    val dynamicThemeInitial: Boolean = runBlocking {
+        runCatching { themeSettings.dynamicTheme.get() }.getOrDefault(false)
+    }
+
     val dynamicThemeFlow = themeSettings.dynamicTheme.flow
     val darkThemeModeFlow = themeSettings.darkThemeMode.flow
 }
