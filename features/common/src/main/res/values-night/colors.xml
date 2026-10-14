@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 《一格 GRID》：冷启动窗口底色 · 深色档（= 规范 §0 的 bg 暗色 #16130F）。
+         与 values/colors.xml 的 grid_window_background 成对出现 —— 深浅会话下都要和
+         features/theme/Color.kt 的 backgroundLight / backgroundDark 一致，
+         否则冷启动窗口色与 Compose 首帧的底色对不上，又会看到颜色跳变。 -->
+    <color name="grid_window_background">#FF16130F</color>
+</resources>

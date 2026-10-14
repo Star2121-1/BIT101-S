@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.BIT101" parent="android:Theme.Material.Light.NoActionBar"/>
+    <!-- 《一格 GRID》：显式指定窗口底色（深浅各一档，见 values-night/colors.xml）。
+         不写的话窗口底色继承 parent（android:Theme.Material.Light.NoActionBar）的近白色，
+         深色会话冷启动会先闪一下白 —— 这是用户看得见的问题，不是观感微调。 -->
+    <style name="Theme.BIT101" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/grid_window_background</item>
+    </style>
 
     <style name="SnackbarAnim">
         <item name="android:windowEnterAnimation">@anim/scale_in</item>

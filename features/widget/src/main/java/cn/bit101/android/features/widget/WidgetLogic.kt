@@ -13,6 +13,7 @@ import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.ddl.DdlSource
+import cn.bit101.android.data.schedule.CourseColorLogic
 import cn.bit101.android.data.school.CourseWeekdayLogic
 import cn.bit101.android.data.school.DayPlan
 import cn.bit101.android.data.school.StudySpotLogic
@@ -154,6 +155,16 @@ data class WidgetLine(
      * 就不切页 —— App 已经停在课表页的别的 tab 时，点条目会「毫无反应」。
      */
     val openTab: Int? = null,
+
+    /**
+     * 课程 12 色板下标（0..11）；非课程行 = -1（DDL / 空闲 / 标题行没有课名可哈希）。
+     *
+     * 规范 §8.2：**同一门课在课表网格 / 时间线 / 桌面组件四处同色**。
+     * 色号由 `:data` 的 `CourseColorLogic.of(课名)` 算出（全仓唯一哈希实现），
+     * 这里只存号不存色 —— 色值在渲染时由 `CoursePalette`（features/theme）按号给出，
+     * 这样亮暗两套色板切换时组件无需重新抓数据。
+     */
+    val colorIndex: Int = -1,
 
     /**
      * 「聚焦到哪一条」的键：DDL 用 `uid`、动态用 `eclass:{id}`。
@@ -756,6 +767,8 @@ object WidgetLogic {
         trail = classroom.ifBlank { campus },
         time = courseTimeText(table, start_section, end_section),
         highlight = state,
+        // §8.2：课名 → 12 色号，与课表网格同源（CourseColorLogic 是全仓唯一哈希实现）
+        colorIndex = CourseColorLogic.of(name),
     )
 
     private fun freeLine(

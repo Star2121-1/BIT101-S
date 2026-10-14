@@ -7,4 +7,11 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- 《一格 GRID》：冷启动窗口底色（= 规范 §0 的 bg，亮 #FBF8F4 / 暗 #16130F）。
+         主题根 Theme.BIT101 的 parent 是 Theme.Material.Light.NoActionBar 且无 values-night 变体，
+         窗口底色不跟着深浅走 ⇒ 深色会话冷启动会先白一下。这里显式给底色并配 values-night 变体。
+         ⚠️ 改这里必须同步改 values-night/colors.xml 与 features/theme/Color.kt 的 background*。
+         （XML 注释里不能写连续的两个连字符，所以上面写成 bg 而不是带前缀的写法） -->
+    <color name="grid_window_background">#FFFBF8F4</color>
 </resources>

@@ -60,6 +60,10 @@ enum class GridButtonVariant {
  * - 加载：文字替换为 20dp 环形进度，**宽度锁定不变**（文字保留布局、仅 alpha=0）
  * - 登录中：同加载态，另在下方出「正在登录…」label-3 `--text-2`；
  *   ⚠️ 规范同时要求「全屏不得再出现第二个登录入口」——那是页面级的活，组件管不到
+ *
+ * ⚠️ **必须在 `BIT101Theme` 内使用**：本组件读 `LocalThemeIsDark`（按压色档要分深浅），
+ * 而它的默认值是 `error("No theme provided")` —— 脱离主题直接渲染会崩，不是取到 false。
+ * 预览请用 `PreviewSurface`（它会一并提供该 CompositionLocal）。
  */
 @Composable
 fun GridButton(

@@ -1,15 +1,31 @@
 package cn.bit101.android.features.schedule.course
 
 import androidx.compose.ui.graphics.Color
+import cn.bit101.android.data.schedule.CourseColorLogic
 
 /**
  * 课程表上一张卡片（课程 / 考试 / 自定义日程）的配色。
+ *
+ * @param stripeColor 单元格左缘 4px 竖条（§8.2：**一律用 ink**，不得用 mark ——
+ *   mark 贴浅色单元格边缘看不见；这是「同色号撞色」时的第二编码之一）
  */
 internal data class ScheduleItemColor(
+    val stripeColor: Color,
     val boarderColor: Color,
     val containerColor: Color,
     val contextColor: Color,
 )
+
+/**
+ * 条目 → 12 色板下标（规范 §8.2 / I5）。
+ *
+ * 三类条目（课程 / 考试 / 自定义）**共用同一个** `fnv1a32(课名) % 12`，
+ * 类型区分靠第二编码角标（「手动」「考试」），不靠颜色。
+ * 哈希实现在 `:data` 的 `CourseColorLogic`（全仓唯一，组件/通知同源），
+ * 这里只调它 + 收拢越界 —— **禁止**在本模块再写一份哈希（守卫 S3 有单测盯着）。
+ */
+internal fun itemColorIndex(item: ScheduleItem): Int =
+    Math.floorMod(CourseColorLogic.of(item.title), CourseColorLogic.PALETTE_SIZE)
 
 /**
  * 「教学安排覆盖」给那一列的卡片定的**色调**。
@@ -48,6 +64,7 @@ internal fun ScheduleItemColor.tinted(
     onContainer: Color,
     ratio: Float,
 ): ScheduleItemColor = ScheduleItemColor(
+    stripeColor = blend(stripeColor, onContainer, ratio),
     boarderColor = blend(boarderColor, container, ratio),
     containerColor = blend(containerColor, container, ratio),
     contextColor = blend(contextColor, onContainer, ratio),

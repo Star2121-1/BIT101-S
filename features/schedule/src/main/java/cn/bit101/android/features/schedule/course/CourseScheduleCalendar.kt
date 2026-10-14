@@ -44,10 +44,11 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
+import cn.bit101.android.data.schedule.CourseColorLogic
 import cn.bit101.android.data.school.DayPlan
 import cn.bit101.android.features.common.component.PageFab
 import cn.bit101.android.features.common.utils.getCurrentTime
-import cn.bit101.android.features.common.utils.mixColor
+import cn.bit101.android.features.theme.GridTheme
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -84,51 +85,28 @@ internal fun CourseScheduleCalendar(
 
     val courseTimes = timeTable.map { it.startTime.format(DateTimeFormatter.ofPattern("HH:mm")) }
 
-    // 配色方案, 为支持可变配色方案, 写在 Compose 层 (其实是因为不让写在 ViewModel 层 XP)
+    // 配色（规范 §8.2 / I5）：网格里三类条目（课程/考试/自定义）都用**同一个**
+    // fnv1a32(课名)%12 从 12 色板取色 —— 类型区分靠第二编码（「手动」「考试」角标，
+    // 见 CourseScheduleItem），**不靠颜色**。色号函数在 :data（CourseColorLogic，
+    // 全仓唯一哈希实现，组件/通知同源），这里只按色号查表（GridTokens.course）。
     val colorScheme = MaterialTheme.colorScheme
-    val scheduleItemColors = remember(colorScheme) {
-        listOf(
-            // 此处顺序和枚举顺序对应
-            // 课程
+    val gridTokens = GridTheme.tokens
+    val scheduleItemColors = remember(gridTokens) {
+        List(CourseColorLogic.PALETTE_SIZE) { i ->
+            val c = gridTokens.course(i)
             ScheduleItemColor(
-                boarderColor = colorScheme.secondary.copy(alpha = 0.25f),
-                containerColor = colorScheme.secondaryContainer,
-                contextColor = colorScheme.onSecondaryContainer,
-            ),
-            // 考试
-            ScheduleItemColor(
-                boarderColor = colorScheme.secondary.copy(alpha = 0.25f),
-                containerColor = mixColor(
-                    colorScheme.secondaryContainer,
-                    colorScheme.errorContainer,
-                    0.75f
-                ),
-                contextColor = mixColor(
-                    colorScheme.onSecondaryContainer,
-                    colorScheme.onErrorContainer,
-                    0.75f
-                ),
-            ),
-            // 自定义
-            ScheduleItemColor(
-                boarderColor = colorScheme.secondary.copy(alpha = 0.25f),
-                containerColor = mixColor(
-                    colorScheme.secondaryContainer,
-                    colorScheme.primaryContainer,
-                    0.75f
-                ),
-                contextColor = mixColor(
-                    colorScheme.onSecondaryContainer,
-                    colorScheme.onPrimaryContainer,
-                    0.75f
-                ),
-            ),
-        )
+                stripeColor = c.ink,
+                boarderColor = c.ink.copy(alpha = 0.25f),
+                containerColor = c.fill,
+                contextColor = c.ink,
+            )
+        }
     }
 
     // 调休那两天的卡片换色调（见 ScheduleItemTint）：
     // **放假 → 灰**（日程还在，但表示「这天不上」）、**补课 → 第三色**（这是借来的课表）。
-    // ⚠️ 靠拢程度刻意给得不低：淡一点就看不出来了，那这个功能就白做
+    // ⚠️ 靠拢程度刻意给得不低：淡一点就看不出来了，那这个功能就白做。
+    // 对 12 色逐支配色调出的变体，条目仍按课名哈希取自己那支。
     val holidayItemColors = remember(scheduleItemColors, colorScheme) {
         scheduleItemColors.map {
             it.tinted(colorScheme.surfaceVariant, colorScheme.onSurfaceVariant, HOLIDAY_TINT)
@@ -344,7 +322,7 @@ internal fun CourseScheduleCalendar(
                                 if (settingData.showBorder) {
                                     modifier = modifier.border(
                                         1.dp,
-                                        itemColors[it.color.ordinal].boarderColor,
+                                        itemColors[itemColorIndex(it)].boarderColor,
                                         shape = CardDefaults.shape
                                     )
                                 }
@@ -356,7 +334,7 @@ internal fun CourseScheduleCalendar(
                                         .clickable(onClick = it.onClick),
                                     week = week,
                                     item = it,
-                                    color = itemColors[it.color.ordinal],
+                                    color = itemColors[itemColorIndex(it)],
                                 )
                             }
                         }

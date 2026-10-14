@@ -149,20 +149,7 @@ internal val lightGridTokens = GridTokens(
     numMd = numTextStyle(22, 30, FontWeight.Bold),
     numSm = numTextStyle(15, 22, FontWeight.SemiBold),
 
-    coursePalette = listOf(
-        CourseColors(Color(0xFF94A4E6), Color(0xFF112369), Color(0xFF2143CA)), // 0 靛蓝
-        CourseColors(Color(0xFFF4DBC2), Color(0xFF734211), Color(0xFFE18A33)), // 1 赭橘
-        CourseColors(Color(0xFFB6ECCF), Color(0xFF17633B), Color(0xFF66D69A)), // 2 松绿
-        CourseColors(Color(0xFFF1C5CF), Color(0xFF71142A), Color(0xFFDE6884)), // 3 玫红
-        CourseColors(Color(0xFFCBE6F6), Color(0xFF0F5076), Color(0xFF7EC0E7)), // 4 天蓝
-        CourseColors(Color(0xFFEBD898), Color(0xFF6A5510), Color(0xFFE8CF7D)), // 5 芥黄
-        CourseColors(Color(0xFFDBBFED), Color(0xFF481769), Color(0xFFA151D6)), // 6 紫罗兰
-        CourseColors(Color(0xFFDDF2CA), Color(0xFF3D6A16), Color(0xFF80CE3B)), // 7 草绿
-        CourseColors(Color(0xFFEB9E98), Color(0xFF6F1711), Color(0xFFA92319)), // 8 朱红
-        CourseColors(Color(0xFF90DDE0), Color(0xFF135B5D), Color(0xFF25A3A7)), // 9 青碧
-        CourseColors(Color(0xFFE090C5), Color(0xFF63174A), Color(0xFFA7257C)), // 10 品紫
-        CourseColors(Color(0xFF92DDA1), Color(0xFF145722), Color(0xFF207932)), // 11 竹青
-    ),
+    coursePalette = CoursePalette.light,
 )
 
 // ── 暗色实例（规范 §0 暗色行 / §8.2 fill-d·ink-d 列 / HTML 原型 [data-theme="dark"]） ──
@@ -196,20 +183,7 @@ internal val darkGridTokens = GridTokens(
     numSm = numTextStyle(15, 22, FontWeight.SemiBold),
 
     // mark 位按 §8.2 放 ink-d（暗态独立图形不用 mark）
-    coursePalette = listOf(
-        CourseColors(Color(0xFF2F3D74), Color(0xFFC9D1ED), Color(0xFFC9D1ED)), // 0 靛蓝
-        CourseColors(Color(0xFF6D4C2C), Color(0xFFEFDBC8), Color(0xFFEFDBC8)), // 1 赭橘
-        CourseColors(Color(0xFF31684B), Color(0xFFCAECDA), Color(0xFFCAECDA)), // 2 松绿
-        CourseColors(Color(0xFF491D27), Color(0xFFEEC9D1), Color(0xFFEEC9D1)), // 3 玫红
-        CourseColors(Color(0xFF275068), Color(0xFFC9E0EE), Color(0xFFC9E0EE)), // 4 天蓝
-        CourseColors(Color(0xFF504521), Color(0xFFEFE6C8), Color(0xFFEFE6C8)), // 5 芥黄
-        CourseColors(Color(0xFF422357), Color(0xFFE1CEEE), Color(0xFFE1CEEE)), // 6 紫罗兰
-        CourseColors(Color(0xFF46632C), Color(0xFFDAECCA), Color(0xFFDAECCA)), // 7 草绿
-        CourseColors(Color(0xFF682B27), Color(0xFFEECBC9), Color(0xFFEECBC9)), // 8 朱红
-        CourseColors(Color(0xFF265354), Color(0xFFCAEBEC), Color(0xFFCAEBEC)), // 9 青碧
-        CourseColors(Color(0xFF6D2C57), Color(0xFFEDC9E1), Color(0xFFEDC9E1)), // 10 品紫
-        CourseColors(Color(0xFF234D2B), Color(0xFFC7EACE), Color(0xFFC7EACE)), // 11 竹青
-    ),
+    coursePalette = CoursePalette.dark,
 )
 
 /**

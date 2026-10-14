@@ -17,6 +17,7 @@ import androidx.annotation.ColorRes
 import androidx.core.content.ContextCompat
 import cn.bit101.android.config.setting.base.PageShowOnNav
 import cn.bit101.android.config.setting.base.toPageData
+import cn.bit101.android.features.theme.CoursePalette
 
 /**
  * 把 [WidgetData] 渲染成 [RemoteViews]。
@@ -351,8 +352,21 @@ internal object WidgetViews {
         else -> R.color.widget_text_primary
     }
 
-    private fun bodyColor(context: Context, line: WidgetLine) =
-        color(context, bodyColorRes(line))
+    /** 正文颜色：课程行走 12 色板 ink（§8.2 跨端同色），其余按状态取色。 */
+    private fun bodyColor(context: Context, line: WidgetLine): Int {
+        // §8.2：课程行的正文用 12 色板的 ink —— 与课表网格的块内文字同源同值，
+        // 同一门课在「课表 / 时间线 / 组件」看起来是同一个颜色。
+        // 强调（正在上 / 马上要上）仍走 ▶ 前缀 + 加粗 + 淡色块底，不靠换色表达。
+        if (line.colorIndex >= 0) {
+            return CoursePalette.inkArgb(line.colorIndex, isDarkTheme(context))
+        }
+        return color(context, bodyColorRes(line))
+    }
+
+    /** 组件渲染在宿主进程，主题从**宿主配置**取，拿不到我们的 CompositionLocal。 */
+    private fun isDarkTheme(context: Context): Boolean =
+        (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
 
     /** 时间列：跟着状态走色，普通行与空闲行用次要色。 */
     private fun timeColor(context: Context, line: WidgetLine) =

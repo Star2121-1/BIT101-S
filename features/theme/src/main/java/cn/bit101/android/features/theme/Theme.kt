@@ -101,6 +101,18 @@ internal val darkScheme = darkColorScheme(
     surfaceContainerHighest = surfaceContainerHighestDark,
 )
 
+/**
+ * 当前是否深色 —— 由 `BIT101Theme` 注入（与 [LocalGridTokens] 成对提供）。
+ *
+ * ⚠️ **默认值为 `error("No theme provided")`**：读它而不在 `BIT101Theme` 里，
+ * 会在组合期直接抛异常（不是「取到 false」）。已知读它的组件：
+ * `GridButton`（按压色档要分深浅）、`GridSnackbar`（暗色是浅色卡，靠它判断）、
+ * `features/web` 的 `WebScreen`。
+ *
+ * ⇒ **这些组件必须在 `BIT101Theme` 内使用**。App 内没问题；
+ * 新入口（独立 Activity / 独立预览 / RemoteViews 之外的自绘）若直接渲染它们会崩，
+ * 用 `PreviewSurface`（预览）或包一层 `BIT101Theme` 解决。
+ */
 val LocalThemeIsDark = staticCompositionLocalOf<Boolean> { error("No theme provided") }
 
 @OptIn(ExperimentalFoundationApi::class)

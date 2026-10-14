@@ -15,7 +15,9 @@ import org.junit.Test
 class ScheduleItemColorTest {
 
     private val base = ScheduleItemColor(
-        // 边框本来就是半透明的（`secondary.copy(alpha = 0.25f)`）
+        // 竖条 = ink（§8.2：竖条一律用 ink，不用 mark）
+        stripeColor = Color(0xFF112233L),
+        // 边框本来就是半透明的（原为 `secondary.copy(alpha = 0.25f)`）
         boarderColor = Color(0xFF112233L).copy(alpha = 0.25f),
         containerColor = Color(0xFF445566L),
         contextColor = Color(0xFF778899L),

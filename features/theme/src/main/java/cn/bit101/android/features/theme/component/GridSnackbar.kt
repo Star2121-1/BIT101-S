@@ -42,6 +42,10 @@ import cn.bit101.android.features.theme.PreviewSurface
  *
  * ⚠️ 时序（入 180ms / 停留 4s / 出 140ms）与「距底 56(Tab)+16+inset」由 SnackbarHost 负责，
  * 本组件只画内容 —— 与 M3 的 Snackbar/Host 分工一致。
+ *
+ * ⚠️ **必须在 `BIT101Theme` 内使用**：本组件读 `LocalThemeIsDark`（暗色 Snackbar 是浅色卡，
+ * 靠它判断），而它的默认值是 `error("No theme provided")` —— 脱离主题直接渲染会崩。
+ * 预览请用 `PreviewSurface`。
  */
 @Composable
 fun GridSnackbar(
