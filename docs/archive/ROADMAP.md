@@ -4,8 +4,8 @@
 >
 > 📌 **本文件只覆盖座位模块的 M1–M9**。此后（v1.6.0 至今）做的事不在本文件：
 > 桌面组件、提醒中心、校园服务（一卡通 / 校园网）、成绩链路、DDL 换源、手动改课表 ——
-> 统见 [README.md](README.md)（功能与差异）与 [CHANGES.md](CHANGES.md)（逐版本变更）；
-> 当前待办与已关闭项见 [docs/next-round-plan.md](docs/next-round-plan.md)。最新发布 **v1.9.26**。
+> 统见 [README.md](README.md)（功能与差异）与 [CHANGES.md](../../CHANGES.md)（逐版本变更）；
+> 当前待办与已关闭项见 [docs/next-round-plan.md](../next-round-plan.md)。最新发布 **v1.9.26**。
 
 ---
 

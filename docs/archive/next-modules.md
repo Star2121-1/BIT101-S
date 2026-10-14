@@ -2,7 +2,7 @@
 
 > ⚠️ **进度已迁移**：本文件是当时的规划与核对记录（保留作历史）。
 > 这里提到的「手动修改课程表」**已实现**（overlay 覆盖层，见 `docs/course-overlay.md`）；
-> 当前待办与已关闭项请看 [next-round-plan.md](next-round-plan.md)，功能总览看 [../README.md](../README.md)。
+> 当前待办与已关闭项请看 [next-round-plan.md](../next-round-plan.md)，功能总览看 [../README.md](../../README.md)。
 
 > 承接 `docs/upstream-feature-plan.md`（上游创想梳理 + 分支 A–D 规划）。
 > 本篇是**用户 2026-09-22 反馈后的重新校准**：用户指出的几处「其实已经有了」经核对属实，
