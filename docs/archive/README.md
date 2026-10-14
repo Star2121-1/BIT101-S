@@ -10,5 +10,6 @@
 | [next-modules.md](next-modules.md) | 当时的分批计划（2026-09-26） | 进度已迁到 [../next-round-plan.md](../next-round-plan.md) |
 | [next-round-plan-2026-09-23.md](next-round-plan-2026-09-23.md) | 当时的核对记录（2026-09-23） | 同上 |
 | [ddl-migration-plan.md](ddl-migration-plan.md) | DDL 换源的调研过程 | 实施结论已并进 [../ddl-source-contract.md](../ddl-source-contract.md) |
+| [round-log-2026-09.md](round-log-2026-09.md) | 批次 A~E 与 v1.9.8~v1.9.16 的逐轮交付记录（2026-09） | 有效部分已留在 [../next-round-plan.md](../next-round-plan.md)；改动记录见 [CHANGES.md](../../CHANGES.md) |
 
 **仍然在线维护的文档**见仓库根 [README.md](../../README.md) 的「相关文档」表。

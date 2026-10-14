@@ -331,7 +331,7 @@ cd BIT101-seat
 | [docs/campus-bus.md](docs/campus-bus.md) | **校园交通**（摆渡车/班车）数据源与结论：时刻表、乘车点、购票规则 |
 | [docs/school-portal-map.md](docs/school-portal-map.md) | **学校官方服务地图**（i北理全功能）与本项目对照：做什么、不做什么 |
 | [docs/codebase-survey.md](docs/codebase-survey.md) | 代码库勘察与模块划分（2026-09-22 快照；**隐私边界等决策依据在此**） |
-| [docs/next-round-plan.md](docs/next-round-plan.md) | 待办与规划（含「明确不做」清单、验证纪律、新功能思路） |
+| [docs/next-round-plan.md](docs/next-round-plan.md) | 规划与结论：**明确不做**清单、验证纪律、OSM 署名合规、功能盘点与新功能思路 |
 | [CHANGES.md](CHANGES.md) | 逐版本变更记录（含每版的验证结论） |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 开发环境、构建与**本机特有怪癖** |
 
