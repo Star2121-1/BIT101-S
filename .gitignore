@@ -8,6 +8,9 @@ local.properties
 # 构建产物
 /build
 /captures
+
+# APK 产物：不进 git。出包放到仓库上层目录（每条线各留最新 1 个）
+*.apk
 /features/build/
 /features/*/build/
 /api/build/

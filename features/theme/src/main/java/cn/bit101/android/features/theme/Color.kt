@@ -18,6 +18,16 @@ import androidx.compose.ui.graphics.Color
  *    不在这里塞，见同目录 [GridTokens.kt]（A3-c 混合方案）。
  */
 
+// ── Primary 按压档（规范 §5.2：移动端无 hover ⇒「悬停/按压」= 按压前 80ms 与按压保持） ──
+
+/** §5.2 填充按钮按压 80ms 过渡底 */
+val primaryPressedLight = Color(0xFF73401E)
+/** §5.2 填充按钮按压保持底 */
+val primaryPressedHeldLight = Color(0xFF6A3A1B)
+/** §5.2 填充按钮按压档（暗色：往亮处提，暗底上「更暗」看不出按压） */
+val primaryPressedDark = Color(0xFFD6A98A)
+val primaryPressedHeldDark = Color(0xFFE6C3A8)
+
 // ── 亮色 ──
 
 val primaryLight = Color(0xFF8A4E26)
