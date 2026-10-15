@@ -4,6 +4,7 @@ import cn.bit101.android.config.common.Transformer
 import cn.bit101.android.config.common.map
 import cn.bit101.android.config.common.toSettingItem
 import cn.bit101.android.config.datastore.SettingDataStore
+import cn.bit101.android.config.setting.base.CourseColorFamily
 import cn.bit101.android.config.setting.base.CourseScheduleSettings
 import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.config.setting.base.toTimeTable
@@ -47,6 +48,14 @@ internal class DefaultCourseScheduleSettings @Inject constructor(
         }
     }
 
+    /**
+     * 课程配色族的转换器：脏值回落 Auto（getFamily 内的显式默认，不是 first()）
+     */
+    private val courseColorFamilyTransformer = object : Transformer<String, CourseColorFamily> {
+        override fun invokeTo(value: String) = CourseColorFamily.getFamily(value)
+        override fun invokeFrom(value: CourseColorFamily) = value.value
+    }
+
     override val term = settingDataStore.courseScheduleTerm.toSettingItem()
 
     override val firstDay = settingDataStore.courseScheduleFirstDay.toSettingItem().map(firstDayTransformer)
@@ -66,4 +75,6 @@ internal class DefaultCourseScheduleSettings @Inject constructor(
     override val showExamInfo = settingDataStore.courseScheduleShowExamInfo.toSettingItem()
 
     override val timeTable = settingDataStore.courseScheduleTimeTable.toSettingItem().map(timeTableTransformer)
+
+    override val courseColorFamily = settingDataStore.courseScheduleColorFamily.toSettingItem().map(courseColorFamilyTransformer)
 }

@@ -72,6 +72,16 @@ interface ThemeSettings {
     val darkThemeMode: SettingItem<DarkThemeMode>
 
     /**
+     * UI 形态（原版界面 / 一格 GRID）
+     */
+    val appSkin: SettingItem<AppSkin>
+
+    /**
+     * 配色方案（原版 / 一格暖棕 / 北理工）
+     */
+    val appPalette: SettingItem<AppPalette>
+
+    /**
      * 动态主题
      */
     val dynamicTheme: SettingItem<Boolean>

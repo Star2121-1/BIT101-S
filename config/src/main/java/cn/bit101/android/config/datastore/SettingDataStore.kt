@@ -40,6 +40,28 @@ internal class SettingDataStore @Inject constructor(
     private val SETTING_DARK_THEME = stringPreferencesKey("setting_dark_theme")
     val settingDarkTheme = PreferencesDataStoreItem(SETTING_DARK_THEME, "system", preferences.SETTING_DATASTORE)
 
+    // ── 外观切换（P5-A：三轴正交 skin × palette × 课程色）─────────────
+    // ⚠️ 四个键只在此处定义一次；value 字符串 = 枚举 name.lowercase()，
+    // 是**发布后冻结的数据兼容契约**（改名 = 老用户设置静默回默认）。
+    // 枚举三件套与容错规则见 config/setting/base/AppSkin.kt、AppPalette.kt、
+    // CourseScheduleSettings.kt（CourseColorFamily）。
+
+    // UI 形态：classic 原版界面 / grid 一格 GRID（grid 暂不可用，P4 落地后开放）
+    private val SETTING_APP_SKIN = stringPreferencesKey("setting_app_skin")
+    val settingAppSkin = PreferencesDataStoreItem(SETTING_APP_SKIN, "classic", preferences.SETTING_DATASTORE)
+
+    // 配色方案：classic 原版 / warm 一格 GRID 暖棕 / brand 北理工（占位·实验性）
+    private val SETTING_APP_PALETTE = stringPreferencesKey("setting_app_palette")
+    val settingAppPalette = PreferencesDataStoreItem(SETTING_APP_PALETTE, "warm", preferences.SETTING_DATASTORE)
+
+    // 课程配色族：auto 跟随（按 palette 解析）/ legacy 统色 / classic 12色 / morandi / brand
+    private val COURSE_SCHEDULE_COLOR_FAMILY = stringPreferencesKey("course_schedule_color_family")
+    val courseScheduleColorFamily = PreferencesDataStoreItem(COURSE_SCHEDULE_COLOR_FAMILY, "auto", preferences.SETTING_DATASTORE)
+
+    // 外观升级一次性说明卡是否已读（稳定线用户 palette 静默迁移时，在我的页/首屏展示）
+    private val SETTING_APPEARANCE_TIP_READ = booleanPreferencesKey("setting_appearance_tip_read")
+    val settingAppearanceTipRead = PreferencesDataStoreItem(SETTING_APPEARANCE_TIP_READ, false, preferences.SETTING_DATASTORE)
+
     // 是否使用webVpn
     private val SETTING_USE_WEB_VPN = booleanPreferencesKey("setting_use_web_vpn")
     val settingUseWebVpn = PreferencesDataStoreItem(SETTING_USE_WEB_VPN, false, preferences.SETTING_DATASTORE)
