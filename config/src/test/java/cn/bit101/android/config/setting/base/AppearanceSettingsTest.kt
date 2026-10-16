@@ -62,8 +62,8 @@ class AppearanceSettingsTest {
 
     @Test
     fun appPalette_脏值回落显式默认值_不是展示序首个() {
-        // ⚠️ 这条是「不能用 first()」的哨兵：展示序第一个是 Classic，默认却是 Warm。
-        // 若兜底写成 allPalettes.first()，脏值用户会莫名变回原版配色——本测试立刻红。
+        // ⚠️ 这条是「不能用 first()」的哨兵：展示序第一个是 Brand，默认却是 Warm。
+        // 若兜底写成 allPalettes.first()，脏值用户会莫名变成 BIT101经典配色——本测试立刻红。
         assertEquals(AppPalette.Warm, AppPalette.getPalette(""))
         assertEquals(AppPalette.Warm, AppPalette.getPalette("不存在的配色"))
         assertEquals(AppPalette.Warm, AppPalette.getPalette("WARM")) // 大小写不匹配即脏值
@@ -75,14 +75,27 @@ class AppearanceSettingsTest {
         assertEquals("classic", AppPalette.Classic.value)
         assertEquals("warm", AppPalette.Warm.value)
         assertEquals("brand", AppPalette.Brand.value)
-        // 展示名契约（P5-C 用户拍板「改展示名」，按实际观感命名）：
+        // 展示名契约（P5-C + 后续两轮用户拍板正名）：
         // value 字符串（持久化键）不变，展示名是设置页直接显示给用户的字。
-        // Classic = master 回迁（桃粉+暖橙）观感暖棕；Warm = P1 分支现状（白底+青绿）观感清新；
-        // Brand = 北理蓝占位。旧名「一格 GRID 暖棕配色」名不副实已废（初稿 §119 意图暖棕、
-        // 实现出来青绿）；新名刻意不含「一格 GRID」（与 AppSkin.Grid 展示名撞词，N1 警示）。
+        // Brand = 深蓝占位 ⇒「BIT101经典配色」，展示首位（官方校色经章程查证为绿+墨绿+褐，
+        //   深蓝占位不蹭学校名故去「北理工」冠名；experimental 仍保留）；
+        // Classic = master 回迁（桃粉+暖橙）⇒「暖棕配色」，不冠「原版」；
+        // Warm = P1 分支现状（白底+青绿）⇒「清新青绿配色」。旧名「一格 GRID 暖棕配色」
+        // 名不副实已废（初稿 §119 意图暖棕、实现出来青绿）；新名刻意不含「一格 GRID」
+        // （与 AppSkin.Grid 展示名撞词，N1 警示）。
+        assertEquals("BIT101经典配色", AppPalette.Brand.toAppPaletteData().name)
         assertEquals("暖棕配色", AppPalette.Classic.toAppPaletteData().name)
         assertEquals("清新青绿配色", AppPalette.Warm.toAppPaletteData().name)
-        assertEquals("北理工配色", AppPalette.Brand.toAppPaletteData().name)
+    }
+
+    @Test
+    fun appPalette_展示序_Brand首位() {
+        // P5-C 后续用户拍板：BIT101经典配色（Brand）提至展示首位，Classic/Warm 顺延。
+        // ⚠️ 展示序 ≠ 默认值：首位是 Brand，默认仍是 Warm（由上面「脏值回落」测试盯着）。
+        assertEquals(
+            listOf(AppPalette.Brand, AppPalette.Classic, AppPalette.Warm),
+            AppPalette.allPalettes,
+        )
     }
 
     @Test

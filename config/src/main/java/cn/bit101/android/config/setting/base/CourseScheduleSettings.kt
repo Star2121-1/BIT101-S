@@ -64,8 +64,10 @@ fun TimeTable.toTimeTableString(): String {
  *
  * ⚠️ value 字符串（`name.lowercase()`）是**发布后冻结的数据兼容契约**。
  *
- * ⚠️ 命名与 [AppPalette] 的 Brand **同词同义**（都指北理工配色）——
+ * ⚠️ 命名与 [AppPalette] 的 Brand **同词同义**（枚举名同指「北理蓝」占位方向）——
  * 两个名字指同一概念，以后必有人问「Bit 和 Brand 是不是两回事」。
+ * （[AppPalette] 侧展示名已改「BIT101经典配色」：官方校色经章程查证为绿+墨绿+褐，
+ * 深蓝占位不蹭学校名。本族展示名「北理蓝 12 色」同 rationale，P5-D 做 UI 时一并复核。）
  */
 enum class CourseColorFamily(
     /** 能不能选：false ⇒ UI 置灰 */

@@ -4,7 +4,7 @@ package cn.bit101.android.config.setting.base
  * 配色方案（palette 轴）——「外观切换」三轴之一。
  *
  * 决定 M3 70 角色 + GridTokens 面色族填什么值，与 UI 形态轴（[AppSkin]）正交：
- * 「原版界面 × 北理配色」这类组合靠本轴表达，原版页面零布局改动即可换色。
+ * 「原版界面 × BIT101经典配色」这类组合靠本轴表达，原版页面零布局改动即可换色。
  *
  * ⚠️ 为什么住 `:config` 而不住 `features/theme`：同 [AppSkin]——ThemeSettings 要暴露
  * `SettingItem<AppPalette>`，枚举住 theme 会与 config 成环。
@@ -20,14 +20,21 @@ enum class AppPalette(
     /** 选了要不要标「实验性」：true ⇒ 可选但带实验性标注（如占位色值） */
     val experimental: Boolean = false,
 ) {
-    /** 暖棕配色（展示名，P5-C 起；master Color.kt 回迁，观感桃粉+暖橙） */
+    /**
+     * BIT101经典配色（展示名，P5-C 后续用户拍板：保持深蓝占位色值、提至展示首位、
+     * 去「北理工」冠名——官方校色经《章程》查证为绿+墨绿+褐，深蓝占位与之不符）。
+     * 值仍是未验证占位，故 [experimental] = true 保留，UI 仍标「实验性」。
+     */
+    Brand(experimental = true),
+
+    /**
+     * 暖棕配色（展示名，P5-C 起；master Color.kt 回迁，观感桃粉+暖橙）。
+     * ⚠️ 值虽是 master 逐格回迁，展示名**不冠「原版」**（P5-C 后续用户拍板）。
+     */
     Classic,
 
     /** 清新青绿配色（展示名，P5-C 起；默认，分支 P1 token 落地事实） */
     Warm,
-
-    /** 北理工配色（占位值待官方 VI，[experimental] = true） */
-    Brand(experimental = true),
     ;
 
     /**
@@ -40,9 +47,10 @@ enum class AppPalette(
     companion object {
 
         /**
-         * 全部配色（UI 展示序：Classic 在前）。
-         * ⚠️ **展示序 ≠ 默认值**：首个是 Classic，默认却是 Warm
-         * ⇒ 兜底必须用显式默认值，用 `first()` 会把脏值回落成 Classic（老用户莫名变原版色）。
+         * 全部配色（UI 展示序：Brand 在前——P5-C 后续用户拍板「BIT101经典配色」提至
+         * 首位，Classic/Warm 顺延）。
+         * ⚠️ **展示序 ≠ 默认值**：首个是 Brand，默认却是 Warm
+         * ⇒ 兜底必须用显式默认值，用 `first()` 会把脏值回落成 Brand（用户莫名变经典配色）。
          */
         val allPalettes: List<AppPalette>
             get() = entries
@@ -66,21 +74,26 @@ data class AppPaletteData(
 )
 
 /**
- * 转为 [AppPaletteData]。展示名与**实际观感**对应（P5-C 用户拍板「改展示名」）：
+ * 转为 [AppPaletteData]。展示名按**用户拍板**定（P5-C + 后续两轮正名）：
  *
- * - Classic = master 逐格回迁（#FFF8F5 桃粉底 + #FFDBC8 暖橙容器 + 棕主色）⇒ 观感暖棕；
- * - Warm = P1 分支现状（纯白底 + #D5E9DF 青绿容器）⇒ 观感清新，**不是**暖棕——
- *   旧名「一格 GRID 暖棕配色」名不副实（初稿 §119 意图是暖棕，实现出来偏青绿），故改；
- * - Brand = 北理蓝主色占位（官方 VI 未到位，[experimental] = true）。
+ * - Brand = 深蓝主色占位（#1B4F9C，值未验证）⇒「BIT101经典配色」，展示首位。
+ *   P5-C 后续用户拍板：保持色值、提至首位、改名。**不再称「北理工配色」**——
+ *   官方校色经《北京理工大学章程》第四十二条查证为「主色绿 + 辅助墨绿/褐」，
+ *   深蓝占位与官方色系不符 ⇒ 占位表不蹭学校名（[experimental] 仍保留）；
+ * - Classic = master 逐格回迁（#FFF8F5 桃粉底 + #FFDBC8 暖橙容器 + 棕主色）⇒「暖棕配色」，
+ *   **不冠「原版」**（值确是 master 回迁，但用户拍板展示名不称原版）；
+ * - Warm = P1 分支现状（纯白底 + #D5E9DF 青绿容器）⇒「清新青绿配色」，观感清新、
+ *   **不是**暖棕——旧名「一格 GRID 暖棕配色」名不副实（初稿 §119 意图是暖棕，
+ *   实现出来偏青绿），故改。
  *
  * ⚠️ datastore value（classic/warm/brand）是**发布后冻结契约**，永不随展示名改。
  * ⚠️ 新名不得含「一格 GRID」：与 [AppSkin.Grid] 的展示名撞词（N1 命名警示）。
  */
 fun AppPalette.toAppPaletteData() = AppPaletteData(
     when (this) {
+        AppPalette.Brand -> "BIT101经典配色"
         AppPalette.Classic -> "暖棕配色"
         AppPalette.Warm -> "清新青绿配色"
-        AppPalette.Brand -> "北理工配色"
     },
     value,
 )

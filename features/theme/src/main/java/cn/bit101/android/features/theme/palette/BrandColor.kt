@@ -13,10 +13,13 @@ import cn.bit101.android.features.theme.onErrorDark
 import cn.bit101.android.features.theme.onErrorLight
 
 /**
- * 北理工配色 —— **占位表，全部未验证**。
+ * BIT101经典配色 —— **深蓝占位表，全部未验证**。
  *
  * ⚠️⚠️ **无官方 VI 手册可引，禁止在任何交付物（代码注释 / 提交说明 / 对用户文案）中
- * 表述为「北理工官方色」**（初稿 §5.4）。[cn.bit101.android.config.setting.base.AppPalette.Brand]
+ * 表述为「北理工官方色」**（初稿 §5.4）。P5-C 后续用户拍板改名「BIT101经典配色」：
+ * 官方校色经《北京理工大学章程》第四十二条查证为「校徽主色调为绿色，辅助色为墨绿色和
+ * 褐色」，本表深蓝与官方色系不符 ⇒ 占位表不蹭学校名、去「北理工」冠名；**色值保留不动**。
+ * [cn.bit101.android.config.setting.base.AppPalette.Brand]
  * 带 `experimental = true`，UI 层必须标「实验性」。
  *
  * 取值方法（§5.4）：沿用原版配色的 tonal 关系结构（Material Theme Builder 输出、

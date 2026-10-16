@@ -68,7 +68,7 @@ private fun ThemeSettingPageContent(
         ),
         SettingItemData.Button(
             title = "配色方案",
-            subTitle = "暖棕配色，清新青绿配色，北理工配色",
+            subTitle = "BIT101经典配色，暖棕配色，清新青绿配色",
             onClick = onOpenPaletteDialog,
             text = palette,
         ),
