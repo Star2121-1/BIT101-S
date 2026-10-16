@@ -13,7 +13,11 @@ import cn.bit101.android.features.theme.onErrorDark
 import cn.bit101.android.features.theme.onErrorLight
 
 /**
- * 一格 GRID 暖棕配色（**默认 palette**，alpha 用户观感零变化的那条路）。
+ * 清新青绿配色（展示名，P5-C 起；**默认 palette**，alpha 用户观感零变化的那条路）。
+ *
+ * ⚠️ 旧展示名「一格 GRID 暖棕配色」名不副实已废：初稿 §119 意图暖棕，但本表实际是
+ * P1 分支落地事实（surface 纯白 #FFFFFF + secondaryContainer 青绿 #D5E9DF），观感清新。
+ * 用户 P5-C 拍板按实际观感改名；datastore value `warm` 不变。
  *
  * 现 Color.kt 整体搬入 + `object` 包裹（撞名解法：master 与现 Color.kt 顶层 val
  * 同名 70/70，同包两个文件同名顶层 val = 重声明编译错，三张表统一 object 形态）。

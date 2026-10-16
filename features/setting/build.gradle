@@ -42,6 +42,11 @@ android {
 }
 
 dependencies {
+    // ── 测试 ──────────────────────────────────────────────
+    // junit 由根 build.gradle subprojects 统一注入；coroutines-test 本模块自备
+    // （ThemeViewModel.set* 走 viewModelScope，单测需 setMain + 等待 IO 落地）
+    testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1"
+
     // 用来画 app 图标
     implementation "com.google.accompanist:accompanist-drawablepainter:0.32.0"
 

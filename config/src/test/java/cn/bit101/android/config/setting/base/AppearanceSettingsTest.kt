@@ -75,10 +75,13 @@ class AppearanceSettingsTest {
         assertEquals("classic", AppPalette.Classic.value)
         assertEquals("warm", AppPalette.Warm.value)
         assertEquals("brand", AppPalette.Brand.value)
-        // 展示名契约（P5-B·F2 口径①）：与初稿 §1.3 权威表 / 用户原话对齐——
-        // value 字符串（持久化键）不变，展示名是 P5-C 直接显示给用户的字
-        assertEquals("原版配色", AppPalette.Classic.toAppPaletteData().name)
-        assertEquals("一格 GRID 暖棕配色", AppPalette.Warm.toAppPaletteData().name)
+        // 展示名契约（P5-C 用户拍板「改展示名」，按实际观感命名）：
+        // value 字符串（持久化键）不变，展示名是设置页直接显示给用户的字。
+        // Classic = master 回迁（桃粉+暖橙）观感暖棕；Warm = P1 分支现状（白底+青绿）观感清新；
+        // Brand = 北理蓝占位。旧名「一格 GRID 暖棕配色」名不副实已废（初稿 §119 意图暖棕、
+        // 实现出来青绿）；新名刻意不含「一格 GRID」（与 AppSkin.Grid 展示名撞词，N1 警示）。
+        assertEquals("暖棕配色", AppPalette.Classic.toAppPaletteData().name)
+        assertEquals("清新青绿配色", AppPalette.Warm.toAppPaletteData().name)
         assertEquals("北理工配色", AppPalette.Brand.toAppPaletteData().name)
     }
 

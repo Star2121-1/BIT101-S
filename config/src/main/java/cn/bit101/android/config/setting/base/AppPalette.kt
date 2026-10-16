@@ -20,10 +20,10 @@ enum class AppPalette(
     /** 选了要不要标「实验性」：true ⇒ 可选但带实验性标注（如占位色值） */
     val experimental: Boolean = false,
 ) {
-    /** 原版配色（master Color.kt 回迁） */
+    /** 暖棕配色（展示名，P5-C 起；master Color.kt 回迁，观感桃粉+暖橙） */
     Classic,
 
-    /** 一格 GRID 暖棕配色（默认；分支 P1 token 落地事实） */
+    /** 清新青绿配色（展示名，P5-C 起；默认，分支 P1 token 落地事实） */
     Warm,
 
     /** 北理工配色（占位值待官方 VI，[experimental] = true） */
@@ -65,11 +65,21 @@ data class AppPaletteData(
     val value: String,
 )
 
-/** 转为 [AppPaletteData]。展示名与初稿 §1.3 / 用户原话一致（「原版配色 / 一格 GRID 暖棕配色 / 北理工配色」）。 */
+/**
+ * 转为 [AppPaletteData]。展示名与**实际观感**对应（P5-C 用户拍板「改展示名」）：
+ *
+ * - Classic = master 逐格回迁（#FFF8F5 桃粉底 + #FFDBC8 暖橙容器 + 棕主色）⇒ 观感暖棕；
+ * - Warm = P1 分支现状（纯白底 + #D5E9DF 青绿容器）⇒ 观感清新，**不是**暖棕——
+ *   旧名「一格 GRID 暖棕配色」名不副实（初稿 §119 意图是暖棕，实现出来偏青绿），故改；
+ * - Brand = 北理蓝主色占位（官方 VI 未到位，[experimental] = true）。
+ *
+ * ⚠️ datastore value（classic/warm/brand）是**发布后冻结契约**，永不随展示名改。
+ * ⚠️ 新名不得含「一格 GRID」：与 [AppSkin.Grid] 的展示名撞词（N1 命名警示）。
+ */
 fun AppPalette.toAppPaletteData() = AppPaletteData(
     when (this) {
-        AppPalette.Classic -> "原版配色"
-        AppPalette.Warm -> "一格 GRID 暖棕配色"
+        AppPalette.Classic -> "暖棕配色"
+        AppPalette.Warm -> "清新青绿配色"
         AppPalette.Brand -> "北理工配色"
     },
     value,

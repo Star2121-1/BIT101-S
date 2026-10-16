@@ -13,7 +13,7 @@ import cn.bit101.android.features.theme.onErrorDark
 import cn.bit101.android.features.theme.onErrorLight
 
 /**
- * 原版配色（master `Color.kt` 回迁 + object 包裹）。
+ * 暖棕配色（展示名，P5-C 起；master `Color.kt` 回迁 + object 包裹）。
  *
  * M3 角色 = `git show master:…/Color.kt` **逐格回迁**（master 表现已由 Material Theme
  * Builder 产出、角色间对比关系经验证；对比度验收见提交说明）。error 族按 §5.2 跨
