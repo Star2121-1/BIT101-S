@@ -65,12 +65,12 @@ data class AppPaletteData(
     val value: String,
 )
 
-/** 转为 [AppPaletteData]。 */
+/** 转为 [AppPaletteData]。展示名与初稿 §1.3 / 用户原话一致（「原版配色 / 一格 GRID 暖棕配色 / 北理工配色」）。 */
 fun AppPalette.toAppPaletteData() = AppPaletteData(
     when (this) {
         AppPalette.Classic -> "原版配色"
-        AppPalette.Warm -> "一格配色"
-        AppPalette.Brand -> "北理配色"
+        AppPalette.Warm -> "一格 GRID 暖棕配色"
+        AppPalette.Brand -> "北理工配色"
     },
     value,
 )

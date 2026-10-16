@@ -91,11 +91,19 @@ class CourseColorResolverTest {
         // Legacy 统色与前两者不同族 ⇒ theme 层查不同的表 ⇒ 课程色不同
         assertNotEquals(viaLegacy, viaAuto)
 
-        // 哈希不进 resolver：同一门课的色号在两种族下是同一个槽位
-        for (name in listOf("数据结构", "高等数学", "大学英语(三)", "")) {
-            val index = CourseColorLogic.of(name)
+        // 哈希不进 resolver：同一门课的色号在两种族下是同一个槽位。
+        // 期望值取 CourseColorLogicTest 的规范 §9.1 对照表 fixture（当年独立重算固化），
+        // 不把 of() 调两次比相等——那恒真、红不了（铁律：守卫写完要故意拆一次看红不红）。
+        val expectedIndex = mapOf(
+            "数据结构" to 4,
+            "大学英语(三)" to 4,
+            "高等数学A(下)" to 5,
+        )
+        for ((name, index) in expectedIndex) {
+            assertEquals("课名「$name」应落色号 $index", index, CourseColorLogic.of(name))
             assertTrue(index in 0 until CourseColorLogic.PALETTE_SIZE)
-            assertEquals(index, CourseColorLogic.of(name)) // 稳定：不随设备/时间/族变
         }
+        // 空串也是确定值而非异常（CourseColorLogic 契约，resolver 链路继承）
+        assertTrue(CourseColorLogic.of("") in 0 until CourseColorLogic.PALETTE_SIZE)
     }
 }
