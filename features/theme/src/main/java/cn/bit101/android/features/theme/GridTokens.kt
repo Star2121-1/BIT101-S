@@ -13,21 +13,25 @@ import androidx.compose.ui.unit.sp
 /**
  * 《一格 GRID》token 层 · M3 ColorScheme 装不下的语义词（规范 §0 / §8.2 / §8.7）。
  *
- * 分工（实施计划 A3-c 混合方案）：
- * - M3 承担能对上的角色（bg / surface / onSurface / primary / error / outline…）→ 见 [Color.kt]；
- * - 本文件承载 M3 没有对应角色的部分：
- *   - 面：`--surface-2` / `--surface-3` / `--disabled-bg` / 骨架色
- *   - 文字：`--text-placeholder`（三级可读）/ `--text-disabled`（仅禁用态）
- *   - 语义色：Success / Accent（银杏金，**仅填充**）/ Info 容器
- *   - 状态语义层：`--state-calm` / `--state-attention` / `--state-urgent`（§8.8 同一语义跨 Tab 同色）
- *   - 数字排版档：num-lg / num-md / num-sm（§8.7 tabular）
- *   - 课程 12 色板（§8.2 权威表）：**只放色值**；色号函数 `fnv1a32(课名)%12` 属 P3，落 `:data`
+ * 分工（实施计划 A3-c 混合方案，P5-B 起加第三层「随 palette 变」）：
+ * - M3 承担能对上的角色（bg / surface / onSurface / primary / error / outline…）
+ *   → 住 `palette/` 三张表（ClassicColor / WarmColor / BrandColor），
+ *     经 [cn.bit101.android.features.theme.palette.Palettes] 分派；
+ * - 本文件承载两类**不随 palette**的部分：
+ *   - 跨 palette 共享字段（§5.2：语义色不随品牌变，保证「同一语义跨 Tab 同色」
+ *     既有规则）：[SharedGridTokens]（success/accent/info 族、state 三档）+ error 族
+ *     （M3 角色里的 error* 八个值，三张 palette 表引用同一组）
+ *   - 第三轴课程 12 色板（§8.2 权威表）：**只放色值**（CoursePalette.kt）；
+ *     色号函数 `fnv1a32(课名)%12` 属 P3，落 `:data`
+ * - 随 palette 变的字段（surface2/3、disabledBg、skeleton、textPlaceholder/textDisabled、
+ *   pressed/pressedHeld）由 [PaletteScheme] 提供，[Palettes.tokens] 组装进本类——
+ *   本类的字段名与语义一律不变（P2 组件 + Previews 的 copy() 都依赖）。
  *
  * ⚠️ 取用入口只有 [GridTheme.tokens]（内部即 `LocalGridTokens.current`）—— 禁止各模块另立第二份色值。
  */
 @Immutable
 data class GridTokens(
-    // ── 面 ──
+    // ── 面（随 palette，PaletteScheme 提供）──
     /** `--surface-2`：次级面（当前/下一节条目底、Chip 未选底、提示条底） */
     val surface2: Color,
     /** `--surface-3`：三级面（分割线、空态图标底、热度条底） */
@@ -37,13 +41,19 @@ data class GridTokens(
     /** 骨架屏底色（`--skeleton`；微光扫掠动画属组件层，P2） */
     val skeleton: Color,
 
-    // ── 文字 ──
+    // ── 文字（随 palette，PaletteScheme 提供）──
     /** `--text-placeholder`：三级可读（占位符 / 弱读数 / 组标题 / 缺值「—」） */
     val textPlaceholder: Color,
     /** `--text-disabled`：**仅**禁用控件文字/图标（§8.1 白名单三类，装饰性时间戳已移出） */
     val textDisabled: Color,
 
-    // ── 语义色 ──
+    // ── 按压档（随 palette，每 palette 手写、不由 primary 派生；规范 §5.2 两段式）──
+    /** 按压 80ms 过渡档（填充按钮按下时的过渡目标色） */
+    val pressed: Color,
+    /** 按压保持档（填充按钮按住不放的底色） */
+    val pressedHeld: Color,
+
+    // ── 语义色（跨 palette 共享，SharedGridTokens 提供）──
     /** Success（`--success`） */
     val success: Color,
     /** Success 容器底 */
@@ -79,7 +89,7 @@ data class GridTokens(
     /** num-sm：15/22/600（时间线时刻 `08:00` / 空到时间 `20:55`） */
     val numSm: TextStyle,
 
-    // ── 课程 12 色板（§8.2，index 0..11 = 色号 0..11）──
+    // ── 课程 12 色板（§8.2，index 0..11 = 色号 0..11；第三轴，P5-D 起按族取表）──
     val coursePalette: List<CourseColors>,
 ) {
     /**
@@ -120,17 +130,39 @@ val LocalGridTokens = staticCompositionLocalOf<GridTokens> {
     error("No GridTokens provided — 检查 BIT101Theme 是否注入了 LocalGridTokens")
 }
 
-// ── 亮色实例（规范 §0 / §8.2 / HTML 原型 :root） ──
+// ─────────────────────────────────────────────────────────────
+// 跨 palette 共享段（§5.2：语义色不随品牌变）
+// 三个 palette 表（palette/ 目录）引用这里的值；**仍分明暗两档**。
+// ─────────────────────────────────────────────────────────────
 
-internal val lightGridTokens = GridTokens(
-    surface2 = Color(0xFFF4EFE8),
-    surface3 = Color(0xFFEAE3DA),
-    disabledBg = Color(0xFFE3DBD1),
-    skeleton = Color(0xFFE7E0D7),
+/**
+ * 跨 palette 共享的 [GridTokens] 字段（§5.2）。
+ *
+ * 为什么不进 [cn.bit101.android.features.theme.palette.PaletteScheme]：
+ * 这些是**语义色**（成功 / 强调 / 信息 / 状态三档），「同一语义跨 Tab 同色」是既有
+ * 规则——换品牌只换面色族，不换「成功是什么色、警告是什么色」。
+ */
+@Immutable
+internal data class SharedGridTokens(
+    val success: Color,
+    val successContainer: Color,
+    val onSuccessContainer: Color,
+    val accent: Color,
+    val accentText: Color,
+    val accentContainer: Color,
+    val onAccentContainer: Color,
+    val infoContainer: Color,
+    val onInfoContainer: Color,
+    val stateCalm: Color,
+    val stateAttention: Color,
+    val stateUrgent: Color,
+    val numLg: TextStyle,
+    val numMd: TextStyle,
+    val numSm: TextStyle,
+)
 
-    textPlaceholder = Color(0xFF726759),
-    textDisabled = Color(0xFF8A7F72),
-
+/** 共享字段 · 亮色档（值 = 原 warm 亮色 GridTokens 的对应项，未动）。 */
+internal val sharedGridTokensLight = SharedGridTokens(
     success = Color(0xFF2F7D5A),
     successContainer = Color(0xFFD8EFE3),
     onSuccessContainer = Color(0xFF1B5B3F),
@@ -148,22 +180,10 @@ internal val lightGridTokens = GridTokens(
     numLg = numTextStyle(44, 52, FontWeight.Bold),
     numMd = numTextStyle(22, 30, FontWeight.Bold),
     numSm = numTextStyle(15, 22, FontWeight.SemiBold),
-
-    coursePalette = CoursePalette.light,
 )
 
-// ── 暗色实例（规范 §0 暗色行 / §8.2 fill-d·ink-d 列 / HTML 原型 [data-theme="dark"]） ──
-
-internal val darkGridTokens = GridTokens(
-    surface2 = Color(0xFF272219),
-    surface3 = Color(0xFF332C24),
-    disabledBg = Color(0xFF2A251F),
-    skeleton = Color(0xFF231F1A),
-
-    // 规范未给暗色占位符档：按亮色 #726759 同族提亮推导（对 surface ≈6:1，仍属「三级可读」）
-    textPlaceholder = Color(0xFFA79A8C),
-    textDisabled = Color(0xFF857B72),
-
+/** 共享字段 · 暗色档（值 = 原 warm 暗色 GridTokens 的对应项，未动）。 */
+internal val sharedGridTokensDark = SharedGridTokens(
     success = Color(0xFF7FDCB4),
     successContainer = Color(0xFF0E3A2A),
     onSuccessContainer = Color(0xFF7FDCB4),
@@ -181,10 +201,22 @@ internal val darkGridTokens = GridTokens(
     numLg = numTextStyle(44, 52, FontWeight.Bold),
     numMd = numTextStyle(22, 30, FontWeight.Bold),
     numSm = numTextStyle(15, 22, FontWeight.SemiBold),
-
-    // mark 位按 §8.2 放 ink-d（暗态独立图形不用 mark）
-    coursePalette = CoursePalette.dark,
 )
+
+// ── 跨 palette 共享的 error 族（M3 角色，§5.2）──
+// 三张 palette 表的 ColorScheme 引用同一组值：error 是语义色不是品牌色。
+// ⚠️ 取 warm（分支现状）值而非 master 的 #BA1A1A 一族——这是 classic「回到原版」
+//    的已知忠实度偏差，报给「像不像原版」评审（初稿 §5.2 的共享决定）。
+
+internal val errorLight = Color(0xFFB3261E)
+internal val onErrorLight = Color(0xFFFFFFFF)
+internal val errorContainerLight = Color(0xFFFBE0DC)
+internal val onErrorContainerLight = Color(0xFF8C1D18)
+
+internal val errorDark = Color(0xFFFFB3A7)
+internal val onErrorDark = Color(0xFF5C0E0A)
+internal val errorContainerDark = Color(0xFF571310)
+internal val onErrorContainerDark = Color(0xFFFFB3A7)
 
 /**
  * §8.7 数字排版档。

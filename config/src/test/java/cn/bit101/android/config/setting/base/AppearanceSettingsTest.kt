@@ -75,9 +75,11 @@ class AppearanceSettingsTest {
         assertEquals("classic", AppPalette.Classic.value)
         assertEquals("warm", AppPalette.Warm.value)
         assertEquals("brand", AppPalette.Brand.value)
+        // 展示名契约（P5-B·F2 口径①）：与初稿 §1.3 权威表 / 用户原话对齐——
+        // value 字符串（持久化键）不变，展示名是 P5-C 直接显示给用户的字
         assertEquals("原版配色", AppPalette.Classic.toAppPaletteData().name)
-        assertEquals("一格配色", AppPalette.Warm.toAppPaletteData().name)
-        assertEquals("北理配色", AppPalette.Brand.toAppPaletteData().name)
+        assertEquals("一格 GRID 暖棕配色", AppPalette.Warm.toAppPaletteData().name)
+        assertEquals("北理工配色", AppPalette.Brand.toAppPaletteData().name)
     }
 
     @Test

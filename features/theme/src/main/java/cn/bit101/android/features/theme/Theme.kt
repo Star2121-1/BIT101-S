@@ -5,10 +5,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
@@ -17,97 +15,25 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import cn.bit101.android.config.setting.base.AppPalette
+import cn.bit101.android.config.setting.base.AppSkin
+import cn.bit101.android.config.setting.base.CourseColorFamily
+import cn.bit101.android.config.setting.base.CourseScheduleSettings
 import cn.bit101.android.config.setting.base.DarkThemeMode
 import cn.bit101.android.config.setting.base.ThemeSettings
+import cn.bit101.android.features.theme.palette.Palettes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
-
-
-
-internal val lightScheme = lightColorScheme(
-    primary = primaryLight,
-    onPrimary = onPrimaryLight,
-    primaryContainer = primaryContainerLight,
-    onPrimaryContainer = onPrimaryContainerLight,
-    secondary = secondaryLight,
-    onSecondary = onSecondaryLight,
-    secondaryContainer = secondaryContainerLight,
-    onSecondaryContainer = onSecondaryContainerLight,
-    tertiary = tertiaryLight,
-    onTertiary = onTertiaryLight,
-    tertiaryContainer = tertiaryContainerLight,
-    onTertiaryContainer = onTertiaryContainerLight,
-    error = errorLight,
-    onError = onErrorLight,
-    errorContainer = errorContainerLight,
-    onErrorContainer = onErrorContainerLight,
-    background = backgroundLight,
-    onBackground = onBackgroundLight,
-    surface = surfaceLight,
-    onSurface = onSurfaceLight,
-    surfaceVariant = surfaceVariantLight,
-    onSurfaceVariant = onSurfaceVariantLight,
-    outline = outlineLight,
-    outlineVariant = outlineVariantLight,
-    scrim = scrimLight,
-    inverseSurface = inverseSurfaceLight,
-    inverseOnSurface = inverseOnSurfaceLight,
-    inversePrimary = inversePrimaryLight,
-    surfaceDim = surfaceDimLight,
-    surfaceBright = surfaceBrightLight,
-    surfaceContainerLowest = surfaceContainerLowestLight,
-    surfaceContainerLow = surfaceContainerLowLight,
-    surfaceContainer = surfaceContainerLight,
-    surfaceContainerHigh = surfaceContainerHighLight,
-    surfaceContainerHighest = surfaceContainerHighestLight,
-)
-
-internal val darkScheme = darkColorScheme(
-    primary = primaryDark,
-    onPrimary = onPrimaryDark,
-    primaryContainer = primaryContainerDark,
-    onPrimaryContainer = onPrimaryContainerDark,
-    secondary = secondaryDark,
-    onSecondary = onSecondaryDark,
-    secondaryContainer = secondaryContainerDark,
-    onSecondaryContainer = onSecondaryContainerDark,
-    tertiary = tertiaryDark,
-    onTertiary = onTertiaryDark,
-    tertiaryContainer = tertiaryContainerDark,
-    onTertiaryContainer = onTertiaryContainerDark,
-    error = errorDark,
-    onError = onErrorDark,
-    errorContainer = errorContainerDark,
-    onErrorContainer = onErrorContainerDark,
-    background = backgroundDark,
-    onBackground = onBackgroundDark,
-    surface = surfaceDark,
-    onSurface = onSurfaceDark,
-    surfaceVariant = surfaceVariantDark,
-    onSurfaceVariant = onSurfaceVariantDark,
-    outline = outlineDark,
-    outlineVariant = outlineVariantDark,
-    scrim = scrimDark,
-    inverseSurface = inverseSurfaceDark,
-    inverseOnSurface = inverseOnSurfaceDark,
-    inversePrimary = inversePrimaryDark,
-    surfaceDim = surfaceDimDark,
-    surfaceBright = surfaceBrightDark,
-    surfaceContainerLowest = surfaceContainerLowestDark,
-    surfaceContainerLow = surfaceContainerLowDark,
-    surfaceContainer = surfaceContainerDark,
-    surfaceContainerHigh = surfaceContainerHighDark,
-    surfaceContainerHighest = surfaceContainerHighestDark,
-)
 
 /**
  * 当前是否深色 —— 由 `BIT101Theme` 注入（与 [LocalGridTokens] 成对提供）。
  *
  * ⚠️ **默认值为 `error("No theme provided")`**：读它而不在 `BIT101Theme` 里，
  * 会在组合期直接抛异常（不是「取到 false」）。已知读它的组件：
- * `GridButton`（按压色档要分深浅）、`GridSnackbar`（暗色是浅色卡，靠它判断）、
- * `features/web` 的 `WebScreen`。
+ * `GridSnackbar`（暗色是浅色卡，靠它判断）、`features/web` 的 `WebScreen`。
+ * （`GridButton` 在 P5-B 起不再读它——按压色档改由 tokens 按明暗取好，见
+ * `palette/PaletteScheme.pressed`。）
  *
  * ⇒ **这些组件必须在 `BIT101Theme` 内使用**。App 内没问题；
  * 新入口（独立 Activity / 独立预览 / RemoteViews 之外的自绘）若直接渲染它们会崩，
@@ -134,6 +60,11 @@ fun BIT101Theme(
         else -> isSystemInDarkTheme()
     }
 
+    // 外观三轴（P5-B：palette 已接线生效；skin 只落 VM flow，P5-F 才消费；
+    // courseColorFamily 只落 VM flow，P5-D 族表落地后才影响取色）
+    val appPalette by vm.appPaletteFlow.collectAsState(initial = vm.appPaletteInitial)
+    val courseColorFamily by vm.courseColorFamilyFlow.collectAsState(initial = vm.courseColorFamilyInitial)
+
     // 应用 Material You 动态颜色
     val colors = when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dynamicColor && useDarkTheme -> dynamicDarkColorScheme(
@@ -144,14 +75,18 @@ fun BIT101Theme(
             LocalContext.current
         )
 
-        useDarkTheme -> darkScheme
-        else -> lightScheme
+        useDarkTheme -> Palettes.scheme(appPalette, isDark = true)
+        else -> Palettes.scheme(appPalette, isDark = false)
     }
 
     CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
         CompositionLocalProvider(LocalThemeIsDark provides useDarkTheme) {
             CompositionLocalProvider(
-                LocalGridTokens provides if (useDarkTheme) darkGridTokens else lightGridTokens
+                LocalGridTokens provides Palettes.tokens(
+                    palette = appPalette,
+                    isDark = useDarkTheme,
+                    family = courseColorFamily,
+                )
             ) {
                 MaterialTheme(
                     colorScheme = colors,
@@ -164,7 +99,8 @@ fun BIT101Theme(
 
 @HiltViewModel
 internal class ThemeViewModel @Inject constructor(
-    themeSettings: ThemeSettings
+    themeSettings: ThemeSettings,
+    courseScheduleSettings: CourseScheduleSettings,
 ) : ViewModel() {
     /**
      * 动态取色的**首帧初值** —— 写死 false，**不**为它阻塞主线程读盘。
@@ -184,19 +120,66 @@ internal class ThemeViewModel @Inject constructor(
     val dynamicThemeInitial: Boolean = false
 
     /**
-     * 暗黑模式的**首帧初值** —— 取持久化值，**值得**这一次同步读盘（与 [dynamicThemeInitial] 相反）。
+     * 外观四项的**首帧初值** —— 取持久化值，合并在**同一个 runBlocking 块**里读
+     * （初稿 §5.5：DataStore 首次 get() 已初始化整个 DataStore，多读三个 string 键
+     * 增量成本 ≈ 0，不新开第二个 runBlocking）。
      *
-     * 为什么这里值得、动态取色那里不值得：`collectAsState(initial = …)` 的 initial 就是用户看到的
-     * **第一帧**。写死 `DarkThemeMode.System` 时，「显式设过深色 / 浅色」的用户会先看到**整个一帧
+     * 为什么值得同步读：`collectAsState(initial = …)` 的 initial 就是用户看到的
+     * **第一帧**。写死默认值时，「显式设过深色 / 浅色」的用户会先看到**整个一帧
      * 错的主题**（系统浅色 ⇒ 首帧整套浅色 UI，等 flow 发射持久化值才整屏翻成深色）——
-     * 这是**整屏主题翻转**，比动态取色那「一帧配色差异」严重得多。
+     * 这是**整屏主题翻转**，比动态取色那「一帧配色差异」严重得多。palette 同理：
+     * 默认 Warm 与用户选的 Classic 差一整套面色族，首帧不能猜错。
      *
-     * 读失败（文件损坏等）退回 System，与旧行为一致。
+     * 读失败（文件损坏等）退回各轴默认值，与旧行为一致
+     * （palette=Warm / skin=Classic / family=Auto，均为 P5-A 定死的显式默认，
+     * 不用 `first()`——展示序与默认值不一致，见 AppPalette KDoc）。
      */
-    val darkThemeModeInitial: DarkThemeMode = runBlocking {
-        runCatching { themeSettings.darkThemeMode.get() }.getOrDefault(DarkThemeMode.System)
+    private val initialAppearance: AppearanceInitials = runBlocking {
+        AppearanceInitials(
+            darkThemeMode = runCatching { themeSettings.darkThemeMode.get() }
+                .getOrDefault(DarkThemeMode.System),
+            appPalette = runCatching { themeSettings.appPalette.get() }
+                .getOrDefault(AppPalette.Warm),
+            appSkin = runCatching { themeSettings.appSkin.get() }
+                .getOrDefault(AppSkin.Classic),
+            courseColorFamily = runCatching { courseScheduleSettings.courseColorFamily.get() }
+                .getOrDefault(CourseColorFamily.Auto),
+        )
     }
+
+    /** 暗黑模式首帧初值（原 [darkThemeModeInitial] 语义，值来自合并读盘块）。 */
+    val darkThemeModeInitial: DarkThemeMode
+        get() = initialAppearance.darkThemeMode
+
+    /** palette 首帧初值（默认 Warm）。 */
+    val appPaletteInitial: AppPalette
+        get() = initialAppearance.appPalette
+
+    /** skin 首帧初值（默认 Classic；P5-F 才消费）。 */
+    val appSkinInitial: AppSkin
+        get() = initialAppearance.appSkin
+
+    /** 课程色族首帧初值（默认 Auto；P5-D 族表落地后才影响取色）。 */
+    val courseColorFamilyInitial: CourseColorFamily
+        get() = initialAppearance.courseColorFamily
 
     val dynamicThemeFlow = themeSettings.dynamicTheme.flow
     val darkThemeModeFlow = themeSettings.darkThemeMode.flow
+
+    /** 配色轴 flow（P5-C 设置页与主题层共用）。 */
+    val appPaletteFlow = themeSettings.appPalette.flow
+
+    /** 形态轴 flow（P5-C 设置页 / P5-F 图表重建消费；P5-B 只落位）。 */
+    val appSkinFlow = themeSettings.appSkin.flow
+
+    /** 课程色族 flow（存盘原值，可能为 Auto；按 palette 解析属 P5-D）。 */
+    val courseColorFamilyFlow = courseScheduleSettings.courseColorFamily.flow
 }
+
+/** 外观四项的首帧初值（合并在一个 runBlocking 块里读，见 [ThemeViewModel] KDoc）。 */
+private data class AppearanceInitials(
+    val darkThemeMode: DarkThemeMode,
+    val appPalette: AppPalette,
+    val appSkin: AppSkin,
+    val courseColorFamily: CourseColorFamily,
+)

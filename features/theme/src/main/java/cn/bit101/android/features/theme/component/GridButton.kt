@@ -1,5 +1,6 @@
 package cn.bit101.android.features.theme.component
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -30,12 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import cn.bit101.android.features.theme.GridTheme
-import cn.bit101.android.features.theme.LocalThemeIsDark
 import cn.bit101.android.features.theme.PreviewSurface
-import cn.bit101.android.features.theme.primaryPressedDark
-import cn.bit101.android.features.theme.primaryPressedHeldDark
-import cn.bit101.android.features.theme.primaryPressedHeldLight
-import cn.bit101.android.features.theme.primaryPressedLight
 
 /** 按钮三种形态（规范 §5.2）。 */
 enum class GridButtonVariant {
@@ -53,7 +49,8 @@ enum class GridButtonVariant {
  * 按钮（规范 §5.2）。
  *
  * 高 48、圆角 12、左右内边距 24。六态要点：
- * - 按压：80ms scale(.98)；填充底换 [primaryPressedLight]（保持中再深一档）
+ * - 按压：80ms scale(.98)；填充底 80ms 过渡到 [GridTokens.pressedHeld]（规范 §5.2
+ *   「悬停/按压 = 按压前 80ms 与按压保持」；按压色档随 palette，tokens 已按明暗取好档）
  * - 选中：**只**用于分段控件内的按钮组（surface-2 底 + text 字 + 1dp Primary 边）
  * - 禁用：`tokens.disabledBg` 底 + `tokens.textDisabled` 字；描边改 1dp `outlineVariant`；
  *   **无 scale、无 state layer**（第二编码：禁用不得仅靠颜色表达）
@@ -61,9 +58,10 @@ enum class GridButtonVariant {
  * - 登录中：同加载态，另在下方出「正在登录…」label-3 `--text-2`；
  *   ⚠️ 规范同时要求「全屏不得再出现第二个登录入口」——那是页面级的活，组件管不到
  *
- * ⚠️ **必须在 `BIT101Theme` 内使用**：本组件读 `LocalThemeIsDark`（按压色档要分深浅），
- * 而它的默认值是 `error("No theme provided")` —— 脱离主题直接渲染会崩，不是取到 false。
- * 预览请用 `PreviewSurface`（它会一并提供该 CompositionLocal）。
+ * ⚠️ **必须在提供 [LocalGridTokens] 的主题内使用**（`BIT101Theme` 或 `PreviewSurface`）：
+ * 本组件读 `GridTheme.tokens` 与 `MaterialTheme.colorScheme`，两者的 CompositionLocal
+ * 默认值都是 `error(...)`，脱离主题直接渲染会崩，不是取到默认色。
+ * （P5-B 起不再读 `LocalThemeIsDark`——按压色档改由 tokens 按明暗取好。）
  */
 @Composable
 fun GridButton(
@@ -79,13 +77,19 @@ fun GridButton(
 ) {
     val tokens = GridTheme.tokens
     val cs = MaterialTheme.colorScheme
-    val isDark = LocalThemeIsDark.current
     val interaction = rememberGridInteraction()
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (enabled && pressed) 0.98f else 1f,
         animationSpec = tween(PRESS_DURATION_MS),
         label = "buttonPress",
+    )
+
+    // 规范 §5.2：按压 80ms 颜色过渡（按压色档随 palette，tokens 已按明暗取好档）
+    val pressedContainer by animateColorAsState(
+        targetValue = if (pressed) tokens.pressedHeld else cs.primary,
+        animationSpec = tween(PRESS_DURATION_MS),
+        label = "buttonPressedContainer",
     )
 
     val shape = RoundedCornerShape(12.dp)
@@ -96,14 +100,7 @@ fun GridButton(
         }
 
         selected -> tokens.surface2 to cs.onSurface
-        variant == GridButtonVariant.Filled -> {
-            val base = if (pressed) {
-                if (isDark) primaryPressedHeldDark else primaryPressedHeldLight
-            } else {
-                cs.primary
-            }
-            base to cs.onPrimary
-        }
+        variant == GridButtonVariant.Filled -> pressedContainer to cs.onPrimary
 
         else -> Color.Transparent to cs.primary
     }
