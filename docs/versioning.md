@@ -80,3 +80,40 @@
   并且根目录"只留最新两个包"要理解成「**每条线各留最新 1 个**」，
   否则新线的包会把稳定线的正式包挤掉。
 
+---
+
+## 签名与 keystore 管理（2026-10-17 新增）
+
+**现状**：`app/build.gradle:34` —— `release` 也在用 `signingConfigs.debug`
+（`~/.android/debug.keystore`，口令公开为 `android`）。即正式包全部是调试密钥签名，
+更新链路的身份完全建立在这把公开口令的钥匙上。
+
+**为什么是问题**：① debug keystore 一旦泄漏，任何人可伪造「同签名」更新包直接覆盖安装；
+② 无法上架任何应用商店；③ 将来切换正式密钥时，存量用户**无法覆盖安装**
+（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`），必须卸载重装——本地数据全部丢失。
+
+### 换签方案（keystore.properties 外部化 + fallback）
+
+- 新增 `keystore.properties`（**不入库**，`.gitignore` 与 `secrets.local.env` 同纪律）：
+  存在 ⇒ `release` 用正式签名；缺失 ⇒ fallback `debug` 签名 + 构建警告（日常开发/CI 不阻塞）。
+- ⚠️ `signingConfigs { release { ... } }` 整块必须放进 `if (keystorePropertiesFile.exists())` 里，
+  没有文件就不创建这个 config（无条件创建会留下没有 `storeFile` 的空配置）。
+- `storeFile` 相对路径以 `:app` 模块目录为基准（`../` = 仓库根）；建议直接写 `${rootDir}/…`。
+- keystore 与口令**必须异地备份**：丢失 = 无法再以同签名更新，官方无静默迁移路径，只能引导卸载重装。
+
+### 换签窗口：**1.12.0 正式版 + 服务端 `/version/` 数据更新之后**（现在不到）
+
+- 服务端 `/version/` 数据仍陈旧（`version_code=7 / 1.4.1`，`url` 仍是失效的 `http://`）
+  ⇒ **在线更新通道推不动任何更新**（实测弹窗内容永远是陈旧的 1.4.1）。
+- 换签会强制存量用户「卸载重装」——没有可用的更新通道时换签，**一条通知都发不出去**，
+  用户只会遇到装不上。
+- 时机建议 1.12.0 正式版窗口：alpha 用户少、波及面最小；届时配合服务端 `min_version_code`
+  推强制更新公告，说明「因签名切换需卸载重装」。
+
+### 轮到换签时
+
+- 按本文件纪律照走「出包 + tag + push」；公告一次说清「新版界面 + 需卸载重装」两件事
+  （若与 1.12.0 号段跨越同窗口，投诉量会叠加）。
+- 验证：`apksigner verify --print-certs <apk>` 确认签名者 CN ≠ `android debug`；
+  测试机上旧包覆盖安装**预期失败**、卸载重装后功能正常。
+
