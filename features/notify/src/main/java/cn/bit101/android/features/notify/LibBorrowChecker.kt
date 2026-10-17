@@ -41,6 +41,7 @@ object LibBorrowChecker {
         result: LibBorrowResult?,
         now: LocalDateTime = LocalDateTime.now(),
     ) {
+        if (!notificationsEnabled(context)) return
         val records = result?.recordsOrNull ?: return
 
         withContext(Dispatchers.IO) {

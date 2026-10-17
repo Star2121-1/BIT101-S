@@ -37,6 +37,17 @@ internal object NotifyRepositoryHolder {
     }
 }
 
+/**
+ * 提醒总开关的即时判断（fail-closed）。
+ *
+ * 供**不走排期**的即时提醒（网费 / 流量 / 借阅）使用 —— 它们由「前台刚取到数据」
+ * 直接触发（见 `CampusServiceViewModel`），不经过 `NotifyRepository.policyOrNull()`
+ * 所在的总开关闸门，必须在发送前自己判一次（与 [ScoreNotifyChecker] 同一模式）。
+ * 拿不到仓库 / 读取失败一律视为「关」：宁可漏一条，也不要违背用户的关闭意图。
+ */
+internal suspend fun notificationsEnabled(context: Context): Boolean =
+    NotifyRepositoryHolder.ensureRepository(context)?.enabled() ?: false
+
 /** Hilt 入口点：取提醒仓库（非注入场景的标准解法）。 */
 @EntryPoint
 @InstallIn(SingletonComponent::class)

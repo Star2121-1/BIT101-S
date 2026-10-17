@@ -11,6 +11,7 @@ import cn.bit101.android.features.seat.api.SeatReservationRepository
 import cn.bit101.android.features.seat.api.SeatSession
 import cn.bit101.android.features.seat.api.SeatSmsChallenge
 import cn.bit101.android.features.seat.api.SeatTaskRepository
+import cn.bit101.android.features.seat.api.isCasAuthFailure
 import cn.bit101.android.features.seat.api.seatErrorText
 import cn.bit101.android.features.seat.model.RenegeRecord
 import cn.bit101.android.features.seat.model.ReservationRecord
@@ -567,6 +568,9 @@ class SeatViewModel @Inject constructor(
     /**
      * 用静默认证探一次会话；确认失效就清空 token。
      *
+     * ⚠️ 只有「认证失败」——服务端明确表示会话不存在（或 401 / 403）——才清 token；
+     * 超时 / 断网 / 5xx 等**不能证明**会话失效的失败一律保留（见 [isCasAuthFailure]）。
+     *
      * 为什么需要：**token 失效时，服务端连「无需认证」的接口也会返回 HTTP 500 + 空响应**
      * （2026-09-18 实测：带失效 token 请求 `/api/Seat/tree` → 500，空 body；
      * 不带 token 却是 200 + 正常数据）。这种情况下拿不到 10001 业务码，
@@ -575,12 +579,19 @@ class SeatViewModel @Inject constructor(
      */
     private suspend fun verifySessionOrLogout() {
         if (seatApi.token.isEmpty()) return
-        val stillValid = seatSession.authenticateSeatlib().isSuccess
-        if (!stillValid) {
-            SeatLog.w(TAG, "session probe failed, clearing token to surface the auth gate")
-            seatApi.token = ""
-            repository.stopAll("登录已失效，请重新授权座位系统")
+        val probe = seatSession.authenticateSeatlib()
+        if (probe.isSuccess) return
+        val cause = probe.exceptionOrNull()
+        if (!isCasAuthFailure(cause)) {
+            // 探针失败但**不能证明**会话失效（超时 / 断网 / 服务端 5xx）：
+            // 清 token + stopAll 会把用户假登出、并杀掉正在跑的监控任务
+            // （重登后任务也不会自动恢复）——保留 token，交给用户/后续请求重试
+            SeatLog.w(TAG, "session probe inconclusive, keeping token: ${cause?.message}")
+            return
         }
+        SeatLog.w(TAG, "session probe failed, clearing token to surface the auth gate")
+        seatApi.token = ""
+        repository.stopAll("登录已失效，请重新授权座位系统")
     }
 
     /**

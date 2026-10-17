@@ -12,6 +12,7 @@ import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.data.repo.base.FreeClassroomRepo
 import cn.bit101.android.data.repo.base.LoginRepo
+import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.features.common.helper.SimpleDataState
 import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.common.helper.withSimpleDataStateLiveData
@@ -173,80 +174,25 @@ internal class FreeClassroomSearchViewModel @Inject constructor(
 
                 val timeTable = scheduleSettings.timeTable.get()
 
-                // timeTable 中下一节课对应的下标
-                var nextClassIndex = 0
-
-                if (LocalTime.now() < timeTable.first().startTime)
-                    nextClassIndex = 0
-                else if (LocalTime.now() > timeTable.last().endTime)
-                    nextClassIndex = timeTable.size
-                else {
-                    for (i in timeTable.indices.reversed()) {
-                        if (LocalTime.now() >= timeTable[i].startTime) {
-                            nextClassIndex = i + 1
-                            break
-                        }
-                    }
-                }
+                // 取一次「现在」，避免逐教室计算时基准时间漂移
+                val now = LocalTime.now()
 
                 val ret = allClassrooms.map { classroom ->
-                    val sortedBusyTimes =
-                        classroom.busyTimeStr
-                            ?.split(',')
-                            .orEmpty()
-                            .map { it.toInt() }
-                            .sorted()
-
-                    val nextBusyTime: LocalTime
+                    // ⚠️ 与 StudySpotLogic.sectionFor 同口径：busyTimeStr 是 1-based 节次号（容错解析 + 升序）
+                    val sortedBusyTimes = StudySpotLogic.parseBusySections(classroom.busyTimeStr).sorted()
 
                     // 先计算下一个开始不空闲的时间, 为 LocalTime.MIN 说明在计算时就已经不空闲了, 为 LocalTime.MAX 则说明直到今天结束都保持空闲
-                    if (nextClassIndex < timeTable.size) {
-                        val nextBusyTimeIndex = sortedBusyTimes.find { it - 1 >= nextClassIndex }?.minus(1)
-
-                        nextBusyTime =
-                            if (nextBusyTimeIndex == null)   // 没找到说明后面没课了
-                                LocalTime.MAX
-                            else
-                                if (sortedBusyTimes.contains(nextBusyTimeIndex)
-                                    && timeTable[nextBusyTimeIndex - 1].endTime >= LocalTime.now()
-                                )     // 当前正在上课
-                                    LocalTime.MIN
-                                else
-                                    timeTable[nextBusyTimeIndex].startTime
-                    } else {
-                        nextBusyTime =
-                            if (sortedBusyTimes.isNotEmpty() && timeTable[sortedBusyTimes.last() - 1].endTime >= LocalTime.now())
-                                LocalTime.MIN
-                            else
-                                LocalTime.MAX
-                    }
+                    val nextBusyTime = ClassroomBusyTimeLogic.nextBusyTimeOf(sortedBusyTimes, timeTable, now)
 
                     // 再 (在当前不空闲的情况下) 计算下一个恢复空闲的时间
                     // 会考虑阈值
-                    var nextFreeTime: LocalTime? = null
-
-                    if (nextBusyTime == LocalTime.MIN) {
-                        var findIndex = 0
-                        val sortedBusyTimeIndices = sortedBusyTimes.map { it - 1 }
-
-                        while (findIndex < sortedBusyTimeIndices.size - 1) {
-                            val nowIndex = sortedBusyTimeIndices[findIndex]
-                            val nextIndex = sortedBusyTimeIndices[findIndex + 1]
-
-                            if (timeTable[nowIndex].endTime >= LocalTime.now()
-                                && timeTable[nextIndex].startTime.toSecondOfDay()
-                                - timeTable[nowIndex].endTime.toSecondOfDay()
-                                > settingData.freeMinutesThreshold.get() * 60
-                            ) {
-                                nextFreeTime = timeTable[nowIndex].endTime
-                                break
-                            }
-                            findIndex++
-                        }
-                        // 无论如何, 所有课上完后教室一定会空闲下来
-                        if (nextFreeTime == null)
-                            nextFreeTime = timeTable[sortedBusyTimeIndices.last()].endTime
-                    }
+                    val nextFreeTime: LocalTime? =
+                        if (nextBusyTime == LocalTime.MIN)
+                            ClassroomBusyTimeLogic.nextFreeTimeOf(
+                                sortedBusyTimes, timeTable, now,
+                                settingData.freeMinutesThreshold.get(),
+                            )
+                        else null
 
                     ClassroomBusyData(
                         classroom = classroom,

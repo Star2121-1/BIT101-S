@@ -23,6 +23,9 @@ class NetFeeCheckWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // 总开关关掉时连内网取数都不做（Checker 内部还有同一道闸兜底，防漏网）
+        if (!notificationsEnabled(applicationContext)) return Result.success()
+
         val repo = EntryPointAccessors.fromApplication(
             applicationContext,
             NetFeeEntryPoint::class.java,
@@ -66,6 +69,7 @@ object NetFeeChecker {
      * 而「刚成功取到数据」正是**人在校内**的确证，是唯一可靠的判断时机。按天去重。
      */
     suspend fun check(context: Context, info: cn.bit101.android.data.school.CampusNetInfo?) {
+        if (!notificationsEnabled(context)) return
         if (info == null) return
         if (info.balanceYuan >= THRESHOLD_YUAN) return
 

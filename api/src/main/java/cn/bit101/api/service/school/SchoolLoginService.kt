@@ -19,7 +19,7 @@ class SchoolLoginService(
         password: String,
         smsCodeHandler: SmsCodeHandler? = null,
     ): SchoolLoginResult {
-        logger.info("SchoolLoginService", "开始登录 username=$username webvpnMode=${NetworkEnv.webvpnMode}")
+        logger.info("SchoolLoginService", "开始登录 username=${username.take(2)}**** webvpnMode=${NetworkEnv.webvpnMode}")
         val initialSession = HttpClient()
         val sso = SsoLogin(
             session = initialSession,

@@ -1,5 +1,6 @@
 package cn.bit101.android.data.repo
 
+import cn.bit101.android.data.BuildConfig
 import cn.bit101.android.data.net.AppHttpClients
 import android.util.Log
 import cn.bit101.android.data.school.CampusNetLogic
@@ -35,7 +36,9 @@ internal class DefaultCampusNetRepo @Inject constructor() : CampusNetRepo {
         runCatching {
             client.newCall(Request.Builder().url(URL).build()).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                Log.i("CampusNetRepo", "status=" + resp.code + " len=" + body.length + " body=" + body.take(120))
+                if (BuildConfig.DEBUG) {
+                    Log.i("CampusNetRepo", "status=" + resp.code + " len=" + body.length + " body=" + body.take(120))
+                }
                 if (resp.code == 200) {
                     CampusNetLogic.parseResult(body)
                 } else {

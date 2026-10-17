@@ -54,6 +54,27 @@ internal fun seatAuthFailure(code: Int, message: String): IOException? =
     else null
 
 /**
+ * 需要认证的**列表类**响应（违约 / 研讨间预约 / 我的预约）的统一校验：
+ * 业务码为 1 才取 `data`，否则抛错。
+ *
+ * ⚠️ 未登录时 seatlib 返回 `HTTP 200 + {"code":10001,...}`（**没有 data**）。
+ * 若用 `optJSONArray("data") ?: JSONArray()` 兜底，会把「没拉到」伪装成
+ * 「成功空列表」：违约卡显示伪造的「违约 0/5」、座位图丢掉「我订的座位」、
+ * 取消预约报出与真实原因无关的「没有这个座位的预约记录」。
+ *
+ * 认证失败经 [seatAuthFailure] 映射为 [SeatApi.TOKEN_EXPIRED] 上浮，
+ * 由调用链（仓储 / 视图模型）按「取不到」而非「0 条」处理。
+ */
+internal fun JSONObject.requireData(): JSONArray {
+    val code = intOrZero("code")
+    // 先判认证失败：会话失效必须走 TOKEN_EXPIRED（触发重新登录引导）
+    seatAuthFailure(code, errorText())?.let { throw it }
+    // 其余非 1 业务码按原文抛业务错误，明确不是「成功空列表」
+    if (code != 1) throw IOException(errorText())
+    return optJSONArray("data") ?: JSONArray()
+}
+
+/**
  * 把内部异常翻译成**给用户看的话**。
  *
  * ⚠️ 内部信号（如 [SeatApi.TOKEN_EXPIRED]）绝不能原样漏到 UI ——

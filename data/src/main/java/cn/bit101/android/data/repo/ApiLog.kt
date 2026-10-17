@@ -1,5 +1,6 @@
 package cn.bit101.android.data.repo
 
+import cn.bit101.android.data.BuildConfig
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 
@@ -14,15 +15,15 @@ internal suspend fun <T> logApiCall(
     result: (T) -> String = { "成功" },
     block: suspend () -> T,
 ): T {
-    Log.i(tag, "$step 开始")
+    if (BuildConfig.DEBUG) Log.i(tag, "$step 开始")
     return try {
         val r = block()
-        Log.i(tag, "$step ${result(r)}")
+        if (BuildConfig.DEBUG) Log.i(tag, "$step ${result(r)}")
         r
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        Log.e(tag, "$step 失败: ${e.message}", e)
+        if (BuildConfig.DEBUG) Log.e(tag, "$step 失败: ${e.message}", e)
         throw e
     }
 }

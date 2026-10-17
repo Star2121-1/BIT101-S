@@ -113,7 +113,6 @@ internal fun WebContent(
                     )
                     // 注入fake-cookie
                     val fakeCookie = vm.fakeCookie.get()
-                    Log.d("WebScreen", fakeCookie)
                     if (fakeCookie.isNotEmpty()) {
                         view.evaluateJavascript(
                             """

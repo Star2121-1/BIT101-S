@@ -714,6 +714,22 @@ object NotifyLogic {
     fun ddlKey(ddl: DDLScheduleEntity, window: String): String = "ddl:${ddl.uid}:$window"
 
     /**
+     * 从 DDL 去重键里取回 uid（键形如 `ddl:{uid}:{窗口}`）。
+     *
+     * ⚠️ **不能 `split(':')` 后按位置取**：uid 自身可能含冒号
+     * （eclass 的 uid 形如 `eclass:123`），`split(":")[1]` 只会拿到 "eclass"，
+     * 查库查无 → 该发的提醒被静默丢掉。做法是先切掉末段的窗口，
+     * 再取「第一个冒号之后」的整段（与 [seatDeadlineOfKey] 同款）。
+     *
+     * 认格式：第一段不是 `ddl` 就返回 null（不是 DDL 键就别硬猜）。
+     */
+    fun ddlUidOfKey(key: String): String? {
+        if (key.substringBefore(':') != "ddl") return null
+        val withoutWindow = key.substringBeforeLast(':')        // ddl:{uid}
+        return withoutWindow.substringAfter(':').takeIf { it.isNotBlank() }
+    }
+
+    /**
      * 座位签到提醒的去重键：`seat:{座位号}:{签到截止时刻}:{提前量}`。
      *
      * ⚠️ **带座位号与截止时刻**（不只是座位号）：同一座位今天预约、明天又预约，

@@ -114,7 +114,7 @@ class NotifyRepository @Inject constructor(
 
         return when (reminder.kind) {
             ReminderKind.CLASS -> classRefreshed(reminder, now)
-            ReminderKind.DDL -> if (ddlStillValid(reminder, now)) reminder else null
+            ReminderKind.DDL -> ddlRefreshed(reminder, now)
             ReminderKind.SEAT_SIGN_IN -> seatRefreshed(reminder, now)
             ReminderKind.EXAM -> examRefreshed(reminder, now)
             ReminderKind.ADJUSTMENT -> adjustmentRefreshed(reminder, now)
@@ -189,11 +189,20 @@ class NotifyRepository @Inject constructor(
         return reminder.copy(title = NotifyLogic.classTitle(left))
     }
 
-    /** DDL 是否仍然「未完成且未过期」（用户可能已提交、或老师改期）。标题中立，无需校正。 */
-    private suspend fun ddlStillValid(reminder: Reminder, now: LocalDateTime): Boolean {
-        val uid = reminder.key.split(":").getOrNull(1) ?: return false
+    /**
+     * DDL 是否仍然「未完成且未过期」（用户可能已提交、或老师改期）；
+     * 仍然成立则按**到点时的实际时间**重算正文。
+     *
+     * ⚠️ 正文里的「今天 / 明天 / 后天」是**相对时间**：排期与执行之间可能跨自然日
+     * （用户不常开 App、或每日重排晚于触发时刻），沿用排期时写死的日词就会说假话
+     * —— 与其余四类到点的重算同一纪律（见 [refreshed] 的说明）。
+     * 标题中立（「作业即将截止」），不需要校正。
+     */
+    private suspend fun ddlRefreshed(reminder: Reminder, now: LocalDateTime): Reminder? {
+        val uid = NotifyLogic.ddlUidOfKey(reminder.key) ?: return null
         val ddls = runCatching { ddlRepo.getDDLByUIDs(listOf(uid)) }.getOrDefault(emptyList())
-        return ddls.any { !it.done && it.time.isAfter(now) }
+        val ddl = ddls.firstOrNull { !it.done && it.time.isAfter(now) } ?: return null
+        return reminder.copy(text = NotifyLogic.ddlText(ddl, now))
     }
 
     /**

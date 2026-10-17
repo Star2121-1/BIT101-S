@@ -65,10 +65,10 @@ class NotifyLogicTest {
         title: String = "操作系统第三次作业",
         time: LocalDateTime,
         done: Boolean = false,
-        uid: String = "lexue-123",
+        uid: String = "eclass:123",
     ) = DDLScheduleEntity(
         id = 0,
-        group = "lexue",
+        group = "eclass",
         uid = uid,
         title = title,
         text = "",
@@ -366,6 +366,24 @@ class NotifyLogicTest {
         assertEquals("见群通知 · 今天 23:59 截止", NotifyLogic.ddlText(entity, now))
     }
 
+    @Test
+    fun `DDL 文案按到点时刻重算日词`() {
+        // 排期与到点可能跨自然日：deadline 固定，now 不同 →「后天」要改口「明天」，
+        // 到点重算正文（ddlRefreshed）说的才是真话
+        val deadline = LocalDateTime.of(monday.plusDays(2), LocalTime.of(9, 0))
+        val early = LocalDateTime.of(monday, LocalTime.of(23, 30))
+        val late = LocalDateTime.of(monday.plusDays(1), LocalTime.of(0, 30))
+
+        assertEquals(
+            "操作系统第三次作业 · 后天 09:00 截止",
+            NotifyLogic.ddlText(ddl(time = deadline), early),
+        )
+        assertEquals(
+            "操作系统第三次作业 · 明天 09:00 截止",
+            NotifyLogic.ddlText(ddl(time = deadline), late),
+        )
+    }
+
     // ------------------------------------------------------------ 去重
 
     @Test
@@ -401,7 +419,33 @@ class NotifyLogicTest {
         val kHour = NotifyLogic.ddlKey(d, NotifyPolicy.DDL_WINDOW_HOUR)
 
         assertFalse(kDay == kHour)
-        assertTrue(kDay.contains("lexue-123"))
+        assertTrue(kDay.contains("eclass:123"))
+    }
+
+    @Test
+    fun `DDL 键能取回含冒号的 eclass uid`() {
+        // eclass 的 uid 形如 eclass:123，旧的 split(":")[1] 会错取成 "eclass"，
+        // 查库查无 → 到点校验把该发的提醒静默丢掉
+        assertEquals("eclass:123", NotifyLogic.ddlUidOfKey("ddl:eclass:123:1d"))
+    }
+
+    @Test
+    fun `DDL 键能取回不含冒号的 uid`() {
+        assertEquals("lexue-123", NotifyLogic.ddlUidOfKey("ddl:lexue-123:1h"))
+    }
+
+    @Test
+    fun `非 DDL 键取 uid 返回 null`() {
+        assertNull(NotifyLogic.ddlUidOfKey("seat:018:2026-09-23T11:03:15:10"))
+        assertNull(NotifyLogic.ddlUidOfKey("eclass:123"))
+    }
+
+    @Test
+    fun `DDL 键往返一致`() {
+        val d = ddl(time = LocalDateTime.of(monday, LocalTime.of(23, 59)))
+        val key = NotifyLogic.ddlKey(d, NotifyPolicy.DDL_WINDOW_DAY)
+
+        assertEquals(d.uid, NotifyLogic.ddlUidOfKey(key))
     }
 
     // ------------------------------------------------------------ 整体

@@ -1,6 +1,7 @@
 package cn.bit101.android.data.repo
 
 import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.data.BuildConfig
 import cn.bit101.android.data.net.AppHttpClients
 import cn.bit101.android.data.net.WebViewCookieSync
 import cn.bit101.android.data.repo.base.CampusCardRepo
@@ -56,12 +57,14 @@ internal class DefaultCampusCardRepo @Inject constructor(
         // 真正该说的是「获取失败，重试」
         (if (failed) CampusCardSnapshot(emptyList(), "", loggedIn = false, failed = true)
         else CampusCardLogic.parse(html, finalUrl)).also {
-            // 调试期：真机跑一次就能从 logcat 看到首页真实形态，据此写精确解析
-            android.util.Log.i(
-                "CampusCardRepo",
-                "finalUrl=$finalUrl len=${it.htmlSnippet.length} loggedIn=${it.loggedIn} " +
-                    "entries=${it.entries} head=${it.htmlSnippet.take(200)}",
-            )
+            if (BuildConfig.DEBUG) {
+                // 调试期：真机跑一次就能从 logcat 看到首页真实形态，据此写精确解析
+                android.util.Log.i(
+                    "CampusCardRepo",
+                    "finalUrl=$finalUrl len=${it.htmlSnippet.length} loggedIn=${it.loggedIn} " +
+                        "entries=${it.entries} head=${it.htmlSnippet.take(200)}",
+                )
+            }
         }
     }
 }

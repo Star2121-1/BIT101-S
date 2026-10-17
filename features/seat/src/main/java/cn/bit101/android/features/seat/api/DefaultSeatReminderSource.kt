@@ -29,6 +29,9 @@ class DefaultSeatReminderSource @Inject constructor(
 ) : SeatReminderSource {
 
     override suspend fun pendingSignIns(now: LocalDateTime): List<SeatReminderInput> {
+        // 本函数是所有通知链（到点校验 / 周期重排 / 启动排期）的汇合点，可能在
+        // 冷进程里执行：先做一次幂等懒恢复，否则 token 为空会让签到提醒被静默丢弃
+        seatApi.ensureTokenLoaded()
         // 没有会话就直接放弃：拉不到数据，也没什么可提醒的（不刷日志、不弹窗）
         if (seatApi.token.isBlank()) return emptyList()
 

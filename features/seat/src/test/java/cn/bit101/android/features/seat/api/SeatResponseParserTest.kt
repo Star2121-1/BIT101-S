@@ -6,8 +6,10 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 /**
  * 响应解析，**用 2026-09-18 从 seatlib.bit.edu.cn 真实抓取的响应体**做输入。
@@ -177,5 +179,40 @@ class SeatResponseParserTest {
         assertEquals("您尚未登录", JSONObject("""{"code":10001,"message":"您尚未登录"}""").errorText())
         assertEquals("操作成功", JSONObject("""{"code":1,"msg":"操作成功"}""").errorText())
         assertEquals("未知错误", JSONObject("""{"code":0}""").errorText())
+    }
+
+    @Test
+    fun `requireData maps unauthorized list response to token expired`() {
+        // 实测（2026-10-17, seatlib.bit.edu.cn）：POST /api/Member/reneges 未登录 →
+        // HTTP 200 + {"code":10001,"msg":"您尚未登录"}（注意是 msg 字段）。
+        // 修复前这里会被 optJSONArray 兜底成「成功空列表」。
+        val error = assertThrows(IOException::class.java) {
+            JSONObject("""{"code":10001,"msg":"您尚未登录"}""").requireData()
+        }
+        assertEquals(SeatApi.TOKEN_EXPIRED, error.message)
+    }
+
+    @Test
+    fun `requireData surfaces business errors instead of faking empty list`() {
+        val error = assertThrows(IOException::class.java) {
+            JSONObject("""{"code":10002,"message":"该座位已被占用"}""").requireData()
+        }
+        // 业务错误按原文上浮（可区分于认证失效），不能被伪装成「成功空列表」
+        assertEquals("该座位已被占用", error.message)
+    }
+
+    @Test
+    fun `requireData returns the data array on success`() {
+        val data = JSONObject("""{"code":1,"msg":"操作成功","data":[{"id":"1"},{"id":"2"}]}""").requireData()
+
+        assertEquals(2, data.length())
+    }
+
+    @Test
+    fun `requireData keeps success responses without data as empty list`() {
+        // 成功但无 data 的响应保持兼容：返回空数组而不是抛错
+        val data = JSONObject("""{"code":1,"msg":"操作成功"}""").requireData()
+
+        assertEquals(0, data.length())
     }
 }

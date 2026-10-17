@@ -43,6 +43,22 @@ internal fun parseCasUser(body: String): LoginResult? {
 }
 
 /**
+ * 探针失败是否属于「认证失败」。只有**能证明会话不存在**的失败才算：
+ *
+ * - `/api/cas/user` 返回 200 但没有 token（[SeatSession.ERR_SESSION_GONE]）
+ * - 服务端 / 网关显式返回 401 / 403
+ *
+ * 超时、断网（`UnknownHostException` / `ConnectException`）、5xx、重定向异常
+ * 一律**不算** —— 它们只说明「这次不知道」，不说明会话死了。
+ * 误判的代价是把用户假登出 + 杀掉正在跑的监控任务（重登后也不会自动恢复）。
+ */
+internal fun isCasAuthFailure(e: Throwable?): Boolean {
+    val msg = e?.message.orEmpty()
+    if (msg.contains(SeatSession.ERR_SESSION_GONE)) return true
+    return msg.startsWith("HTTP 401") || msg.startsWith("HTTP 403")
+}
+
+/**
  * seatlib 的会话管理：把 CAS 登录结果换成 JWT。
  *
  * - [authenticateSeatlib] 静默认证 —— seatlib 侧已有有效 phpCAS 会话时无需任何交互；
@@ -60,6 +76,15 @@ class SeatSession @Inject constructor(
     companion object {
         private const val TAG = "SeatSession"
         private const val CAS_USER_PATH = "/api/cas/user"
+
+        /**
+         * `/api/cas/user` 响应里没有 token 时的错误文案。
+         *
+         * 它是「认证真的失败」的唯一地面真相：phpCAS 会话被清后解析不出 token
+         * （[parseCasUser] 返回 null），区别于超时 / 断网 / 5xx 这些「不知道」的失败
+         * （见 [isCasAuthFailure]）。
+         */
+        internal const val ERR_SESSION_GONE = "会话已过期或未登录"
 
         /** phpCAS 的 service 地址 —— 必须与 seatlib 服务端登记的一致。 */
         private const val CAS_SERVICE = "https://seatlib.bit.edu.cn/api/cas/cas"
@@ -109,7 +134,7 @@ class SeatSession @Inject constructor(
         client.newCall(request).execute().use { response ->
             val body = response.body?.string() ?: "{}"
             if (response.code != 200) throw IOException("HTTP ${response.code}")
-            val result = parseCasUser(body) ?: throw IOException("会话已过期或未登录")
+            val result = parseCasUser(body) ?: throw IOException(ERR_SESSION_GONE)
             SeatLog.d(TAG) {
                 "cas exchange ok (${if (ticket != null) "code" else "silent"}), " +
                     "token=${SeatLog.mask(result.token)}"

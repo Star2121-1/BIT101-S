@@ -171,7 +171,7 @@ internal class DefaultLoginRepo @Inject constructor(
         password: String,
         smsCodeHandler: SmsCodeHandler? = null,
     ) = withContext(Dispatchers.IO) {
-        val result = logApiCall(TAG, "学校统一身份认证登录(sid=$username)", result = { "成功, webVpn=${it.webVpn}" }) {
+        val result = logApiCall(TAG, "学校统一身份认证登录(sid=${username.take(2)}****)", result = { "成功, webVpn=${it.webVpn}" }) {
             api.schoolLogin.login(username, password, smsCodeHandler)
         }
         SchoolCookieStore.replace(loginStatus.cookieManager.cookieStore, result.cookies)

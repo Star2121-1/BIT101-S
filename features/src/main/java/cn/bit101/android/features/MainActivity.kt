@@ -19,7 +19,6 @@ import cn.bit101.android.features.nfc.NfcShortcut
 import cn.bit101.android.features.nfc.NfcTap
 import cn.bit101.android.features.theme.BIT101Theme
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -39,6 +38,10 @@ class MainActivity : ComponentActivity() {
      * 为什么不现用现查：`LoginStatus.status` 是 suspend/Flow 的，而「贴卡回调」
      * 需要**立刻**给答案（决定去目标页还是去登录页）。所以在这里跟着 Flow 维护一份，
      * 贴卡时读它即可 —— 它只在主线程被写、被读。
+     *
+     * 收集器跟着 STARTED 走（repeatOnLifecycle）：STOPPED 期间读到的是上一次的旧值，
+     * 但回到 STARTED 的首帧 StateFlow 会重发当前值自愈；而读它的贴卡回调只在
+     * reader mode 生效期（RESUMED）触发（见 NfcTap.sync 的 foreground 条件）——晚于自愈时点。
      */
     private var loggedIn: Boolean = false
 
@@ -82,19 +85,23 @@ class MainActivity : ComponentActivity() {
         }
 
         // 设置屏幕旋转
-        MainScope().launch {
-            themeSettings.autoRotate.flow.collect {
-                requestedOrientation = if (it) {
-                    ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-                } else {
-                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        lifecycleScope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                themeSettings.autoRotate.flow.collect {
+                    requestedOrientation = if (it) {
+                        ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+                    } else {
+                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    }
                 }
             }
         }
 
         // 跟着登录态走一份快照，供「贴卡即用」在回调里立刻取用（见 loggedIn 的说明）。
-        MainScope().launch {
-            loginStatus.status.flow.collect { loggedIn = it }
+        lifecycleScope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                loginStatus.status.flow.collect { loggedIn = it }
+            }
         }
     }
 

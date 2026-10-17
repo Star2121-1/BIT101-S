@@ -44,6 +44,7 @@ object NetFlowChecker {
      * 每日周期任务的触发时刻固定，校外会永远落空。
      */
     suspend fun check(context: Context, info: CampusNetInfo?) {
+        if (!notificationsEnabled(context)) return
         if (info == null) return
         withContext(Dispatchers.IO) {
             val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)

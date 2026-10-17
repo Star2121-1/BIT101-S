@@ -2,6 +2,7 @@ package cn.bit101.android.features.seat
 
 import android.content.Context
 import cn.bit101.android.features.notify.NotifyAppStartup
+import cn.bit101.android.features.seat.api.SeatApi
 import cn.bit101.android.features.seat.api.SeatTaskRepository
 import cn.bit101.android.features.seat.api.SeatReservationRepository
 import cn.bit101.android.features.seat.model.ReservationRecord
@@ -41,6 +42,7 @@ class SeatWidgetPublisher @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: SeatTaskRepository,
     private val reservationRepository: SeatReservationRepository,
+    private val seatApi: SeatApi,
 ) {
 
     /** 开始观察状态变化并推送到组件。幂等。 */
@@ -66,6 +68,9 @@ class SeatWidgetPublisher @Inject constructor(
      */
     private suspend fun periodicRefresh() {
         while (kotlin.coroutines.coroutineContext.isActive) {
+            // 冷进程（组件先被拉起 / 进程刚重建）里内存 token 为空 —— 先懒恢复，
+            // 否则这一轮刷新必然以「未认证」失败
+            seatApi.ensureTokenLoaded()
             val refreshed = runCatching { reservationRepository.refreshIfStale(REFRESH_INTERVAL_MS) }
                 .onFailure { SeatLog.w(TAG, "periodic refresh failed: ${it.message}") }
                 .getOrDefault(false)
@@ -78,6 +83,8 @@ class SeatWidgetPublisher @Inject constructor(
     }
 
     private suspend fun publish(tasks: List<ReservationTask>, records: List<ReservationRecord>) {
+        // canReserveNow() 读内存 token：不先恢复会把「一键预约」按钮误判掉
+        seatApi.ensureTokenLoaded()
         val model = SeatStatusLogic.build(records = records, tasks = tasks)
         SeatWidgetSnapshot.write(
             context,

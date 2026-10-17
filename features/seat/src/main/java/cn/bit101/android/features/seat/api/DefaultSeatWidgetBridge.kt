@@ -36,6 +36,8 @@ class DefaultSeatWidgetBridge @Inject constructor(
 
     /** 交给 [SeatReservationRepository]：失败它自己记日志，不打扰用户。 */
     override suspend fun refreshReservations() {
+        // 组件后台兜底刷新可能是冷进程：先补上持久化会话，否则本轮刷新必然失败
+        seatApi.ensureTokenLoaded()
         reservationRepository.refresh()
     }
 
@@ -43,6 +45,9 @@ class DefaultSeatWidgetBridge @Inject constructor(
         val task = taskRepository.tasks.value.firstOrNull { it.id == taskId }
             ?: return "任务不存在或已结束"
 
+        // 组件一键预约可能在 App 进程被回收后被点击：token 还在持久化里，
+        // 先懒恢复再判定，避免把已授权用户误报成「未登录」
+        seatApi.ensureTokenLoaded()
         if (!canReserveNow()) return "座位系统未登录，请先打开 App 授权"
 
         val params = resolveSegment(task.areaId, task.reserveDate)

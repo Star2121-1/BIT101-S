@@ -24,7 +24,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import javax.inject.Inject
@@ -79,6 +78,27 @@ class SeatApi @Inject constructor(
         val saved = seatLoginStatus.token.get()
         _token.value = saved
         return saved
+    }
+
+    /**
+     * 后台路径的幂等懒恢复：内存为空时从持久化补读一次；已有值立即返回。
+     *
+     * 与 [restoreToken] 的差别：后者**无条件**把内存值刷成持久化值，只在座位页 init
+     * （确认没有并发写 token）时安全。后台路径（通知到点校验、组件一键预约、
+     * 前台服务重建、组件推送）会在**冷进程**里执行 —— 那时内存 token 恒为空，
+     * 带认证的请求一律失败，表现为：签到提醒被静默丢弃、组件误报「未登录」、
+     * 监控任务被 stopAll 误杀。
+     *
+     * - **零网络**：只读 DataStore，不触发任何登录 / phpCAS 交互
+     * - **不覆盖**：compareAndSet 保证并发写入的新 token 不被旧值冲掉
+     * - **尽力而为**：持久化读取异常时保持现状 —— 后台协程结构各异
+     *   （如组件推送的 combine 收集），恢复失败绝不能连累调用方
+     */
+    suspend fun ensureTokenLoaded(): String {
+        _token.value.takeIf { it.isNotEmpty() }?.let { return it }
+        val saved = runCatching { seatLoginStatus.token.get() }.getOrNull().orEmpty()
+        if (saved.isNotEmpty()) _token.compareAndSet("", saved)
+        return _token.value
     }
 
     private val client: OkHttpClient by lazy {
@@ -228,7 +248,7 @@ class SeatApi @Inject constructor(
     suspend fun getRenegeRecords(type: Int = 1): Result<List<RenegeRecord>> = authed {
         val body = jsonBody(JSONObject().put("type", type))
         val json = JSONObject(post("/api/Member/reneges", body))
-        parseRenegeRecords(json.optJSONArray("data") ?: JSONArray())
+        parseRenegeRecords(json.requireData())
     }
 
     /**
@@ -240,14 +260,14 @@ class SeatApi @Inject constructor(
      */
     suspend fun getMySeminarReservations(): Result<List<SeminarRecord>> = authed {
         val json = JSONObject(post("/api/Member/seminar", jsonBody(JSONObject())))
-        parseSeminarRecords(json.optJSONArray("data") ?: JSONArray())
+        parseSeminarRecords(json.requireData())
     }
 
     /** 「我的预约」（有效记录）。数据源与取消预约一致。 */
     suspend fun getMyReservations(): Result<List<ReservationRecord>> = authed {
         val body = jsonBody(JSONObject().put("type", "1"))
         val json = JSONObject(post("/api/index/subscribe", body))
-        parseReservations(json.optJSONArray("data") ?: JSONArray())
+        parseReservations(json.requireData())
     }
 
     suspend fun confirmSeat(seatId: String, segment: String): Result<Boolean> = authed {

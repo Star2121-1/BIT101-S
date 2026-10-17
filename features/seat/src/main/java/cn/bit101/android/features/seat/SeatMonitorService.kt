@@ -88,6 +88,17 @@ class SeatMonitorService : Service() {
         createChannel()
         startForeground(NOTIFICATION_ID, buildNotification(0))
         scope.launch {
+            // 进程被回收后 START_STICKY 重建时内存 token 必然是空的：不恢复的话，
+            // 轮询到目标座位后的 confirm 会以「未登录」失败并触发 stopAll，
+            // 即使服务端的 JWT 仍然有效（正在跑的任务被全量误杀）
+            if (seatApi.ensureTokenLoaded().isBlank()) {
+                // 持久化里也没有可用会话：**绝不能**带空 token 把 RUNNING 任务
+                // 跑成 FAILED（那会触发 stopAll）。先停服务，等用户打开座位页
+                // 完成授权后，任务会随仓储状态重新拉起。
+                SeatLog.w(TAG, "no persisted seat token, stopping to avoid failing all tasks")
+                stopSelf()
+                return@launch
+            }
             repository.loadOnce()
             repository.tasks.collect { syncJobs(it) }
         }
