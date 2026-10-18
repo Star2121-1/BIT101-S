@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  组件配色。
+  组件配色（亮态）。
 
   ⚠️ 不用 `?attr/colorSurface` 这类主题属性：RemoteViews 在宿主（桌面）进程里
   被 inflate，主题不一定是我们 App 的，取不到正确的值，可能渲染成黑色。
   这里写固定色值（Material3 baseline 亮色），保证任何桌面下都一致。
+
+  ⚠️ 深色对应项住在 `values-night/colors.xml`（候选 A / P5-E：组件随系统深色）。
+  桌面 apply RemoteViews 时按系统深色自动取那边的值，代码里没有分支。
+  改这里的色值**必须**同步检查 values-night 对应项；
+  WidgetCourseInkTest 用同值常量把「ink 对底色的对比度契约」钉住。
 -->
 <resources>
 

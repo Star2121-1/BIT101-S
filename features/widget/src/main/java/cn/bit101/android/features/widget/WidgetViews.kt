@@ -352,20 +352,33 @@ internal object WidgetViews {
         else -> R.color.widget_text_primary
     }
 
-    /** 正文颜色：课程行走 12 色板**亮色** ink（§8.2 跨端同色；卡片恒亮），其余按状态取色。 */
+    /** 正文颜色：课程行走 12 色板 ink（亮/暗板随卡片 chrome，§8.2 跨端同色），其余按状态取色。 */
     private fun bodyColor(context: Context, line: WidgetLine): Int {
         // §8.2：课程行的正文用 12 色板的 ink —— 与课表网格的块内文字同源同值，
         // 同一门课在「课表 / 时间线 / 组件」看起来是同一个颜色。
-        // ⚠️ 固定取**亮色板** ink：ink 必须与所在底色配套（§8.2：亮态块配 ink、
-        // 暗态块配 ink-d），而组件卡片 chrome 恒为亮色（colors.xml 固定色值 +
-        // 外观切换 §10-Q6「chrome 换肤不进 v1」）—— 取暗色板 ink（浅色）画在白卡上
-        // 就是「白底白字」（实测对比度 1.22~1.48:1）。chrome 日后若随深色，这里再联动。
+        // ⚠️ ink 与卡片底色**配套**（§8.2：亮底配亮色板 ink、暗底配暗色板 ink）：
+        // 卡片底走资源亮/暗态（values[-night]/colors.xml 的 @color/widget_surface，
+        // 由宿主进程配置 = 系统深色解析）；这里的 isDark 读**同一份系统 uiMode**
+        // （Provider/Service 都在本进程），两边同源、永不失配。
+        // （历史坑 WIDGET-001：chrome 恒亮而 isDark 跟系统 → 白卡浅字 1.22~1.48:1；
+        //  候选 A / P5-E 起 chrome 随系统深色，这里同步取对应板 ink。）
         // 强调（正在上 / 马上要上）仍走 ▶ 前缀 + 加粗 + 淡色块底，不靠换色表达。
         if (line.colorIndex >= 0) {
-            return CoursePalette.inkArgb(line.colorIndex, isDark = false)
+            return CoursePalette.inkArgb(line.colorIndex, isDarkTheme(context))
         }
         return color(context, bodyColorRes(line))
     }
+
+    /**
+     * 系统是否深色。组件渲染在宿主进程，主题从**宿主配置**取（拿不到我们的
+     * CompositionLocal）；Provider/Service 都在本进程，`resources.configuration`
+     * 与桌面宿主同为系统配置，与 values-night 的解析口径一致。
+     * App 内「深色模式」三档设置不作用于组件（组件 chrome 属系统级外观）。
+     */
+    private fun isDarkTheme(context: Context): Boolean =
+        (context.resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
 
     /** 时间列：跟着状态走色，普通行与空闲行用次要色。 */
     private fun timeColor(context: Context, line: WidgetLine) =

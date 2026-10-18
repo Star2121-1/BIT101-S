@@ -60,11 +60,13 @@
 
     <!-- ===== 底部说明与动作键（widget_root.xml） ===== -->
 
-    <!-- 底部说明行：课程页的「今天 · 9月21日 周一 · 第3周」 -->
+    <!-- 底部说明行：课程页的「今天 · 9月21日 周一 · 第3周」。
+         marginTop 6→2dp（T1-c-DEF-1：末条被视口底边裁字，回收与底边距合计 7dp
+         让视口容纳整数行；见 report-t1c-b10-widget-dark.md §2.4） -->
     <style name="WidgetFooter">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:layout_marginTop">2dp</item>
         <item name="android:maxLines">1</item>
         <item name="android:ellipsize">end</item>
         <item name="android:textColor">@color/widget_text_secondary</item>

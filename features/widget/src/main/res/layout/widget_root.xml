@@ -31,7 +31,10 @@
     android:layout_height="match_parent"
     android:background="@drawable/widget_background"
     android:orientation="vertical"
-    android:padding="10dp">
+    android:paddingStart="10dp"
+    android:paddingEnd="10dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="7dp">
 
     <!-- 页签行：课程 / DDL / 动态 / 座位 / 自习 / 刷新
          ⚠️ 顺序 **必须**与 `PageKind.entries` 一致（页签按索引画、文案由代码 setTextViewText）。

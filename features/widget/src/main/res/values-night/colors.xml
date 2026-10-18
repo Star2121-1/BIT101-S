@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  组件配色的**夜态**（候选 A / P5-E：组件 chrome 随系统深色）。
+
+  与 values/colors.xml 的分工：
+  - 亮态值住在 values/colors.xml；
+  - 深态值住在这里 —— 资源级的亮/暗解析由**宿主（桌面）进程的配置**决定，
+    系统深色时桌面 apply RemoteViews 自动取这里的值（不需要任何代码分支）。
+
+  ⚠️ 与 WidgetViews.bodyColor 的耦合（P5-E 后）：课程行 ink 的 isDark 读
+  **同一份系统 uiMode**（Provider/Service 都在本进程，进程配置=系统配置），
+  与这里的解析结果永远一致——「深色卡配暗色板 ink，亮色卡配亮色板 ink」。
+
+  ⚠️ 色值口径：M3 baseline 暗色 token（widget_surface 亮值 #FFFBFE 即 M3 亮色
+  surface，对应暗色 surface = #1C1B1F）。ongoing/upcoming/urgent 是与亮态同族
+  的提亮变体（保证对 #1C1B1F ≥ 4.5:1，由 WidgetCourseInkTest 同款算法钉住）。
+-->
+<resources>
+
+    <!-- 卡片背景（亮：#FFFBFE） -->
+    <color name="widget_surface">#1C1B1F</color>
+
+    <!-- 强调色（亮：#6750A4；页签选中、行首标记、刷新键、节次前缀） -->
+    <color name="widget_accent">#D0BCFF</color>
+
+    <!-- 选中页签的底色（亮：#EADDFF） -->
+    <color name="widget_tab_selected_bg">#4F378B</color>
+
+    <!-- 选中页签的文字色（亮：#21005D） -->
+    <color name="widget_tab_selected_text">#EADDFF</color>
+
+    <!-- 未选中页签的文字色（亮：#49454F） -->
+    <color name="widget_tab_text">#CAC4D0</color>
+
+    <!-- 正文（亮：#1C1B1F） -->
+    <color name="widget_text_primary">#E6E1E5</color>
+
+    <!-- 次要文字（亮：#49454F） -->
+    <color name="widget_text_secondary">#CAC4D0</color>
+
+    <!-- 紧急（亮：#D3302F） -->
+    <color name="widget_urgent">#FFB4AB</color>
+
+    <!-- 正在上课：绿（亮：#1E8E3E） -->
+    <color name="widget_class_ongoing">#6DD58C</color>
+
+    <!-- 即将上课：橙（亮：#E8710A） -->
+    <color name="widget_class_upcoming">#FFB86B</color>
+
+    <!-- 当前时段条目的底色（亮：#1AEADDFF）：换成暗色系强调色的 10% -->
+    <color name="widget_item_highlight_bg">#1AD0BCFF</color>
+
+    <!-- 不覆盖、继承亮态的项：
+         widget_divider       #1FCAC4D0（12% 浅灰，暗底上同为可见的细分隔线）
+         widget_preview_bg    （选择器预览底，不随运行时主题） -->
+
+</resources>
