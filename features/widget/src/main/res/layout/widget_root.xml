@@ -46,25 +46,51 @@
         android:layout_height="36dp"
         android:orientation="horizontal">
 
+        <!-- 每个页签是**一对** TextView：tab_N（未选中外观）/ tab_sel_N（选中外观）。
+             底色与文字色都固化在样式的 XML 资源属性里，宿主每次重放 RemoteViews
+             都按当前系统深浅色重新解析 ⇒ 切换主题即时生效（A6）。
+             一块视图的资源属性是静态的，选中态无法“换色”，只能两块切可见性 ——
+             切换在 WidgetViews.renderTabs，颜色本身不出现在任何动作里。 -->
+
         <TextView
             android:id="@+id/tab_0"
             style="@style/WidgetTab" />
+        <TextView
+            android:id="@+id/tab_sel_0"
+            style="@style/WidgetTabSelected"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/tab_1"
             style="@style/WidgetTab" />
+        <TextView
+            android:id="@+id/tab_sel_1"
+            style="@style/WidgetTabSelected"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/tab_2"
             style="@style/WidgetTab" />
+        <TextView
+            android:id="@+id/tab_sel_2"
+            style="@style/WidgetTabSelected"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/tab_3"
             style="@style/WidgetTab" />
+        <TextView
+            android:id="@+id/tab_sel_3"
+            style="@style/WidgetTabSelected"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/tab_4"
             style="@style/WidgetTab" />
+        <TextView
+            android:id="@+id/tab_sel_4"
+            style="@style/WidgetTabSelected"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/tab_refresh"

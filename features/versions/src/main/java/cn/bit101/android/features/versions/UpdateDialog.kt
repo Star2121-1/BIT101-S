@@ -127,14 +127,30 @@ fun UpdateDialog() {
     var dismissed by rememberSaveable { mutableStateOf(false) }
 
     // 数据就绪且发现比「已忽略版本」更新的版本时自动弹出
-    // （修复点：原先 show 从未被置 true，软更新弹窗永不出现）
+    // （修复点：原先 show 从未被置 true，软更新弹窗永不出现；
+    //  真正要不要弹由下方守卫判定 —— 含「服务端号 > 装机号」与强更优先，
+    //  真值表见 UpdateLogicTest）
     LaunchedEffect(version.versionCode, ignoreVersion) {
         if (!dismissed && version.versionCode > ignoreVersion!!) {
             show = true
         }
     }
 
-    if((show && version.versionCode > ignoreVersion!!) || appVersion.versionCode < version.minVersionCode) {
+    // 提示判定（缺陷背景：原判据只有「服务端号 > 已忽略值」，从未与装机号比较，
+    // 服务端数据陈旧时会对从未忽略的用户弹「降级提示」；见 UpdateLogic 的说明）：
+    // - 强更（装机号 < minVersionCode）优先，忽略值与服务端号都不挡；
+    // - 常规提示要求「服务端号 > 装机号」且「服务端号 > 已忽略值」，
+    //   并且用户本次会话还没关过（show/dismissed 控制会话内不再打扰）。
+    val forceUpdate = UpdateLogic.isForceUpdate(
+        installedVersionCode = appVersion.versionCode,
+        minVersionCode = version.minVersionCode.toLong(),
+    )
+    val regularUpdate = UpdateLogic.hasRegularUpdate(
+        serverVersionCode = version.versionCode.toLong(),
+        installedVersionCode = appVersion.versionCode,
+        ignoredVersionCode = ignoreVersion!!,
+    )
+    if (forceUpdate || (show && regularUpdate)) {
         UpdateDialog(
             version = version,
             onDismiss = {

@@ -7,14 +7,34 @@
 -->
 <resources>
 
-    <!-- 页签：横向均分剩余宽度（refresh 固定 48dp） -->
+    <!-- 页签：横向均分剩余宽度（refresh 固定 48dp）。
+         底色与文字色都写在 **XML 资源属性**里（@drawable / @color 引用）：
+         RemoteViews 每次重放动作表都按宿主当前配置重新解析 XML 属性，
+         系统切深浅色时页签颜色即时跟变（A6 修复）。
+         选中/未选中的差异不靠“换色”（一块视图的资源属性是静态的），
+         而靠成对视图切可见性 —— 见 widget_root.xml 的 tab_N / tab_sel_N。 -->
     <style name="WidgetTab">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_height">36dp</item>
         <item name="android:layout_weight">1</item>
+        <item name="android:background">@drawable/widget_tab_normal</item>
         <item name="android:gravity">center</item>
         <item name="android:maxLines">1</item>
+        <item name="android:textColor">@color/widget_tab_text</item>
         <item name="android:textSize">15sp</item>
+    </style>
+
+    <!-- 选中页签：同几何，仅底色（圆角药丸）与文字色换成选中款。
+         ⚠️ A6 修复为什么不用 setTextAppearance(资源 id)：实测在真实宿主上不可行 ——
+         TextView.setTextAppearance(int) 没有 @RemotableViewMethod 注解，
+         RemoteViews.getMethod 在宿主重放时直接抛 ActionException「can't use method
+         with RemoteViews」，组件整块显示 "Can't load widget"（证据：
+         evidence/2026-10-19-a1/b1-actionexception-logcat.txt + b1-cant-load-widget.png）。
+         颜色走 XML 属性则是资源引用、宿主重放时按当前配置解析 —— 效果同样即时，
+         且完全不引入反射动作。 -->
+    <style name="WidgetTabSelected" parent="WidgetTab">
+        <item name="android:background">@drawable/widget_tab_selected</item>
+        <item name="android:textColor">@color/widget_tab_selected_text</item>
     </style>
 
     <!-- ===== 列表条目（widget_item.xml） ===== -->

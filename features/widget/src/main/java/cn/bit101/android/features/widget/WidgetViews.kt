@@ -42,10 +42,11 @@ internal object WidgetViews {
     /**
      * 页签槽位 id，**顺序与 `PageKind.entries` 一致，个数也必须一致**。
      *
-     * ⚠️ 这三个地方必须同时改（**加新页时最容易漏的就是这里和布局**）：
-     * ① `PageKind` 枚举 ② `widget_root.xml` 的 `tab_N` 槽位 ③ 这个数组。
+     * ⚠️ 加新页时要同时改的地方（**最容易漏的就是这里和布局**）：
+     * ① `PageKind` 枚举 ② `widget_root.xml` 的 `tab_N` 槽位
+     * ③ 这个数组 ④ 与它成对的 `tab_sel_N` 槽位和 [TAB_SEL_IDS]。
      * v1.9.54 加「自习」页时就只改了 ① —— 组件上永远看不到第 5 页。
-     * 有单测 `页签槽位数与 PageKind 一致` 守着（同时数布局与这个数组）。
+     * 有单测 `页签槽位数与 PageKind 一致` 守着（布局与代码两组 id 都数）。
      */
     private val TAB_IDS = intArrayOf(
         R.id.tab_0,
@@ -53,6 +54,22 @@ internal object WidgetViews {
         R.id.tab_2,
         R.id.tab_3,
         R.id.tab_4,
+    )
+
+    /**
+     * 选中态槽位（与 [TAB_IDS] 一一对应、同序）。
+     *
+     * 为什么每页要两块视图：选中/未选中差异（药丸底色 + 文字色）只允许出现在
+     * **XML 资源属性**里（宿主重放时按当前配置重新解析 ⇒ 切深浅色即时生效）。
+     * 一块视图的属性是静态的，换不了色，只能两块切可见性；
+     * 候选的 `setTextAppearance` 反射方案已被证实会被宿主直接拒绝（见 widget_styles.xml）。
+     */
+    private val TAB_SEL_IDS = intArrayOf(
+        R.id.tab_sel_0,
+        R.id.tab_sel_1,
+        R.id.tab_sel_2,
+        R.id.tab_sel_3,
+        R.id.tab_sel_4,
     )
 
     fun build(
@@ -90,34 +107,38 @@ internal object WidgetViews {
         pageIndex: Int,
     ) {
         TAB_IDS.forEachIndexed { i, id ->
+            val selId = TAB_SEL_IDS[i]
             // 槽位比页数多时（比如某版临时只出 4 页）把多余槽位收起来，
             // 否则会留下一个「有底色的空页签」。正常情况两者相等，见 TAB_IDS 的说明。
             if (i >= pages.size) {
                 rv.setViewVisibility(id, View.GONE)
+                rv.setViewVisibility(selId, View.GONE)
                 return@forEachIndexed
             }
-            rv.setViewVisibility(id, View.VISIBLE)
 
             val kind = pages[i].kind
             val title = pages[i].title
             val selected = i == pageIndex
 
+            // A6 修复（v1.12.0-alpha.12）：底色和文字色**不出现在任何动作里** ——
+            // 它们固化在两块视图各自的 XML 资源属性（WidgetTab / WidgetTabSelected），
+            // 宿主每次重放 RemoteViews 都按当前系统配置重新解析 ⇒ 切深浅色即时生效。
+            // 这里只发「文字 + 可见性」两类动作（都是一等 API，不走反射）：
+            // 两块都写文案，可见性决定谁出场。
+            // ⚠️ 不要改回 setTextColor/setTextAppearance：前者把解析后的 int
+            // 烤进动作表（主题切换滞后一拍，A6 原缺陷）；后者在真实宿主上直接
+            // 抛 ActionException（TextView.setTextAppearance(int) 无
+            // @RemotableViewMethod 注解），组件会整块 "Can't load widget"。
+            // 证据：evidence/2026-10-19-a1/b1-actionexception-logcat.txt
             rv.setTextViewText(id, title)
-            rv.setTextColor(
-                id,
-                color(
-                    context,
-                    if (selected) R.color.widget_tab_selected_text else R.color.widget_tab_text,
-                ),
-            )
-            // 选中态用圆角底色区分。RemoteViews 没有 setBackgroundResource，
-            // 要借 setInt(viewId, "setBackgroundResource", resId) 走反射式调用。
-            rv.setInt(
-                id,
-                "setBackgroundResource",
-                if (selected) R.drawable.widget_tab_selected else R.drawable.widget_tab_normal,
-            )
-            rv.setOnClickPendingIntent(id, pagePendingIntent(context, appWidgetId, kind))
+            rv.setTextViewText(selId, title)
+            rv.setViewVisibility(id, if (selected) View.GONE else View.VISIBLE)
+            rv.setViewVisibility(selId, if (selected) View.VISIBLE else View.GONE)
+
+            // 点击两块都挂：只有可见的那块能收到触摸，写两处省得按可见性分支。
+            val pending = pagePendingIntent(context, appWidgetId, kind)
+            rv.setOnClickPendingIntent(id, pending)
+            rv.setOnClickPendingIntent(selId, pending)
         }
     }
 
