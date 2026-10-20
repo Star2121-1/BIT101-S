@@ -37,11 +37,11 @@
     <!-- 紧急（DDL 已过期 / 24h 内到期） -->
     <color name="widget_urgent">#D3302F</color>
 
-    <!-- 正在上课：绿色 -->
-    <color name="widget_class_ongoing">#1E8E3E</color>
+    <!-- 正在上课：绿色（AA 对 #FFFBFE 4.95:1；a2 真机验收后调整，原 #1E8E3E=4.10） -->
+    <color name="widget_class_ongoing">#1A7F37</color>
 
-    <!-- 即将上课：橙色 -->
-    <color name="widget_class_upcoming">#E8710A</color>
+    <!-- 即将上课：橙色（AA 对 #FFFBFE 4.90:1；原 #E8710A=3.01） -->
+    <color name="widget_class_upcoming">#B45309</color>
 
     <!-- 列表分隔线（ListView 的 divider） -->
     <color name="widget_divider">#1FCAC4D0</color>

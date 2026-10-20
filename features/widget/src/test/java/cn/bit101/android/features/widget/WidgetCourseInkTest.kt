@@ -82,12 +82,14 @@ class WidgetCourseInkTest {
 
     @Test
     fun `chrome 文字色对卡片底的对比度契约`() {
-        // 亮态（values/colors.xml）——沿既有设计，只钉已过 AA 的项；
-        // ongoing(#1E8E3E)=4.10 / upcoming(#E8710A)=3.01 属既有设计，不在本契约收紧范围。
+        // 亮态（values/colors.xml）——a2 真机验收后把两状态色纳入 AA
+        // （原 #1E8E3E=4.10 / #E8710A=3.01 不达标，调整为 #1A7F37 / #B45309）。
         assertRatio(0xFF1C1B1F.toInt(), widgetSurface, "亮态正文")
         assertRatio(0xFF49454F.toInt(), widgetSurface, "亮态次要文字/未选中页签")
         assertRatio(0xFF6750A4.toInt(), widgetSurface, "亮态强调色")
         assertRatio(0xFFD3302F.toInt(), widgetSurface, "亮态紧急")
+        assertRatio(0xFF1A7F37.toInt(), widgetSurface, "亮态正在上课")
+        assertRatio(0xFFB45309.toInt(), widgetSurface, "亮态即将上课")
         assertRatio(0xFF21005D.toInt(), 0xFFEADDFF.toInt(), "亮态选中页签文字×选中底")
 
         // 暗态（values-night/colors.xml）——A 新增，全量 ≥ 4.5。
