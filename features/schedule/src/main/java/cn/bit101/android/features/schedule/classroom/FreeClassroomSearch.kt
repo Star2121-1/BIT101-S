@@ -395,12 +395,6 @@ internal fun FreeClassroomSearch(
         }
     }
 
-    LaunchedEffect(getBuildingTypeStatus) {
-        if (getBuildingTypeStatus is SimpleDataState.Fail) {
-            mainController.snackbar("拉取教学楼信息失败 Orz...")
-        }
-    }
-
     val getClassroomLastStatus = vm.getClassroomLastStatusLiveData.value
     LaunchedEffect(getClassroomLastStatus) {
         if (getClassroomLastStatus is SimpleState.Fail) {
@@ -441,12 +435,53 @@ internal fun FreeClassroomSearch(
         LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
             if (getBuildingTypeStatus is SimpleDataState.Loading) {
                 item { LoadingTip("正在拉取教学楼列表...") }
+            } else if (getBuildingTypeStatus is SimpleDataState.Fail) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp, 5.dp)
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                            .padding(12.dp, 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = "教学楼列表加载失败",
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            text = "可能是学校登录已过期，或网络异常。",
+                            modifier = Modifier.padding(top = 4.dp),
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                        Row(
+                            modifier = Modifier.padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            TextButton(onClick = { vm.loadBuildingTypes() }) {
+                                Text("重试")
+                            }
+                            TextButton(
+                                onClick = {
+                                    mainController.navigate(NavDest.Login) {
+                                        launchSingleTop = true
+                                    }
+                                }
+                            ) {
+                                Text("重新登录")
+                            }
+                        }
+                    }
+                }
             } else if (campusGroups.isEmpty()) {
                 item {
                     // 空态说得保守一点：以前会点名「没有获取到 XX 校区的教学楼」，
                     // 但现在列表是**所有校区**的，再点名某个校区就不准确了
                     Text(
-                        text = "没有获取到教学楼QwQ\n(确认已登录学校账号，或到设置里切换默认校区)",
+                        text = "没有获取到教学楼QwQ\n(可以到设置里切换默认校区)",
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(10.dp, 5.dp)

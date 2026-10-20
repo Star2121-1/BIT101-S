@@ -11,6 +11,7 @@ import cn.bit101.android.config.setting.base.FreeClassroomSettings
 import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.config.setting.base.TimeTableItem
 import cn.bit101.android.data.repo.base.FreeClassroomRepo
+import cn.bit101.android.data.repo.base.LoginRefreshResult
 import cn.bit101.android.data.repo.base.LoginRepo
 import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.features.common.helper.SimpleDataState
@@ -19,6 +20,7 @@ import cn.bit101.android.features.common.helper.withSimpleDataStateLiveData
 import cn.bit101.api.model.common.BuildingInfo
 import cn.bit101.api.model.common.ClassroomInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -87,7 +89,21 @@ internal class FreeClassroomSearchViewModel @Inject constructor(
     }
 
     fun loadBuildingTypes() = withSimpleDataStateLiveData(getBuildingTypeStatusLiveData) {
-        loginRepo.doOperationRequiresLogin(this::getBuildingTypesWithoutState)
+        try {
+            getBuildingTypesWithoutState()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 会话过期时只做「非交互续期」：用已保存的凭据静默重登，绝不弹出短信验证。
+            // 不走 doOperationRequiresLogin —— 它失败后会走交互式登录，可能在用户
+            // 不知情时触发学校统一认证的短信验证。静默续期失败就如实返回失败，
+            // 由 UI 给出「重试 / 重新登录」入口。
+            if (loginRepo.refreshLogin(allowInteractive = false) == LoginRefreshResult.SUCCESS) {
+                getBuildingTypesWithoutState()
+            } else {
+                throw e
+            }
+        }
     }
 
     val getClassroomsStatesMap = mutableStateMapOf<String,SimpleState>()
