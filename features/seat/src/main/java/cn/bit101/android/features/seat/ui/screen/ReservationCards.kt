@@ -29,8 +29,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import cn.bit101.android.features.seat.SeatStatusLogic
 import cn.bit101.android.features.seat.SeatViewModel
 import cn.bit101.android.features.seat.model.ReservationRecord
+import java.time.Instant
 import java.time.ZoneId
 
 /**
@@ -47,6 +49,23 @@ internal fun ReservationCard(
     now: Long,
     onCancel: () -> Unit,
 ) {
+    val phase = SeatStatusLogic.phaseOf(record)
+    val nowLocal = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDateTime()
+    val badgeText = when (phase) {
+        SeatStatusLogic.Phase.IN_USE -> "使用中"
+        SeatStatusLogic.Phase.LEAVE -> "暂离"
+        SeatStatusLogic.Phase.PENDING -> "有效"
+        SeatStatusLogic.Phase.OTHER -> record.statusName ?: "已结束"
+    }
+    val badgeColor = when {
+        phase == SeatStatusLogic.Phase.IN_USE -> Color(0xFF2BD06D)
+        phase == SeatStatusLogic.Phase.LEAVE -> Color(0xFFFF8E5D)
+        record.status == "4" -> Color(0xFF3B97FB)
+        phase == SeatStatusLogic.Phase.PENDING -> Color(0xFF2E7D32)
+        else -> Color(0xFF999999)
+    }
+    val signIn = if (record.status == "2" || record.status == "4") signInRow(record, now) else null
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -61,12 +80,12 @@ internal fun ReservationCard(
                         Text(record.areaName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                     }
                 }
-                Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFF2E7D32).copy(alpha = 0.15f)) {
+                Surface(shape = RoundedCornerShape(8.dp), color = badgeColor.copy(alpha = 0.15f)) {
                     Text(
-                        "有效",
+                        badgeText,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF2E7D32),
+                        color = badgeColor,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -81,38 +100,58 @@ internal fun ReservationCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            signInRow(record, now)?.let { (text, overdue) ->
-                Spacer(Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (overdue) MaterialTheme.colorScheme.errorContainer
-                    else MaterialTheme.colorScheme.tertiaryContainer
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Timelapse, null,
-                            modifier = Modifier.size(15.dp),
-                            tint = if (overdue) MaterialTheme.colorScheme.onErrorContainer
-                            else MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(Modifier.size(6.dp))
-                        Text(
-                            text,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium,
-                            color = if (overdue) MaterialTheme.colorScheme.onErrorContainer
-                            else MaterialTheme.colorScheme.onTertiaryContainer
-                        )
+            when {
+                phase == SeatStatusLogic.Phase.IN_USE -> {
+                    val text = SeatStatusLogic.usedText(record, nowLocal)
+                    if (text.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        ReservationStatusRow(text, urgent = false)
                     }
                 }
+                phase == SeatStatusLogic.Phase.LEAVE -> {
+                    Spacer(Modifier.height(8.dp))
+                    ReservationStatusRow(SeatStatusLogic.leaveRemainingText(record, nowLocal), urgent = true)
+                }
+                signIn != null -> {
+                    Spacer(Modifier.height(8.dp))
+                    ReservationStatusRow(signIn.first, urgent = signIn.second)
+                }
             }
-            Spacer(Modifier.height(6.dp))
-            TextButton(onClick = onCancel, enabled = !busy, modifier = Modifier.align(Alignment.End)) {
-                Text("取消预约", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
+            if (record.isActive) {
+                Spacer(Modifier.height(6.dp))
+                TextButton(onClick = onCancel, enabled = !busy, modifier = Modifier.align(Alignment.End)) {
+                    Text("取消预约", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun ReservationStatusRow(text: String, urgent: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (urgent) MaterialTheme.colorScheme.errorContainer
+        else MaterialTheme.colorScheme.tertiaryContainer
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Timelapse, null,
+                modifier = Modifier.size(15.dp),
+                tint = if (urgent) MaterialTheme.colorScheme.onErrorContainer
+                else MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                color = if (urgent) MaterialTheme.colorScheme.onErrorContainer
+                else MaterialTheme.colorScheme.onTertiaryContainer
+            )
         }
     }
 }

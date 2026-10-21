@@ -383,5 +383,7 @@ translate 变换**，实际裁的是画布 `(0,0,w,h)`，而图已经平移到 `
   `uiautomator dump`（坐标/文本）+ 截图 + 服务端脚本复现；
   `dumpsys notification` / `dumpsys activity services` 可用
 - 密码框聚焦触发 FLAG_SECURE，截屏全黑属正常，dump 仍可读文本
-- 复测脚本：`F:/Agent_Work/BIT-102/.workbuddy/tmp_cert/seatlib.py`
+- 复测脚本：`F:/Agent_Work/BIT-102/.workbuddy/archive/tools/seatlib.py`
   （登录 + 鉴权头封装，凭据走参数，不含硬编码）
+  ⚠️ 2026-10-21 更正：原路径 `.workbuddy/tmp_cert/seatlib.py` 已随 `tmp_cert/` 清理
+  （脚本迁到 `archive/tools/`），旧路径已失效。

@@ -83,7 +83,7 @@ class SeatReservationRepository @Inject constructor(
     suspend fun refresh(): Result<List<ReservationRecord>> {
         val result = seatApi.getMyReservations()
         result.onSuccess {
-            _records.value = it
+            _records.value = withLeaveSince(it)
             lastRefreshAt = System.currentTimeMillis()
             // 顺便查违约：这是**新增违约通知的唯一驱动点**，App 内刷新与组件后台刷新
             // 都会经过这里，所以不开 App 也能收到提醒。
@@ -172,6 +172,21 @@ class SeatReservationRepository @Inject constructor(
         if (System.currentTimeMillis() - lastRefreshAt < maxAgeMs) return false
         refresh()
         return true
+    }
+
+    private fun withLeaveSince(fresh: List<ReservationRecord>): List<ReservationRecord> {
+        val previous = _records.value.associateBy { it.id }
+        val now = System.currentTimeMillis()
+        return fresh.map { record ->
+            if (record.status != "6") {
+                record.copy(leaveSince = null)
+            } else {
+                val old = previous[record.id]
+                record.copy(
+                    leaveSince = if (old?.status == "6") old.leaveSince ?: now else now,
+                )
+            }
+        }
     }
 
     /** 登出 / 会话彻底失效时调用。 */

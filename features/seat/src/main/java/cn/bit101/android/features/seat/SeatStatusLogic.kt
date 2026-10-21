@@ -11,8 +11,10 @@ import cn.bit101.android.features.seat.model.isActive
 import cn.bit101.android.features.seat.model.seatNumberEquals
 import cn.bit101.android.features.widget.WidgetLine
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneId
 
 /**
  * 座位状态 → 组件行的纯逻辑。
@@ -78,6 +80,8 @@ object SeatStatusLogic {
             LEAVE_KEYWORDS.any { name.contains(it) } -> Phase.LEAVE
             IN_USE_KEYWORDS.any { name.contains(it) } -> Phase.IN_USE
             record.status == STATUS_ACTIVE -> Phase.PENDING
+            record.status == "3" && name.isBlank() -> Phase.IN_USE
+            record.status == "6" && name.isBlank() -> Phase.LEAVE
             else -> Phase.OTHER
         }
     }
@@ -159,9 +163,7 @@ object SeatStatusLogic {
             lead = "暂离",
             main = seatLabel(),
             time = timeRangeText(),
-            // 服务端不返回「什么时候离开的」，所以算不出还剩几分钟。
-            // 这里给出**规则允许的保留时长**（比编一个倒计时诚实）。
-            trail = "保留 ${leaveAllowanceMinutes(now.toLocalTime())} 分钟",
+            trail = leaveRemainingText(this, now),
             urgent = true,
         )
 
@@ -215,6 +217,16 @@ object SeatStatusLogic {
         val begin = record.beginLocalTime() ?: return ""
         if (begin.isAfter(now)) return ""      // 还没开始（例如次日预约）
         return "已用 ${durationText(Duration.between(begin, now))}"
+    }
+
+    fun leaveRemainingText(record: ReservationRecord, now: LocalDateTime): String {
+        val sinceMs = record.leaveSince
+            ?: return "保留 ${leaveAllowanceMinutes(now.toLocalTime())} 分钟"
+        val since = Instant.ofEpochMilli(sinceMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
+        val allowance = leaveAllowanceMinutes(since.toLocalTime())
+        val elapsed = Duration.between(since, now).toMinutes().coerceAtLeast(0)
+        val remaining = (allowance - elapsed).coerceAtLeast(0)
+        return if (remaining == 0L) "保留时间已到" else "剩余 $remaining 分钟"
     }
 
     /**

@@ -1,6 +1,5 @@
 package cn.bit101.android.features.seat.api
 
-import cn.bit101.android.config.user.base.SeatLoginStatus
 import cn.bit101.android.data.repo.base.SeatBookingSource
 import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.features.seat.SeatLog
@@ -18,11 +17,11 @@ import javax.inject.Singleton
 @Singleton
 class DefaultSeatBookingSource @Inject constructor(
     private val reservations: SeatReservationRepository,
-    private val seatLoginStatus: SeatLoginStatus,
+    private val seatApi: SeatApi,
 ) : SeatBookingSource {
 
     override suspend fun currentBooking(now: LocalDateTime): StudySpotLogic.Booking? {
-        val token = runCatching { seatLoginStatus.token.get() }.getOrNull()
+        val token = runCatching { seatApi.ensureTokenLoaded() }.getOrNull()
         if (token.isNullOrBlank()) return null
 
         runCatching { reservations.refreshIfStale(STALE_MS) }

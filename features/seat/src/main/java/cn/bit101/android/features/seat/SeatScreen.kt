@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,6 +31,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import cn.bit101.android.features.common.MainController
+import cn.bit101.android.features.common.SeatOpenRequest
 import cn.bit101.android.features.seat.ui.component.SmsCodeDialog
 import cn.bit101.android.features.seat.ui.screen.CasLoginScreen
 import cn.bit101.android.features.seat.ui.screen.NewTaskScreen
@@ -41,6 +43,10 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
     val navController = rememberNavController()
     val navigateToMap by viewModel.navigateToSeatMap.collectAsState()
     val showCasLogin by viewModel.casLoginFlow.collectAsState()
+    val requestedTab by SeatOpenRequest.tab.collectAsState()
+    val startRoute = remember {
+        if (requestedTab == SeatOpenRequest.TAB_TASKS) "tasks" else "new_task"
+    }
 
     // ⚠️ 导航必须放在副作用里。直接在组合期间调用 navController.navigate() 是
     // Compose 的经典坑：组合可能被打断/重跑，跳转时灵时不灵（表现为「选座按钮点了没反应」）。
@@ -85,8 +91,20 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
         return
     }
 
+    LaunchedEffect(requestedTab) {
+        val target = when (requestedTab) {
+            SeatOpenRequest.TAB_TASKS -> "tasks"
+            SeatOpenRequest.TAB_NEW_TASK -> "new_task"
+            else -> return@LaunchedEffect
+        }
+        if (navController.currentDestination?.route != target) {
+            navController.navigate(target) { launchSingleTop = true }
+        }
+        SeatOpenRequest.consume()
+    }
+
     val navEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navEntry?.destination?.route ?: "new_task"
+    val currentRoute = navEntry?.destination?.route ?: startRoute
     // 座位图是详情页：不显示「预约 / 列表」切换（它自带返回），避免三层栏叠在一起
     val isDetailPage = currentRoute.startsWith("seat_map")
 
@@ -115,7 +133,7 @@ fun SeatScreen(mainController: MainController, viewModel: SeatViewModel = hiltVi
             NavHost(
                 modifier = Modifier.fillMaxSize(),
                 navController = navController,
-                startDestination = "new_task"
+                startDestination = startRoute
             ) {
                 composable("new_task") {
                     NewTaskScreen(

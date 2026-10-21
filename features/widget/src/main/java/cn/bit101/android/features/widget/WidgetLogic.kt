@@ -21,6 +21,7 @@ import cn.bit101.android.data.school.DayPlan
 import cn.bit101.android.data.school.ExamListLogic
 import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.data.school.weekdayCn
+import cn.bit101.android.features.common.SeatOpenRequest
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -1052,10 +1053,14 @@ object WidgetLogic {
         val noticeLine = snapshot.activeNotice()?.let {
             WidgetLine(lead = "提示", main = it, muted = true)
         }
+        val seatRoute = PageShowOnNav.Seat.toPageData().value
+        val lines = snapshot.lines.map {
+            it.copy(openRoute = seatRoute, openTab = SeatOpenRequest.TAB_TASKS)
+        }
         return WidgetPage(
             kind = PageKind.SEAT,
             title = PageKind.SEAT.label,
-            items = (listOfNotNull(noticeLine) + snapshot.lines).take(MAX_ITEMS),
+            items = (listOfNotNull(noticeLine) + lines).take(MAX_ITEMS),
             emptyText = "暂无预约",
             quickReserveTaskId = snapshot.quickReserveTaskId,
         )

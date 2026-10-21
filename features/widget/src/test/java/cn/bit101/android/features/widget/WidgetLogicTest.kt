@@ -8,6 +8,7 @@ import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
 import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.features.common.SeatOpenRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -614,6 +615,21 @@ class WidgetLogicTest {
 
         assertEquals(listOf("座位 051", "座位 108"), page.items.map { it.main })
         assertTrue(page.items.first().urgent)
+    }
+
+    @Test
+    fun `座位页每行点击都去 App 的座列表`() {
+        val lines = listOf(
+            WidgetLine(lead = "已预约", main = "座位 051"),
+            WidgetLine(lead = "使用中", main = "座位 108"),
+        )
+
+        val page = WidgetLogic.seatPage(SeatWidgetSnapshot.Snapshot(lines = lines))
+
+        page.items.forEach {
+            assertEquals("seat", it.openRoute)
+            assertEquals(SeatOpenRequest.TAB_TASKS, it.openTab)
+        }
     }
 
     // ------------------------------------------------------------ 整体装配

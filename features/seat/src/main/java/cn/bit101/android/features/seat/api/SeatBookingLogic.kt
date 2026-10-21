@@ -25,7 +25,7 @@ internal object SeatBookingLogic {
         val deadline = now.plusMinutes(LEAD_MINUTES)
 
         return records.asSequence()
-            .filter { it.isActive }
+            .filter { it.isCurrent }
             .mapNotNull { record ->
                 val begin = record.beginLocalTime() ?: return@mapNotNull null
                 val end = record.endLocalTime() ?: return@mapNotNull null

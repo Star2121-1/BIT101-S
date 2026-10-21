@@ -634,7 +634,7 @@ class SeatViewModel @Inject constructor(
 
             val images = imgDeferred.await().getOrNull()
             val mineIds = mineDeferred.await().getOrNull()
-                ?.filter { it.isActive }
+                ?.filter { it.isCurrent }
                 ?.map { it.seatId }?.toSet() ?: emptySet()
 
             if (result.isSuccess) {

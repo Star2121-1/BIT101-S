@@ -16,6 +16,7 @@ import org.junit.Test
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneId
 
 /**
  * [SeatStatusLogic] 的纯逻辑单测。
@@ -37,6 +38,7 @@ class SeatStatusLogicTest {
         statusName: String? = null,
         beginTime: String = "2026-09-21 14:00:00",
         endTime: String = "2026-09-21 22:30:00",
+        leaveSince: Long? = null,
     ) = ReservationRecord(
         id = "r-$seatNo-$status",
         seatId = "900",
@@ -46,7 +48,11 @@ class SeatStatusLogicTest {
         endTime = endTime,
         status = status,
         statusName = statusName,
+        leaveSince = leaveSince,
     )
+
+    private fun epoch(at: LocalDateTime): Long =
+        at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     private fun task(
         mode: TaskMode = TaskMode.MONITOR,
@@ -86,8 +92,10 @@ class SeatStatusLogicTest {
     }
 
     @Test
-    fun `状态名缺失时按数字兜底为待签到`() {
+    fun `状态名缺失时按数字兜底`() {
         assertEquals(SeatStatusLogic.Phase.PENDING, SeatStatusLogic.phaseOf(record(status = "2")))
+        assertEquals(SeatStatusLogic.Phase.IN_USE, SeatStatusLogic.phaseOf(record(status = "3")))
+        assertEquals(SeatStatusLogic.Phase.LEAVE, SeatStatusLogic.phaseOf(record(status = "6")))
     }
 
     @Test
@@ -146,13 +154,63 @@ class SeatStatusLogicTest {
     }
 
     @Test
-    fun `暂离显示规则允许的保留时长`() {
+    fun `暂离按规则显示剩余时间`() {
+        val line = SeatStatusLogic.build(
+            listOf(
+                record(
+                    status = "7",
+                    statusName = "临时离开",
+                    leaveSince = epoch(now.minusMinutes(12)),
+                )
+            ),
+            emptyList(),
+            now,
+        ).lines.single()
+        assertEquals("暂离", line.lead)
+        assertEquals("剩余 48 分钟", line.trail)
+        assertTrue("暂离需要提醒（黄色/红色），必须标记紧急", line.urgent)
+    }
+
+    @Test
+    fun `暂离开始时间未知时退回规则保留时长`() {
         val line = SeatStatusLogic.build(
             listOf(record(status = "7", statusName = "临时离开")), emptyList(), now,
         ).lines.single()
-        assertEquals("暂离", line.lead)
         assertEquals("保留 60 分钟", line.trail)
-        assertTrue("暂离需要提醒（黄色/红色），必须标记紧急", line.urgent)
+    }
+
+    @Test
+    fun `用餐时段暂离按离开时刻延长到 120 分钟`() {
+        val at = today.atTime(12, 10)
+        val line = SeatStatusLogic.build(
+            listOf(
+                record(
+                    status = "7",
+                    statusName = "暂离",
+                    beginTime = "2026-09-21 11:00:00",
+                    leaveSince = epoch(today.atTime(11, 30)),
+                )
+            ),
+            emptyList(),
+            at,
+        ).lines.single()
+        assertEquals("剩余 80 分钟", line.trail)
+    }
+
+    @Test
+    fun `暂离保留时间到点后不再显示负数`() {
+        val line = SeatStatusLogic.build(
+            listOf(
+                record(
+                    status = "7",
+                    statusName = "暂离",
+                    leaveSince = epoch(now.minusMinutes(61)),
+                )
+            ),
+            emptyList(),
+            now,
+        ).lines.single()
+        assertEquals("保留时间已到", line.trail)
     }
 
     @Test

@@ -26,6 +26,7 @@ data class ReservationRecord(
     val endTime: String = "",
     val status: String = "",
     val statusName: String? = null,
+    val leaveSince: Long? = null,
 ) {
     /**
      * 预约时段的开始时刻；解析失败返回 null。
@@ -77,6 +78,9 @@ data class ReservationRecord(
 
     /** 是否仍未签到（status 2 即有效未签到）。 */
     val isActive: Boolean get() = status == "2"
+
+    val isCurrent: Boolean
+        get() = status == "2" || status == "3" || status == "4" || status == "6"
 }
 
 internal fun parseDateTime(raw: String): LocalDateTime? = runCatching {

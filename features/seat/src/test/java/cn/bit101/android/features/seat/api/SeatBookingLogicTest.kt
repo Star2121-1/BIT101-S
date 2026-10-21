@@ -71,13 +71,35 @@ class SeatBookingLogicTest {
     }
 
     @Test
-    fun `非有效状态的预约不提示`() {
+    fun `已结束或取消的预约不提示`() {
         assertNull(
             SeatBookingLogic.pick(
-                listOf(record("2026-10-21 09:30:00", "2026-10-21 11:30:00", status = "3")),
+                listOf(record("2026-10-21 09:30:00", "2026-10-21 11:30:00", status = "8")),
                 now,
             )
         )
+    }
+
+    @Test
+    fun `使用中和暂离的预约都会提示`() {
+        listOf("3", "6").forEach { status ->
+            val booking = SeatBookingLogic.pick(
+                listOf(record("2026-10-21 09:30:00", "2026-10-21 11:30:00", status = status)),
+                now,
+            )
+
+            assertEquals("status=$status", "09:30-11:30", booking?.timeText)
+        }
+    }
+
+    @Test
+    fun `已开始但未签到的预约会提示`() {
+        val booking = SeatBookingLogic.pick(
+            listOf(record("2026-10-21 09:30:00", "2026-10-21 11:30:00", status = "4")),
+            now,
+        )
+
+        assertEquals("09:30-11:30", booking?.timeText)
     }
 
     @Test

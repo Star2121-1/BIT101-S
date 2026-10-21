@@ -11,10 +11,13 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import cn.bit101.android.config.setting.base.PageShowOnNav
 import cn.bit101.android.config.setting.base.ScheduleTabs
 import cn.bit101.android.config.setting.base.ThemeSettings
+import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.config.user.base.LoginStatus
 import cn.bit101.android.features.common.GotoRequest
+import cn.bit101.android.features.common.SeatOpenRequest
 import cn.bit101.android.features.nfc.NfcShortcut
 import cn.bit101.android.features.nfc.NfcTap
 import cn.bit101.android.features.theme.BIT101Theme
@@ -157,8 +160,16 @@ class MainActivity : ComponentActivity() {
         val route = intent?.getStringExtra(EXTRA_GOTO)
 
         if (!route.isNullOrBlank()) {
-            val tab = intent.getIntExtra(EXTRA_TAB, TAB_NONE)
-                .takeIf { ScheduleTabs.isValid(it) }
+            val rawTab = intent.getIntExtra(EXTRA_TAB, TAB_NONE)
+            if (route == PageShowOnNav.Seat.toPageData().value &&
+                rawTab == SeatOpenRequest.TAB_TASKS
+            ) {
+                SeatOpenRequest.request(SeatOpenRequest.TAB_TASKS)
+                GotoRequest.request(route)
+                return
+            }
+
+            val tab = rawTab.takeIf { ScheduleTabs.isValid(it) }
             val focus = intent.getStringExtra(EXTRA_FOCUS)?.takeIf { it.isNotBlank() }
 
             GotoRequest.request(route, tab = tab, key = focus)
