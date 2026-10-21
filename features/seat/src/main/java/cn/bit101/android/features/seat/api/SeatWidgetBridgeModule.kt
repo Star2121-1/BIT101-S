@@ -1,5 +1,6 @@
 package cn.bit101.android.features.seat.api
 
+import cn.bit101.android.data.repo.base.SeatBookingSource
 import cn.bit101.android.features.notify.SeatReminderSource
 import cn.bit101.android.features.widget.SeatWidgetBridge
 import dagger.Binds
@@ -31,4 +32,7 @@ abstract class SeatWidgetBridgeModule {
 
     @Binds
     abstract fun bindSeatReminderSource(impl: DefaultSeatReminderSource): SeatReminderSource
+
+    @Binds
+    abstract fun bindSeatBookingSource(impl: DefaultSeatBookingSource): SeatBookingSource
 }

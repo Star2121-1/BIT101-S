@@ -1,4 +1,4 @@
-package cn.bit101.android.features.schedule.course
+package cn.bit101.android.data.school
 
 import cn.bit101.android.data.database.entity.ExamScheduleEntity
 import org.junit.Assert.assertEquals

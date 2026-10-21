@@ -54,6 +54,7 @@ internal object WidgetViews {
         R.id.tab_2,
         R.id.tab_3,
         R.id.tab_4,
+        R.id.tab_5,
     )
 
     /**
@@ -70,6 +71,7 @@ internal object WidgetViews {
         R.id.tab_sel_2,
         R.id.tab_sel_3,
         R.id.tab_sel_4,
+        R.id.tab_sel_5,
     )
 
     fun build(

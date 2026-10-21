@@ -619,7 +619,7 @@ class WidgetLogicTest {
     // ------------------------------------------------------------ 整体装配
 
     @Test
-    fun `build 固定返回五页且顺序为 课程-DDL-动态-座位-自习`() {
+    fun `build 固定返回六页且顺序为 课程-DDL-动态-座位-自习-考试`() {
         val data = WidgetLogic.build(
             courses = emptyList(),
             ddls = emptyList(),
@@ -628,12 +628,19 @@ class WidgetLogicTest {
             firstDay = firstDay,
         )
 
-        assertEquals(5, data.pages.size)
+        assertEquals(6, data.pages.size)
         assertEquals(
             // ⚠️ 页序即页签顺序，用户 2026-09-23 要求「DDL 与动态挨着」：
             // 顺序变了没关系 —— 页号现在存的是**页名**（WidgetPageStore），老用户不会串页。
-            // ⚠️ 新页只能**追加在末尾**，见 PageKind.STUDY 的说明。
-            listOf(PageKind.COURSE, PageKind.DDL, PageKind.ACTIVITY, PageKind.SEAT, PageKind.STUDY),
+            // ⚠️ 新页只能**追加在末尾**，见 PageKind.STUDY / PageKind.EXAM 的说明。
+            listOf(
+                PageKind.COURSE,
+                PageKind.DDL,
+                PageKind.ACTIVITY,
+                PageKind.SEAT,
+                PageKind.STUDY,
+                PageKind.EXAM,
+            ),
             data.pages.map { it.kind },
         )
     }

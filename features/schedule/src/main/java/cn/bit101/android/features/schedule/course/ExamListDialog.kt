@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import cn.bit101.android.config.setting.base.hm
 import cn.bit101.android.data.database.entity.ExamScheduleEntity
+import cn.bit101.android.data.school.ExamListLogic
 import cn.bit101.android.features.common.helper.SimpleState
 import java.time.LocalDateTime
 

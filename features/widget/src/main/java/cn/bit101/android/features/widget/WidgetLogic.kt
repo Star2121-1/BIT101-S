@@ -4,6 +4,7 @@ import cn.bit101.android.config.setting.base.AppRoutes
 import cn.bit101.android.config.setting.base.PageShowOnNav
 import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.config.setting.base.courseTimeText
+import cn.bit101.android.config.setting.base.hm
 import cn.bit101.android.config.common.FocusKeys
 import cn.bit101.android.config.setting.base.ScheduleTabs
 import cn.bit101.android.config.setting.base.sectionEnd
@@ -11,16 +12,19 @@ import cn.bit101.android.config.setting.base.sectionStart
 import cn.bit101.android.config.setting.base.toPageData
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.DDLScheduleEntity
+import cn.bit101.android.data.database.entity.ExamScheduleEntity
 import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.ddl.DdlSource
 import cn.bit101.android.data.schedule.CourseColorLogic
 import cn.bit101.android.data.school.CourseWeekdayLogic
 import cn.bit101.android.data.school.DayPlan
+import cn.bit101.android.data.school.ExamListLogic
 import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.data.school.weekdayCn
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 
@@ -123,6 +127,14 @@ enum class PageKind(val label: String) {
      * 数字留给 App 内那张卡（现拉现算），见 [StudySpotLogic.coarseTitle]。
      */
     STUDY("自习"),
+
+    /**
+     * 考试安排（未结束的）。
+     *
+     * 同样**追加在末尾**：枚举顺序 = 页签顺序，插队会让老用户页号错位。
+     * 数据来自本地考试库，与 App 内考试列表同源。
+     */
+    EXAM("考试"),
 }
 
 /**
@@ -476,6 +488,7 @@ object WidgetLogic {
     fun build(
         courses: List<CourseScheduleEntity>,
         ddls: List<DDLScheduleEntity>,
+        exams: List<ExamScheduleEntity> = emptyList(),
         seat: SeatWidgetSnapshot.Snapshot = SeatWidgetSnapshot.Snapshot(),
         today: LocalDate,
         now: LocalDateTime,
@@ -530,8 +543,72 @@ object WidgetLogic {
                 ),
                 freeLine = studySpotLine,
             ),
+            // ⚠️ 追加在末尾，保持 PageKind.entries 与页签槽位一致
+            examPage(exams = exams, now = now, loggedIn = bit101LoggedIn),
         )
     )
+
+    /**
+     * 考试页：只显示**未结束**的考试（进行中 + 未来）。
+     *
+     * 已结束的考试对「出门前扫一眼」没有意义，还会把下一场挤出屏幕；
+     * 需要看历史的用户进 App 的考试列表（那里保留完整排序）。
+     *
+     * ⚠️ 与课程页同样按登录态整页替换：本地考试库可能是几天前同步的，
+     * 会话失效后继续展示会让人以为考试安排还是最新的。
+     */
+    fun examPage(
+        exams: List<ExamScheduleEntity>,
+        now: LocalDateTime,
+        loggedIn: Boolean = true,
+    ): WidgetPage {
+        if (!loggedIn) {
+            return WidgetPage(
+                kind = PageKind.EXAM,
+                title = PageKind.EXAM.label,
+                emptyText = "暂无考试安排",
+                loginPrompt = loginPromptOf(PageKind.EXAM, loggedIn = false),
+            )
+        }
+
+        val items = ExamListLogic.sorted(exams, now)
+            .filter { ExamListLogic.status(it, now) != ExamListLogic.Status.FINISHED }
+            .map { exam ->
+                WidgetLine(
+                    lead = examLead(exam, now),
+                    main = exam.name,
+                    time = "${exam.beginTime.format(HH_MM)}-${exam.endTime.format(HH_MM)}",
+                    trail = exam.classroom,
+                    urgent = ExamListLogic.status(exam, now) == ExamListLogic.Status.ONGOING,
+                    openRoute = PageShowOnNav.Schedule.toPageData().value,
+                    openTab = ScheduleTabs.COURSE,
+                )
+            }
+
+        return WidgetPage(
+            kind = PageKind.EXAM,
+            title = PageKind.EXAM.label,
+            items = items,
+            emptyText = "暂无考试安排",
+        )
+    }
+
+    private val HH_MM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+    /** 考试行的日期标记：今天 / 明天 / 后天 / 6/12（跨年才带年份）。 */
+    private fun examLead(exam: ExamScheduleEntity, now: LocalDateTime): String {
+        val dayDiff = ChronoUnit.DAYS.between(now.toLocalDate(), exam.date)
+        return when (dayDiff) {
+            0L -> "今天"
+            1L -> "明天"
+            2L -> "后天"
+            else -> if (exam.date.year == now.year) {
+                "${exam.date.monthValue}/${exam.date.dayOfMonth}"
+            } else {
+                "${exam.date.year}/${exam.date.monthValue}/${exam.date.dayOfMonth}"
+            }
+        }
+    }
 
     /**
      * 「现在去哪儿自习」页 —— 最多两行，且刻意不含数量。

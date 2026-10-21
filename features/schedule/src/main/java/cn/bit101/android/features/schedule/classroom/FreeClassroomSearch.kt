@@ -558,20 +558,34 @@ internal fun FreeClassroomSearch(
                                                 vm.refreshClassroomInfoIfInvalid(building.buildingIndex)
                                             }
 
-                                            val currentClassrooms =
-                                                currentClassroomData[building.buildingIndex]
-                                                    .orEmpty()
-                                                    .filter {
-                                                        !hideBusyClassroom.value || vm.isFreeNow(
-                                                            it,
-                                                            nowTime,
-                                                            freeMinutesThreshold ?: 0
-                                                        )
-                                                    }
+                                            val allClassrooms =
+                                                currentClassroomData[building.buildingIndex].orEmpty()
+
+                                            val isFreeNow: (ClassroomBusyData) -> Boolean = {
+                                                vm.isFreeNow(
+                                                    it,
+                                                    nowTime,
+                                                    freeMinutesThreshold ?: 0
+                                                )
+                                            }
+
+                                            val currentClassrooms = allClassrooms.filter {
+                                                !hideBusyClassroom.value || isFreeNow(it)
+                                            }
 
                                             if (currentClassrooms.isEmpty()) {
+                                                // 有教室但全被「隐藏非空闲」过滤掉时，说清楚是整栋在课，
+                                                // 而不是像加载失败；原本一间都没有才保留旧文案
+                                                val emptyText = if (allClassrooms.isEmpty()) null
+                                                else ClassroomEmptyStateLogic.text(
+                                                    ClassroomEmptyStateLogic.summarize(
+                                                        allClassrooms,
+                                                        isFreeNow,
+                                                    )
+                                                )
+
                                                 Text(
-                                                    text = "未找到教室 :(",
+                                                    text = emptyText ?: "未找到教室 :(",
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .padding(10.dp, 5.dp)
@@ -585,7 +599,7 @@ internal fun FreeClassroomSearch(
                                                 ClassroomList(
                                                     currentClassrooms = currentClassrooms,
                                                     nowTime = nowTime,
-                                                    isFreeNow = { vm.isFreeNow(it, nowTime, freeMinutesThreshold ?: 0) },
+                                                    isFreeNow = isFreeNow,
                                                 )
                                             }
                                         }

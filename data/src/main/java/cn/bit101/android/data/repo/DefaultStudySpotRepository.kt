@@ -8,6 +8,7 @@ import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.repo.base.CoursesRepo
 import cn.bit101.android.data.repo.base.FreeClassroomRepo
+import cn.bit101.android.data.repo.base.SeatBookingSource
 import cn.bit101.android.data.repo.base.StudySpotRepository
 import cn.bit101.android.data.repo.base.TeachingAdjustmentRepo
 import cn.bit101.android.data.school.CampusLocations
@@ -51,6 +52,8 @@ internal class DefaultStudySpotRepository @Inject constructor(
     private val coursesRepo: CoursesRepo,
     private val teachingAdjustmentRepo: TeachingAdjustmentRepo,
     private val courseScheduleSettings: CourseScheduleSettings,
+    /** 座位预约来源：实现在 features:seat，未登录/失败时返回 null（见接口约定）。 */
+    private val seatBookingSource: SeatBookingSource,
 ) : StudySpotRepository {
 
     /** 一栋楼的原始教室列表 —— 缓存的就是它（与节次无关）。 */
@@ -72,6 +75,8 @@ internal class DefaultStudySpotRepository @Inject constructor(
         /** 距离的参考点；`null` = 不给距离 */
         val reference: StudySpotLogic.Reference?,
         val lastClassroom: String?,
+        /** 进行中 / 1 小时内开始的座位预约；`null` = 没有或取不到 */
+        val booking: StudySpotLogic.Booking?,
     )
 
     @Volatile
@@ -85,9 +90,7 @@ internal class DefaultStudySpotRepository @Inject constructor(
             at = l.arriveAt,
             table = l.table,
             course = l.course,
-            // ⚠️ 座位预约传 null：解析格式在 features:seat，data 层拿不到
-            //    （分支本身已实现且有单测，接上了传进来即可）
-            booking = null,
+            booking = l.booking,
             rooms = l.rooms,
             reference = l.reference,
         )
@@ -97,7 +100,7 @@ internal class DefaultStudySpotRepository @Inject constructor(
         StudySpotLogic.suggest(
             now = now.toLocalTime(),
             course = l.course,
-            booking = null,
+            booking = l.booking,
             buildings = l.buildings,
             lastClassroom = l.lastClassroom,
         )
@@ -143,6 +146,14 @@ internal class DefaultStudySpotRepository @Inject constructor(
         val ownClassrooms = allCourses.mapNotNull { it.classroom.takeIf { c -> c.isNotBlank() } }.toSet()
         val raw = fetchRooms(ownClassrooms)
 
+        // 正在上课时「去哪儿自习」本来就没意义（见 planOf 的第一条分支），
+        // 不必为了一行用不上的文案去碰座位接口
+        val booking = if (course == null) {
+            runCatching { seatBookingSource.currentBooking(now) }.getOrNull()
+        } else {
+            null
+        }
+
         Loaded(
             table = table,
             course = course,
@@ -151,6 +162,7 @@ internal class DefaultStudySpotRepository @Inject constructor(
             buildings = raw.flatMap { freeGroupsOf(it.building, it.rooms, section, table) },
             reference = referenceOf(course, lastClassroom),
             lastClassroom = lastClassroom,
+            booking = booking,
         )
     }
 

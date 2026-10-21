@@ -107,6 +107,9 @@ class WidgetRepository @Inject constructor(
         // 分区（未完成 / 已完成）与条数上限在 WidgetLogic 里处理。
         val ddls = runCatching { ddlRepo.getAllDDL().first() }.getOrDefault(emptyList())
 
+        // 考试与 DDL 一样来自本地库，重绘不打网络
+        val exams = runCatching { coursesRepo.getExamsFromLocal().first() }.getOrDefault(emptyList())
+
         val seat = runCatching { SeatWidgetSnapshot.read(context) }.getOrDefault(SeatWidgetSnapshot.Snapshot())
 
         val eclass = eclassData(fresh = forceEclass)
@@ -141,6 +144,7 @@ class WidgetRepository @Inject constructor(
         return WidgetLogic.build(
             courses = courses,
             ddls = ddls,
+            exams = exams,
             seat = seat,
             today = today,
             now = now,

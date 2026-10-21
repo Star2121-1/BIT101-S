@@ -21,7 +21,8 @@
         <item name="android:gravity">center</item>
         <item name="android:maxLines">1</item>
         <item name="android:textColor">@color/widget_tab_text</item>
-        <item name="android:textSize">15sp</item>
+        <!-- 6 页签 + 刷新在 250dp 最小宽度下要给「课程」留够宽度，15sp 会顶到边 -->
+        <item name="android:textSize">13sp</item>
     </style>
 
     <!-- 选中页签：同几何，仅底色（圆角药丸）与文字色换成选中款。

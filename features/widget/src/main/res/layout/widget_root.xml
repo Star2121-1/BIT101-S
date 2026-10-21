@@ -36,7 +36,7 @@
     android:paddingTop="10dp"
     android:paddingBottom="7dp">
 
-    <!-- 页签行：课程 / DDL / 动态 / 座位 / 自习 / 刷新
+    <!-- 页签行：课程 / DDL / 动态 / 座位 / 自习 / 考试 / 刷新
          ⚠️ 顺序 **必须**与 `PageKind.entries` 一致（页签按索引画、文案由代码 setTextViewText）。
          ⚠️ 槽位数 **必须**等于 `PageKind.entries.size` —— 加了新页却不加槽位，
          新页就**永远不会出现**（v1.9.54 加「自习」页时就漏在这里，桌面组件上看不到）。
@@ -89,6 +89,14 @@
             style="@style/WidgetTab" />
         <TextView
             android:id="@+id/tab_sel_4"
+            style="@style/WidgetTabSelected"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tab_5"
+            style="@style/WidgetTab" />
+        <TextView
+            android:id="@+id/tab_sel_5"
             style="@style/WidgetTabSelected"
             android:visibility="gone" />
 
