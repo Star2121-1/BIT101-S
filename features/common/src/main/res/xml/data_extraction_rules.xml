@@ -1,19 +1,101 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  云备份 / 换机直传规则（Android 12+ / API 31+ 用这个文件；更早的 API 走 backup_rules.xml）。
+
+  ## 判据：什么能上云，什么不能
+
+  **能**：用户自己配的东西（外观、提醒开关、页序、节次时间表）—— 换手机时不想重配一遍。
+
+  **不能**：
+  1. **凭据** —— 学号 / 密码 / seatlib JWT / 学校会话 cookie / fake-cookie。
+     加密存储的密钥在 Android Keystore 里（**不参与备份**），所以就算备份了也解不开；
+     但「解不开」不等于「该备份」—— 明确排除才是真的没有。
+  2. **状态** —— 当天取消预约次数、提醒去重记录：换设备后继承旧状态会造成
+     「次数被占」或「同一条提醒不再发」。
+  3. **缓存与快照** —— 课表/DDL 数据库、自习推荐快照、座位组件快照、成绩快照：
+     都能联网重建，而且成绩快照里是**原始分数**（通知里刻意只放课名不放分数，
+     这里也不能把它顺手传上云）。
+
+  ## ⚠️ 改这个文件前先看 AOSP 的实现，别凭记忆
+
+  - `sharedpref` 的 path **写不写 `.xml` 都一样**：AOSP 的
+    `FullBackup.parseIncludeExcludeTag` 会自动补一条 `.xml` 后缀的规则
+    （`android.app.backup.FullBackup`）。
+  - `path="."` 表示**整个域**（`extractCanonicalFile` 直接 `new File(domain, ".")`）。
+  - `database` 域会自动带上同名的 `-journal` / `-wal`，不用手写。
+  - `root` 域是 app 数据目录**减去**其它域的子目录（`f/` `sp/` `db/` 各自成树），
+    所以这里不需要动它。
+
+  ## ⚠️⚠️ 规则**必须**写在 `<cloud-backup>` / `<device-transfer>` 里面
+
+  AOSP `FullBackup.parseNewBackupSchemeFromXmlLocked` 的循环是：
+
+      if (event != START_TAG || !configSection.equals(parser.getName())) continue;
+
+  ⇒ 写在 `<data-extraction-rules>` **顶层**的 exclude 会被**静默跳过**：
+  不报错、不崩、只是规则不生效 ⇒ 凭据照旧上云。
+  这是「看着配了、其实没配」的最危险写法，别犯。
+
+  ## ⚠️ `<device-transfer>` 这段不能省
+
+  AOSP：`if (isSectionPresent) { mIsUsingNewScheme = true; return; }` ——
+  **新配置里没有对应 section 时，设备直传（D2D）会完全不看 `backup_rules.xml`**。
+  ⇒ 少写这一段 = 换机直传时全量备份。
 -->
 <data-extraction-rules>
+
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
+        <!-- 凭据：学号 / 密码 / seatlib JWT（加密存储，Keystore 绑定，备份出来也解不开） -->
+        <exclude domain="sharedpref" path="encrypted_store" />
+        <!-- 凭据：学校会话 cookie（活凭据，跨设备继承 = 别人的会话） -->
+        <exclude domain="sharedpref" path="cookie" />
+
+        <!-- 状态：当天已用掉的取消预约次数（官方规则每天 2 次） -->
+        <exclude domain="sharedpref" path="seat_cancels" />
+        <!-- 状态：提醒去重记录（否则同一条提醒在新设备上不再发 / 或反过来重复发） -->
+        <exclude domain="sharedpref" path="notify_sent" />
+        <exclude domain="sharedpref" path="lib_due_alert" />
+        <exclude domain="sharedpref" path="netflow_alert" />
+
+        <!-- 缓存快照：自习推荐 / 座位组件（都能重算，且含用户的学习状态） -->
+        <exclude domain="sharedpref" path="study_spot_snapshot" />
+        <exclude domain="sharedpref" path="seat_widget_snapshot" />
+        <!-- 隐私：保存的校园卡号 -->
+        <exclude domain="sharedpref" path="bit101_nfc_card" />
+
+        <!-- 成绩快照：内容是 `{去重键: 成绩原文}` —— 原始分数，不能上云 -->
+        <exclude domain="file" path="score_snapshot.json" />
+        <!-- logcat 导出：里面可能有学号与请求片段 -->
+        <exclude domain="external" path="logcat" />
+
+        <!-- 数据库：课表 / DDL / 教学调整等缓存（联网可重建），也含用户的学习数据 -->
+        <exclude domain="database" path="." />
+
+        <!--
+          保留（不写 exclude = 会备份）：
+          - file/datastore/settings.preferences_pb —— 外观、提醒开关、页序、节次时间表
+          - sharedpref/bit101_widget_page —— 组件页签选择
+          - sharedpref/bit101_nfc_tap —— NFC 贴纸配置
         -->
     </cloud-backup>
+
     <!--
-    <device-transfer>
-        <include .../>
-        <exclude .../>
-    </device-transfer>
+      换机直传（手机 → 手机）用同一套规则：
+      直传同样会把数据落到新设备上，凭据同样不该跟着走。
     -->
+    <device-transfer>
+        <exclude domain="sharedpref" path="encrypted_store" />
+        <exclude domain="sharedpref" path="cookie" />
+        <exclude domain="sharedpref" path="seat_cancels" />
+        <exclude domain="sharedpref" path="notify_sent" />
+        <exclude domain="sharedpref" path="lib_due_alert" />
+        <exclude domain="sharedpref" path="netflow_alert" />
+        <exclude domain="sharedpref" path="study_spot_snapshot" />
+        <exclude domain="sharedpref" path="seat_widget_snapshot" />
+        <exclude domain="sharedpref" path="bit101_nfc_card" />
+        <exclude domain="file" path="score_snapshot.json" />
+        <exclude domain="external" path="logcat" />
+        <exclude domain="database" path="." />
+    </device-transfer>
+
 </data-extraction-rules>

@@ -1,13 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older that API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+  备份规则（Android 11 及更早 / API 30 及更早用这个文件；API 31+ 走 data_extraction_rules.xml）。
+
+  排除清单与 [data_extraction_rules.xml] **完全一致**（两份必须同步改，否则
+  老系统上凭据就上云了）。
+
+  判据与逐条理由见 data_extraction_rules.xml 的注释。
+
+  ⚠️ AOSP 行为备忘（`android.app.backup.FullBackup`）：
+  - `sharedpref` 的 path 写不写 `.xml` 都一样（系统会自动补一条 `.xml` 规则）；
+  - `path="."` = 整个域；
+  - `database` 域会自动带上 `-journal` / `-wal`。
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+
+    <!-- 凭据：学号 / 密码 / seatlib JWT -->
+    <exclude domain="sharedpref" path="encrypted_store" />
+    <!-- 凭据：学校会话 cookie -->
+    <exclude domain="sharedpref" path="cookie" />
+
+    <!-- 状态：当天已用掉的取消预约次数 -->
+    <exclude domain="sharedpref" path="seat_cancels" />
+    <!-- 状态：提醒去重记录 -->
+    <exclude domain="sharedpref" path="notify_sent" />
+    <exclude domain="sharedpref" path="lib_due_alert" />
+    <exclude domain="sharedpref" path="netflow_alert" />
+
+    <!-- 缓存快照 -->
+    <exclude domain="sharedpref" path="study_spot_snapshot" />
+    <exclude domain="sharedpref" path="seat_widget_snapshot" />
+    <!-- 隐私：保存的校园卡号 -->
+    <exclude domain="sharedpref" path="bit101_nfc_card" />
+
+    <!-- 成绩快照：原始分数 -->
+    <exclude domain="file" path="score_snapshot.json" />
+    <!-- logcat 导出 -->
+    <exclude domain="external" path="logcat" />
+
+    <!-- 数据库：课表 / DDL 缓存，联网可重建 -->
+    <exclude domain="database" path="." />
+
 </full-backup-content>
