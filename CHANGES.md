@@ -8,6 +8,7 @@
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| `v1.12.0-alpha.20` | 10-22 | 备份规则落地：学号/密码/会话 cookie/成绩快照/logcat 导出不再随云备份上云；`fake_cookie` 从明文存储迁进加密存储，换机后用户设置（外观/提醒/页序）仍能留住 |
 | `v1.12.0-alpha.19` | 10-22 | release 包的 logcat 不再外泄用户内容：评论正文、被复制的文本、整条评论对象、借阅记录、举报正文、URL 全部只在 debug 打 |
 | `v1.12.0-alpha.18` | 10-22 | 座位状态口径补齐：状态 4「预约开始提醒」不再漏掉签到倒计时与提醒；加密偏好项从「一次快照」改成真流（登录后学号不再停在旧值）；提醒去重改同步落盘 |
 | `v1.12.0-alpha.17` | 10-21 | 「座」页的预约卡片按状态渲染：使用中显示已用时长、暂离显示按规则算出的剩余时间；签到提示与取消按钮按状态收窄 |
@@ -25,6 +26,100 @@
 | `v1.9.54` | 10-12 | 「现在去哪儿自习」上线 |
 
 > 更早的段落在下方依次排列（`v1.9.53` → `2026-08-29`）。
+
+## 2026-10-22 v1.12.0-alpha.20（功能线 1021）备份规则：凭据与状态不再上云
+
+**没有新模块、没有新页面** ⇒ 只加补丁位。功能线号段继续 `1001+`（`docs/versioning.md`）。
+
+### 一、问题：`allowBackup` + 空规则 = 全量上云
+
+`app/src/main/AndroidManifest.xml` 写着 `android:allowBackup="true"`，而
+`features/common/src/main/res/xml/backup_rules.xml` 与 `data_extraction_rules.xml`
+**都是 IDE 生成的空模板**（里面还留着 `TODO` 注释，一个 include/exclude 都没有）。
+
+⇒ 规则为空 = **什么都不排除** ⇒ 学号、密码、seatlib JWT、学校会话 cookie、
+`fake_cookie`、成绩快照、logcat 导出文件、整个数据库，全部会被备份到 Google 云。
+
+外部评审 G5 组（`AUTH-005` + `BUILD-004` + `PRIV-007` 合并）也点了这一条
+（判 P2，标注「非 P1，列此备查」）。
+
+### 二、为什么不能只排除加密存储就完事
+
+`fake_cookie` 是**明文**存在 `settings.preferences_pb`（DataStore）里的，
+而它和「用户设置」（外观、提醒开关、页序、节次时间表）**挤在同一个文件**。
+DataStore 的 preferences 是**一个 protobuf 文件，不能按 key 排除** ⇒ 二选一：
+
+- 排除整个文件 ⇒ 换手机后用户设置全丢（外观是这轮开发的核心卖点）
+- 把 `fake_cookie` 挪走 ⇒ 文件变成纯用户设置，可放心备份
+
+⇒ 选后者。`fake_cookie` 本身也该是加密的（它是 BIT101 站点的**活凭据**，
+注入 WebView 的 localStorage），这一挪顺带把它从明文升级成了密文。
+
+### 三、改动
+
+| 位置 | 改动 |
+|---|---|
+| `config/.../UserDataStore.kt` | `fakeCookie` 从 `PreferencesDataStoreItem`（明文 DataStore）改成 `EncryptedPreferencesItem`；新增一次性幂等迁移 |
+| `config/.../UserDataStoreMigration.kt` | **新增**：迁移的两条判定规则（纯函数，可单测） |
+| `config/src/test/.../UserDataStoreMigrationTest.kt` | **新增** 6 条用例 |
+| `features/common/res/xml/data_extraction_rules.xml` | API 31+ 的云备份 / 换机直传规则 |
+| `features/common/res/xml/backup_rules.xml` | API 30 及更早的全量备份规则（两份**必须同步**） |
+
+**排除清单**（`domain` / `path`）：
+
+| 域 | 排除 | 为什么 |
+|---|---|---|
+| sharedpref | `encrypted_store` | 学号 / 密码 / seatlib JWT（加密存储，Keystore 绑定，备份出来也解不开） |
+| sharedpref | `cookie` | 学校会话 cookie（**活凭据**，跨设备继承 = 别人的会话） |
+| sharedpref | `seat_cancels` | 当天已用掉的取消次数（官方规则每天 2 次）⇒ 换设备后别把次数占住 |
+| sharedpref | `notify_sent` / `lib_due_alert` / `netflow_alert` | 提醒去重记录 ⇒ 换设备后同一条提醒要么不再发、要么重复发 |
+| sharedpref | `study_spot_snapshot` / `seat_widget_snapshot` | 缓存快照（可重算，且含用户的学习状态） |
+| sharedpref | `bit101_nfc_card` | 保存的校园卡号（隐私） |
+| file | `score_snapshot.json` | 内容是 `{去重键: 成绩原文}` —— **原始分数**。通知里刻意只放课名不放分数，这里也不能顺手把它传上云 |
+| external | `logcat` | logcat 导出文件里可能有学号与请求片段 |
+| database | `.`（整个域） | 课表 / DDL / 教学调整等缓存，联网可重建，也含用户的学习数据 |
+
+**保留**（不写 exclude = 会备份）：`file/datastore/settings.preferences_pb`（用户设置）、
+`sharedpref/bit101_widget_page`（组件页签选择）、`sharedpref/bit101_nfc_tap`（NFC 贴纸配置）。
+
+### 四、⚠️ 改这类文件必须先读 AOSP，别凭记忆
+
+这一轮踩了两个坑，都是**静默失效**（不报错、不崩、只是规则不生效）：
+
+1. **规则必须写在 `<cloud-backup>` / `<device-transfer>` 里面。**
+   AOSP `FullBackup.parseNewBackupSchemeFromXmlLocked` 的循环是
+   `if (event != START_TAG || !configSection.equals(parser.getName())) continue;`
+   ⇒ 写在 `<data-extraction-rules>` **顶层**的 exclude 会被**静默跳过**。
+2. **`<device-transfer>` 这段不能省。**
+   AOSP：`if (isSectionPresent) { mIsUsingNewScheme = true; return; }`
+   ⇒ 新配置里没有对应 section 时，**设备直传会完全不看 `backup_rules.xml`** ⇒ 全量备份。
+
+另外两条已核实的语义（写进注释了）：`sharedpref` 的 path **写不写 `.xml` 都一样**
+（`parseIncludeExcludeTag` 会自动补一条 `.xml` 规则）；`path="."` = 整个域
+（`extractCanonicalFile` 直接 `new File(domain, ".")`）。
+
+### 五、一次性迁移（`UserDataStoreMigration`，幂等）
+
+1. **旧明文 `fake_cookie` 搬进加密存储** —— 加密存储里已有值就**不搬**
+   （否则一次「老用户升级后恰好登出过」就会用旧值盖掉新签发的凭据）；
+   写之前再确认一次加密存储仍为空（期间可能刚登录过）。
+2. **删掉旧明文 key** —— 无论搬没搬成都要删：**留着它就等于继续把它备份上云**。
+3. **幽灵登录态自愈** —— 换了设备后学号没跟过来（加密存储不参与备份），
+   但 `login_status` 会跟着设置文件被恢复成 `true` ⇒ 界面显示「已登录」、
+   实际什么都做不了 ⇒ `sid` 为空时把 `login_status` / `login_web_vpn` 重置为 false。
+   （只在「确实为 true」时才写，否则每次冷启动都白写一次 DataStore。）
+
+迁移在 `UserDataStore` 构造时于后台协程里跑：幂等、失败也只是「旧明文还在」，
+不影响任何功能 ⇒ 不阻塞 App 启动。
+
+### 六、验证
+
+- `:config:test` / `:data:test` 全绿；`UserDataStoreMigrationTest` 6 条；
+  `DefaultLoginRepoTest`（用了 `loginStatus.fakeCookie.get()`）不受影响。
+- **全量 `test` + `assembleRelease` + `assembleDebug`：BUILD SUCCESSFUL**。
+- ⚠️ **未验**：真机上「装包 → 触发备份 → 看备份内容里没有凭据」这一环**没做**
+  （需要设备与备份传输；`adb backup` 在 API 31+ 已停用）。
+  本轮验证的是**规则写法正确**（照 AOSP 源码逐条核对），不是**端到端效果**。
 
 ## 2026-10-22 v1.12.0-alpha.19（功能线 1020）release 包不再把用户内容写进 logcat
 
