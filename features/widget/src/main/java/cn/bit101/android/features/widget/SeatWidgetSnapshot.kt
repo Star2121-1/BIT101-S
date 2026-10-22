@@ -118,6 +118,9 @@ object SeatWidgetSnapshot {
         put("urgent", urgent)
         put("muted", muted)
         highlight?.let { put("highlight", it.name) }
+        // 倒计时：存**截止时刻**而不是算好的分钟数 ⇒ 组件渲染时现算，不受 10 分钟快照间隔影响
+        countdownDeadlineAt?.let { put("countdownDeadlineAt", it) }
+        countdownExpiredText?.let { put("countdownExpiredText", it) }
     }
 
     private fun JSONObject.toWidgetLine() = WidgetLine(
@@ -129,5 +132,7 @@ object SeatWidgetSnapshot {
         muted = optBoolean("muted", false),
         highlight = optString("highlight").takeIf { it.isNotBlank() }
             ?.let { name -> runCatching { ClassState.valueOf(name) }.getOrNull() },
+        countdownDeadlineAt = if (has("countdownDeadlineAt")) optLong("countdownDeadlineAt") else null,
+        countdownExpiredText = optString("countdownExpiredText").takeIf { it.isNotBlank() },
     )
 }

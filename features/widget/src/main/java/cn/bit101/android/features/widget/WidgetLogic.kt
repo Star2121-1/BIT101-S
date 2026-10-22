@@ -6,6 +6,7 @@ import cn.bit101.android.config.setting.base.TimeTable
 import cn.bit101.android.config.setting.base.courseTimeText
 import cn.bit101.android.config.setting.base.hm
 import cn.bit101.android.config.common.FocusKeys
+import cn.bit101.android.config.common.durationText
 import cn.bit101.android.config.setting.base.ScheduleTabs
 import cn.bit101.android.config.setting.base.sectionEnd
 import cn.bit101.android.config.setting.base.sectionStart
@@ -22,6 +23,7 @@ import cn.bit101.android.data.school.ExamListLogic
 import cn.bit101.android.data.school.StudySpotLogic
 import cn.bit101.android.data.school.weekdayCn
 import cn.bit101.android.features.common.SeatOpenRequest
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -191,7 +193,61 @@ data class WidgetLine(
      * 标题行只作为分区标识：次要色、没有第二行、**不可点**。
      */
     val header: Boolean = false,
+
+    /**
+     * 倒计时**截止时刻**（epoch 毫秒）；null = [trail] 里的数字不需要实时刷新。
+     *
+     * ## 为什么需要它
+     *
+     * 座位模块每 **10 分钟**才写一次快照（`SeatWidgetPublisher.REFRESH_INTERVAL_MS`），
+     * 组件只读快照 ⇒ 快照里算好的「剩余 48 分钟」会**卡住最多 10 分钟**。
+     * 而这两种场景卡 10 分钟是有实际后果的：
+     * - **暂离**：保留期到点自动释放座位并记违约 1 次 ⇒ 看错可能白跑一趟或违约
+     * - **签到**：窗口只有 60 分钟，10 分钟占了 1/6
+     *
+     * ⇒ 快照存**截止时刻**，组件**渲染时现算**剩余分钟数。
+     *
+     * ⚠️ 组件与座位模块**不共享**这套规则（widget 不依赖 seat），
+     * 所以规则全在座位侧算好，组件侧只做「按时刻算差值 + 替换占位符」这一件机械活。
+     */
+    val countdownDeadlineAt: Long? = null,
+
+    /**
+     * 倒计时**到期后**显示的文案（如「保留时间已到」「签到已超时」）；null = 沿用 [trail]。
+     *
+     * 为什么要单独一个字段：快照是陈旧的，渲染时截止时刻可能**已经过去**
+     * （组件还没等到下一次刷新）⇒ 这时算出来是负数 ⇒ 不能显示「剩余 -3 分钟」。
+     */
+    val countdownExpiredText: String? = null,
 )
+
+/**
+ * 倒计时占位符：**剩余的总分钟数**。
+ *
+ * 座位侧把 [WidgetLine.trail] 写成「剩余 {m} 分钟」这样的**模板**，
+ * 组件渲染时把它替换成「距离 [WidgetLine.countdownDeadlineAt] 还有多少分钟」。
+ *
+ * ⚠️ 只用**分钟**、不区分「小时 + 分」：
+ * 组件是「扫一眼」的东西，分钟数够用；而 App 里的座位卡片是用户主动去看的地方，
+ * 用「1 小时 20 分」这种友好格式。两处**表示的是同一个截止时刻**，
+ * 只是详略不同 —— 别为了让两边字面一致而改 App 侧的格式。
+ *
+ * ⚠️ 约定写在 widget 模块（座位模块依赖 widget ⇒ 方向对），
+ * 但**填充规则归座位侧管** —— widget 不该知道「暂离保留 60 分钟」这种事。
+ */
+const val COUNTDOWN_MINUTES_PLACEHOLDER = "{m}"
+
+/**
+ * 倒计时占位符：**时长文本**（`42 分钟` / `1 小时 5 分`）。
+ *
+ * 与 [COUNTDOWN_MINUTES_PLACEHOLDER] 的区别：一个是**总分钟数**，一个是**说成人话的时长**。
+ * 座位侧按场景挑一个用（两者不会同时出现在一行里）：
+ * - 保留期（最多 120 分钟）⇒ 用 `{m}`，显示「剩余 48 分钟」
+ * - 次日预约的签到 ⇒ 用 `{d}`，显示「剩 12 小时刷卡」而不是「剩 720 分钟刷卡」
+ *
+ * ⚠️ 措辞格式由 `config` 的 `durationText` 提供（**共用一份**，别在 widget 里另写）。
+ */
+const val COUNTDOWN_DURATION_PLACEHOLDER = "{d}"
 
 /**
  * 一节课相对于「现在」的状态。
@@ -278,6 +334,40 @@ object WidgetLogic {
     /** 连续节次对应的时间段文本，如 `09:55-12:20`（实现见 config 的 courseTimeText）。 */
     fun courseTimeText(table: TimeTable, startSection: Int, endSection: Int): String =
         cn.bit101.android.config.setting.base.courseTimeText(table, startSection, endSection)
+
+    // ------------------------------------------------------------ 倒计时（现算）
+
+    /**
+     * 倒计时文本：把 [WidgetLine.trail] 里的占位符换成**现算**的分钟数。
+     *
+     * ## 为什么组件要现算
+     *
+     * 座位模块每 10 分钟才写一次快照 ⇒ 快照里算好的「剩余 48 分钟」会**卡住最多 10 分钟**。
+     * 而暂离保留期到点会**释放座位并记违约**、签到窗口只有 60 分钟 ⇒ 这 10 分钟有实际后果。
+     * ⇒ 快照存**截止时刻**，组件渲染时现算。
+     *
+     * ## 这里的职责边界
+     *
+     * widget **不依赖** seat 模块 ⇒ 它不该知道「暂离保留 60 分钟」这类规则。
+     * 所以规则全在座位侧算好（座位侧把 trail 写成带占位符的模板），
+     * 这里只做两件机械活：① 按时刻算差值 ② 替换占位符。
+     *
+     * ⚠️ 放在纯逻辑层（而不是 `WidgetViews`）是为了**能在 JVM 单测里验** ——
+     * RemoteViews 绑定跑不了单测，所以「可能出错的判断」必须下沉到这里。
+     *
+     * @param now 当前时刻（epoch 毫秒）
+     */
+    fun countdownText(line: WidgetLine, now: Long): String {
+        val deadline = line.countdownDeadlineAt ?: return line.trail
+        // 快照是陈旧的 ⇒ 渲染时截止时刻可能已经过去 ⇒ 不能显示「剩余 -3 分钟」
+        if (now >= deadline) return line.countdownExpiredText ?: line.trail
+        val minutes = (deadline - now) / 60_000L
+        return line.trail
+            // {d} = 时长文本（`42 分钟` / `1 小时 5 分`）—— 次日预约的签到倒计时要用它
+            .replace(COUNTDOWN_DURATION_PLACEHOLDER, durationText(Duration.ofMinutes(minutes)))
+            // {m} = 总分钟数 —— 保留期这类「本来就用分钟说」的场合用它
+            .replace(COUNTDOWN_MINUTES_PLACEHOLDER, minutes.toString())
+    }
 
     // ------------------------------------------------------------ 一天的时间轴
 

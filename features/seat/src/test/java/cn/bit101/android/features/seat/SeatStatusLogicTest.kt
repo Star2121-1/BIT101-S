@@ -115,7 +115,8 @@ class SeatStatusLogicTest {
             listOf(record(status = "4", statusName = "预约开始提醒")), emptyList(), now,
         ).lines.single()
         assertEquals("预约开始提醒", line.lead)
-        assertEquals("剩 48 分钟刷卡", line.trail)
+        // 组件存的是**模板**（分钟数由组件渲染时现算）
+        assertEquals("剩 {d}刷卡", line.trail)
         assertTrue("过了签到时限就是违约，必须标紧急", line.urgent)
     }
 
@@ -134,14 +135,18 @@ class SeatStatusLogicTest {
         assertEquals("已预约", line.lead)
         assertEquals("座位 018", line.main)
         assertEquals("14:00-22:30", line.time)
-        assertEquals("剩 48 分钟刷卡", line.trail)
+        // 组件存的是**模板**，分钟数由组件渲染时现算（快照每 10 分钟才写一次）
+        assertEquals("剩 {d}刷卡", line.trail)
+        // 截止时刻 = 15:00，组件拿它算「还剩几分钟」
+        assertEquals(epoch(today.atTime(15, 0)), line.countdownDeadlineAt)
     }
 
     @Test
     fun `签到超时明确说超时而不是给负数`() {
         val late = today.atTime(16, 0)
         val line = SeatStatusLogic.build(listOf(record()), emptyList(), late).lines.single()
-        assertEquals("签到已超时", line.trail)
+        // 组件侧按截止时刻判断：已过期 ⇒ 显示过期文案，而不是「剩 -30 分钟」
+        assertEquals("签到已超时", line.countdownExpiredText)
     }
 
     @Test
@@ -150,7 +155,10 @@ class SeatStatusLogicTest {
         val rec = record(beginTime = "2026-09-22 08:00:00", endTime = "2026-09-22 22:30:00")
         val line = SeatStatusLogic.build(listOf(rec), emptyList(), today.atTime(21, 0)).lines.single()
         // 预约开始 08:00 + 60 分钟 = 09:00，与「次日 9:00 前」一致
-        assertEquals("剩 12 小时刷卡", line.trail)
+        // ⚠️ 组件存的是**模板**：{d} 由组件渲染时替换成时长文本
+        //（12 小时 ⇒ 「剩 12 小时刷卡」，而不是「剩 720 分钟刷卡」）
+        assertEquals("剩 {d}刷卡", line.trail)
+        assertEquals(epoch(tomorrow.atTime(9, 0)), line.countdownDeadlineAt)
     }
 
     // ------------------------------------------------------------ 使用中 / 暂离
@@ -188,7 +196,10 @@ class SeatStatusLogicTest {
             now,
         ).lines.single()
         assertEquals("暂离", line.lead)
-        assertEquals("剩余 48 分钟", line.trail)
+        // 组件存的是**模板**（分钟数由组件渲染时现算）
+        assertEquals("剩余 {m} 分钟", line.trail)
+        // 保留期截止 = 离开时刻 + 60 分钟（14:12 - 12 分 = 14:00 离开 → 15:00 到点）
+        assertEquals(epoch(today.atTime(15, 0)), line.countdownDeadlineAt)
         assertTrue("暂离需要提醒（黄色/红色），必须标记紧急", line.urgent)
     }
 
@@ -197,7 +208,9 @@ class SeatStatusLogicTest {
         val line = SeatStatusLogic.build(
             listOf(record(status = "7", statusName = "临时离开")), emptyList(), now,
         ).lines.single()
+        // 还没观察到暂离时刻 ⇒ 只能给规则说明，没有倒计时可算
         assertEquals("保留 60 分钟", line.trail)
+        assertNull("没有离开时刻就没有截止时刻", line.countdownDeadlineAt)
     }
 
     @Test
@@ -215,7 +228,9 @@ class SeatStatusLogicTest {
             emptyList(),
             at,
         ).lines.single()
-        assertEquals("剩余 80 分钟", line.trail)
+        assertEquals("剩余 {m} 分钟", line.trail)
+        // 11:30 离开（用餐时段）→ 保留 120 分钟 → 13:30 到点
+        assertEquals(epoch(today.atTime(13, 30)), line.countdownDeadlineAt)
     }
 
     @Test
@@ -231,7 +246,8 @@ class SeatStatusLogicTest {
             emptyList(),
             now,
         ).lines.single()
-        assertEquals("保留时间已到", line.trail)
+        // 组件侧按截止时刻判断：已过期 ⇒ 显示过期文案，而不是「剩 -1 分钟」
+        assertEquals("保留时间已到", line.countdownExpiredText)
     }
 
     @Test

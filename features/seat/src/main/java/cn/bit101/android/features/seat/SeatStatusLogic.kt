@@ -9,6 +9,8 @@ import cn.bit101.android.features.seat.model.TaskMode
 import cn.bit101.android.features.seat.model.TaskStatus
 import cn.bit101.android.features.seat.model.isActive
 import cn.bit101.android.features.seat.model.seatNumberEquals
+import cn.bit101.android.features.widget.COUNTDOWN_DURATION_PLACEHOLDER
+import cn.bit101.android.features.widget.COUNTDOWN_MINUTES_PLACEHOLDER
 import cn.bit101.android.features.widget.WidgetLine
 import java.time.Duration
 import java.time.Instant
@@ -183,7 +185,9 @@ object SeatStatusLogic {
             lead = "暂离",
             main = seatLabel(),
             time = timeRangeText(),
-            trail = leaveRemainingText(this, now),
+            trail = leaveTemplate(now),
+            countdownDeadlineAt = leaveDeadlineAt(),
+            countdownExpiredText = LEAVE_EXPIRED_TEXT,
             urgent = true,
         )
 
@@ -191,7 +195,9 @@ object SeatStatusLogic {
             lead = "已预约",
             main = seatLabel(),
             time = timeRangeText(),
-            trail = signInCountdownText(this, now),
+            trail = signInTemplate(),
+            countdownDeadlineAt = signInDeadlineAt(now),
+            countdownExpiredText = SIGN_IN_EXPIRED_TEXT,
         )
 
         // 「预约开始提醒」：已经开始、还没刷卡 ⇒ 倒计时是这一行唯一有用的信息。
@@ -201,7 +207,9 @@ object SeatStatusLogic {
             lead = statusName ?: "预约开始提醒",
             main = seatLabel(),
             time = timeRangeText(),
-            trail = signInCountdownText(this, now),
+            trail = signInTemplate(),
+            countdownDeadlineAt = signInDeadlineAt(now),
+            countdownExpiredText = SIGN_IN_EXPIRED_TEXT,
             urgent = true,
         )
 
@@ -227,16 +235,76 @@ object SeatStatusLogic {
         }
     }
 
+    // ------------------------------------------------------------------ 组件倒计时
+
     /**
-     * 签到倒计时文案，如 `剩 42 分钟刷卡`。
+     * 组件用的**倒计时模板**（带占位符），由组件在渲染时替换成现算的分钟数。
      *
-     * ⚠️ 已超时必须明说「签到已超时」而不是给负数 —— 见 [ReservationRecord.signInDeadline]。
+     * ## 为什么组件不直接存「剩余 48 分钟」
+     *
+     * 座位模块每 **10 分钟**才写一次组件快照（`SeatWidgetPublisher.REFRESH_INTERVAL_MS`），
+     * 组件只读快照 ⇒ 写死的分钟数会**卡住最多 10 分钟**。
+     * 而这两种场景卡 10 分钟是有实际后果的：
+     * - **暂离**：保留期到点自动释放座位并记违约 1 次 ⇒ 看错可能白跑一趟
+     * - **签到**：窗口只有 60 分钟，10 分钟占了 1/6
+     *
+     * ⇒ 快照存**截止时刻**（[WidgetLine.countdownDeadlineAt]），组件现算。
+     *
+     * ⚠️ widget 模块**不依赖**座位模块 ⇒ 规则全在这里算好，
+     * 组件侧只做「按时刻算差值 + 替换占位符」这一件机械活。
      */
-    fun signInCountdownText(record: ReservationRecord, now: LocalDateTime): String {
-        val deadline = record.signInDeadline(now) ?: return ""
-        if (!deadline.isAfter(now)) return "签到已超时"
-        return "剩 ${durationText(Duration.between(now, deadline))}刷卡"
+    /**
+     * 签到倒计时模板。
+     *
+     * ⚠️ 用 `{d}`（**时长文本**）而不是 `{m}`（总分钟数）：
+     * 次日预约的签到截止是「次日 9:00」，距今可能十几小时 ⇒
+     * 显示「剩 12 小时刷卡」而不是「剩 720 分钟刷卡」。
+     */
+    private fun ReservationRecord.signInTemplate(): String =
+        // ⚠️ 必须用 `${}` 花括号：Kotlin 的标识符可以包含汉字 ⇒ `$VAR刷卡` 会被解析成
+        // 一个叫「VAR刷卡」的变量 ⇒ Unresolved reference
+        "剩 ${COUNTDOWN_DURATION_PLACEHOLDER}刷卡"
+
+    /**
+     * 暂离的倒计时模板。
+     *
+     * ⚠️ 用 `{m}`（**总分钟数**）而不是 `{d}`：保留期本来就用分钟说
+     * （「剩余 48 分钟」），而且最多 120 分钟 ⇒ 不会出现「1 小时 30 分」这种别扭形式。
+     *
+     * ⚠️ `leaveSince` 未知（还没观察到暂离）时给的是**规则说明**而不是倒计时
+     * （「保留 60 分钟」）⇒ 这时 [leaveDeadlineAt] 返回 null ⇒ 组件侧不刷新它。
+     */
+    private fun ReservationRecord.leaveTemplate(now: LocalDateTime): String {
+        if (leaveSince == null) return "保留 ${leaveAllowanceMinutes(now.toLocalTime())} 分钟"
+        return "剩余 $COUNTDOWN_MINUTES_PLACEHOLDER 分钟"
     }
+
+    /**
+     * 签到截止时刻（epoch 毫秒）；拿不到时返回 null（不显示倒计时）。
+     *
+     * ⚠️ 用**传入的 now** 而不是真实当前时间 ⇒ 单测可确定性地断言。
+     */
+    private fun ReservationRecord.signInDeadlineAt(now: LocalDateTime): Long? =
+        signInDeadline(now)?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
+
+    /**
+     * 暂离保留期的截止时刻（epoch 毫秒）。
+     *
+     * = 「首次观察到暂离的时刻」+「当时的保留时长」。
+     * ⚠️ 允许时长按**离开时刻**判定（不是当前时刻）⇒ 跨过用餐时段边界也不会变。
+     */
+    private fun ReservationRecord.leaveDeadlineAt(): Long? {
+        val sinceMs = leaveSince ?: return null
+        val since = Instant.ofEpochMilli(sinceMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
+        val deadline = since.plusMinutes(leaveAllowanceMinutes(since.toLocalTime()).toLong())
+        return deadline.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    }
+
+    /** 暂离保留期到点后的文案。 */
+    const val LEAVE_EXPIRED_TEXT = "保留时间已到"
+
+    /** 签到超时后的文案。 */
+    const val SIGN_IN_EXPIRED_TEXT = "签到已超时"
 
     /**
      * 已用时长：`已用 1 小时 20 分`。
@@ -273,13 +341,7 @@ object SeatStatusLogic {
     }
 
     /** 时长 → `1 小时 20 分` / `42 分钟`。 */
-    fun durationText(d: Duration): String {
-        val total = d.toMinutes().coerceAtLeast(0)
-        if (total < 60) return "$total 分钟"
-        val h = total / 60
-        val m = total % 60
-        return if (m == 0L) "$h 小时" else "$h 小时 $m 分"
-    }
+    fun durationText(d: Duration): String = cn.bit101.android.config.common.durationText(d)
 
     /** `"2026-09-21 14:03:27"` → `14:03`；拿不到返回空串。 */
     private fun String.timePart(): String {

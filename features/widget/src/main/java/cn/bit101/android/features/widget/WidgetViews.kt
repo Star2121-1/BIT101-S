@@ -289,11 +289,14 @@ internal object WidgetViews {
         )
 
         // 第 2 行（时间 + 地点，靠右）：两者都空时整行隐藏，否则留一条空行白占高度
-        val hasMeta = line.time.isNotBlank() || line.trail.isNotBlank()
+        // ⚠️ 倒计时行的 trail 是**模板**（「剩余 {m} 分钟」），非空 ⇒ 这里天然成立；
+        // 但仍显式带上 countdownDeadlineAt，避免将来 trail 改成空串时整行被吞。
+        val hasMeta = line.time.isNotBlank() || line.trail.isNotBlank() ||
+            line.countdownDeadlineAt != null
         rv.setViewVisibility(R.id.item_meta, if (hasMeta) View.VISIBLE else View.GONE)
         rv.setTextViewText(R.id.item_time, line.time)
         rv.setTextColor(R.id.item_time, timeColor(context, line))
-        rv.setTextViewText(R.id.item_trail, line.trail)
+        rv.setTextViewText(R.id.item_trail, WidgetLogic.countdownText(line, nowMillis()))
 
         // 条目的点击语义：**打开 App 并跳到某页**（openRoute，可选 openTab / focusKey）。
         // 组件里不再有「勾选」—— 一个 collection 只能挂一个点击模板，
@@ -314,6 +317,9 @@ internal object WidgetViews {
         }
         return rv
     }
+
+    /** 当前时刻（epoch 毫秒）—— 单独一个函数是为了**单测能注入固定时刻**。 */
+    internal fun nowMillis(): Long = System.currentTimeMillis()
 
     /**
      * 行文本：`▶ 标记  正文`。
