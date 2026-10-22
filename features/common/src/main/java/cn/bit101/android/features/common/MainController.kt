@@ -41,7 +41,9 @@ class MainController(
     }
 
     fun copyText(cm: ClipboardManager, text: AnnotatedString) {
-        Log.i("copyText", text.text)
+        // ⚠️ 只在 debug 打：被复制的**内容可能是用户的私密信息**（评语、成绩、联系方式），
+        // release 的 logcat 任何有 root 的应用都能读 ⇒ 不该留。
+        if (BuildConfig.DEBUG) Log.i("copyText", text.text)
         cm.setText(text)
         snackbar(message = "已复制")
     }

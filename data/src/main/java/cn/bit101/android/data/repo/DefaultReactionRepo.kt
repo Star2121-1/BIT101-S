@@ -1,6 +1,7 @@
 package cn.bit101.android.data.repo
 
 import android.util.Log
+import cn.bit101.android.data.BuildConfig
 import cn.bit101.android.data.net.base.APIManager
 import cn.bit101.android.data.repo.base.ReactionRepo
 import cn.bit101.api.model.common.Comment
@@ -19,7 +20,8 @@ internal class DefaultReactionRepo @Inject constructor(
     suspend fun like(obj: String) = withContext(Dispatchers.IO) {
         val res = api.reaction.postLike(PostLikeDataModel.Body(obj))
 
-        Log.i("DefaultReactionRepo", res.errorBody()?.string().toString())
+        // ⚠️ 只在 debug 打：errorBody 可能带用户内容（昵称、正文片段）
+        if (BuildConfig.DEBUG) Log.i("DefaultReactionRepo", res.errorBody()?.string().toString())
         res.body() ?: throw Exception("like error")
     }
 
@@ -44,14 +46,17 @@ internal class DefaultReactionRepo @Inject constructor(
             imageMids = ArrayList(images),
         ))
 
-        Log.i("sendComment", PostCommentDataModel.Body(
-            obj = obj,
-            text = text,
-            replyUid = replyUid,
-            anonymous = anonymous,
-            imageMids = ArrayList(images),
-        ).toString())
-        Log.i("sendComment", res.body().toString())
+        // ⚠️ 只在 debug 打：**用户写的评论正文**与服务器回包都不该出现在 release 的 logcat 里
+        if (BuildConfig.DEBUG) {
+            Log.i("sendComment", PostCommentDataModel.Body(
+                obj = obj,
+                text = text,
+                replyUid = replyUid,
+                anonymous = anonymous,
+                imageMids = ArrayList(images),
+            ).toString())
+            Log.i("sendComment", res.body().toString())
+        }
 
         res.body() ?: throw Exception("send comment error")
     }

@@ -33,6 +33,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import cn.bit101.android.features.common.BuildConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
@@ -59,7 +60,10 @@ private fun LikeContent(
 
     val points = remember(like) { mutableListOf<Offset>() }
 
-    Log.i("LikeContent", "size: $size, offset: $offset, like: $like, process: $process")
+    // ⚠️ 只在 debug 打：这是每次重组都会走一遍的排障日志，release 里纯属噪音
+    if (BuildConfig.DEBUG) {
+        Log.i("LikeContent", "size: $size, offset: $offset, like: $like, process: $process")
+    }
 
     val centerOffset = Offset(size.width / 2f, size.height / 2f)
 

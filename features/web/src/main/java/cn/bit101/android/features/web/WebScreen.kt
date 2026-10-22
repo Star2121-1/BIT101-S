@@ -80,7 +80,7 @@ internal fun WebContent(
         }
     }
     val themeIsDark = LocalThemeIsDark.current
-    Log.i("WebScreen", "themeIsDark: $themeIsDark")
+    if (BuildConfig.DEBUG) Log.i("WebScreen", "themeIsDark: $themeIsDark")
 
     WebView(
         state = state,
@@ -95,7 +95,8 @@ internal fun WebContent(
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
 
-                Log.i("WebScreen", "onPageStarted: $url")
+                // ⚠️ 只在 debug 打：URL 的 query 里可能带 token / 学号
+                if (BuildConfig.DEBUG) Log.i("WebScreen", "onPageStarted: $url")
 
                 scope.launch {
                     // 切换主题模式

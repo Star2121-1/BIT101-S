@@ -21,11 +21,18 @@ import javax.inject.Provider
 /**
  * Android 的 Logger，用于在 API 模块使用 Android 的 Log
  */
+/**
+ * Android 侧的 Logger：API 模块统一用它而不是直接用 Android 的 Log
+ *
+ * ⚠️ **debug 才真正写 logcat**（外部评审 R-3）：这些日志的正文可能含学号、
+ * cookie、响应片段；release 的 logcat 任何有 root 的应用都能读 ⇒ 不该留。
+ * 保留方法签名是为了**调用点不用改**（logger 是接口，api 模块不依赖 Android）。
+ */
 private val androidLogger = object : Logger {
-    override fun err(tag: String?, msg: String) { Log.e(tag, msg) }
-    override fun warn(tag: String?, msg: String) { Log.w(tag, msg) }
-    override fun info(tag: String?, msg: String) { Log.i(tag, msg) }
-    override fun debug(tag: String?, msg: String) { Log.d(tag, msg) }
+    override fun err(tag: String?, msg: String) { if (BuildConfig.DEBUG) Log.e(tag, msg) }
+    override fun warn(tag: String?, msg: String) { if (BuildConfig.DEBUG) Log.w(tag, msg) }
+    override fun info(tag: String?, msg: String) { if (BuildConfig.DEBUG) Log.i(tag, msg) }
+    override fun debug(tag: String?, msg: String) { if (BuildConfig.DEBUG) Log.d(tag, msg) }
 }
 
 internal class DefaultAPIManager @Inject constructor(

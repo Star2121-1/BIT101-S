@@ -8,6 +8,7 @@
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| `v1.12.0-alpha.19` | 10-22 | release 包的 logcat 不再外泄用户内容：评论正文、被复制的文本、整条评论对象、借阅记录、举报正文、URL 全部只在 debug 打 |
 | `v1.12.0-alpha.18` | 10-22 | 座位状态口径补齐：状态 4「预约开始提醒」不再漏掉签到倒计时与提醒；加密偏好项从「一次快照」改成真流（登录后学号不再停在旧值）；提醒去重改同步落盘 |
 | `v1.12.0-alpha.17` | 10-21 | 「座」页的预约卡片按状态渲染：使用中显示已用时长、暂离显示按规则算出的剩余时间；签到提示与取消按钮按状态收窄 |
 | `v1.11.9` | 10-14 | 未验项收口：v1.11.2 的降级渲染上了真机；`CourseWeekdayLogic`（提醒+自习共用的调休判断）补上第一条测试，组件那份重复实现收敛成一份 |
@@ -24,6 +25,51 @@
 | `v1.9.54` | 10-12 | 「现在去哪儿自习」上线 |
 
 > 更早的段落在下方依次排列（`v1.9.53` → `2026-08-29`）。
+
+## 2026-10-22 v1.12.0-alpha.19（功能线 1020）release 包不再把用户内容写进 logcat
+
+**没有新模块、没有新页面** ⇒ 只加补丁位。功能线号段继续 `1001+`（`docs/versioning.md`）。
+
+### 一、问题：release 包的 logcat 里有用户内容
+
+外部评审 R-3 指出「`BuildConfig.DEBUG` 门控的重灾区是 `ApiLog`，草案只改了 3 处」。
+核下来**确实还有一批**：`data` / `features` 里有一批 `Log.i` 直接把**用户内容**打了出来，
+而 release 包的 logcat 任何有 root 的应用都能读。
+
+逐条列出打的是什么（不是「日志太多」，是**打的是用户的东西**）：
+
+| 位置 | 打的是什么 | 为什么敏感 |
+|---|---|---|
+| `data/DefaultReactionRepo` | **用户写的评论正文** + 服务器回包 | 评论是用户自己写的内容 |
+| `data/DefaultManageRepo` | 举报请求的 errorBody | 举报正文是用户写的 |
+| `data/DefaultLibBorrowRepo` | 借阅记录条数 + 异常信息 | 借阅记录是隐私（看了什么书、什么时候还）；异常信息可能含学号 |
+| `features/common/MainController.copyText` | **被复制的文本全文** | 复制的可能是评语、成绩、联系方式 |
+| `features/poster/CommentUtils` | **整条 Comment 对象**（含昵称与正文） | 同上 |
+| `features/web/WebScreen` | 页面 URL | query 里可能带 token / 学号 |
+| `data/DefaultAPIManager.androidLogger` | API 模块的**全部**日志 | 底层库可能带 cookie / 响应片段 |
+| `features/map/MapViewModel` | 瓦片请求错误 | 噪音 |
+| `features/common/.../LikeIconButton`、`AnnotatedText` | 动画尺寸 / 手势 | 纯排障噪音（每次重组都打） |
+
+### 二、改法
+
+统一按 `BuildConfig.DEBUG` 门控（仓库已有先例：`data` / `features:seat` / `features:widget` / `features:notify` 都开了 `buildConfig true`）。
+本轮给 `features:common` / `features:poster` / `features:web` / `features:map` **四个模块补开** `buildConfig true`
+（AGP 8 起 library 模块默认关闭，不显式开就拿不到 `BuildConfig`）。
+
+`DefaultAPIManager.androidLogger` 四个方法全部加门控 —— **方法签名不变**，
+因为 `api` 模块不依赖 Android（`Logger` 是接口，闸门在 `data` 这一侧实现）。
+
+### 三、验证
+
+- `test assembleRelease`：**BUILD SUCCESSFUL**；
+- **全量 `test` 2104 条断言 0 失败 / 0 错误**（190 个 XML 实点）—— 与改前一致。
+
+### 四、⚠️ 未验
+
+- **未上真机实测「release 包 logcat 干净」** —— 判据应是：装 release 包 → 操作评论/复制/借阅 →
+  `adb logcat` 里不应出现正文。本轮按用户要求不做真机复核。
+- 闸门是**编译期常量**（`BuildConfig.DEBUG` 在 release 下是 `false`）⇒
+  R8 开启后这些分支会被直接裁掉；但本项目 `minifyEnabled false` ⇒ 保留为运行时判断（代价可忽略）。
 
 ## 2026-10-22 v1.12.0-alpha.18（功能线 1019）状态口径补齐 + 偏好项真流 + 提醒去重同步写
 

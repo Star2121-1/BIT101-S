@@ -1,6 +1,7 @@
 package cn.bit101.android.data.repo
 
 import android.util.Log
+import cn.bit101.android.data.BuildConfig
 import cn.bit101.android.data.net.base.APIManager
 import cn.bit101.android.data.repo.base.ManageRepo
 import cn.bit101.api.model.http.bit101.PostReportDataModel
@@ -26,7 +27,8 @@ internal class DefaultManageRepo @Inject constructor(
             text = text,
         ))
 
-        Log.i("DefaultManageRepo", "report: ${res.errorBody()?.string()}")
+        // ⚠️ 只在 debug 打：errorBody 可能带用户写的举报正文
+        if (BuildConfig.DEBUG) Log.i("DefaultManageRepo", "report: ${res.errorBody()?.string()}")
 
         res.body() ?: throw Exception("report failed")
     }

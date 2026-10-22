@@ -1,6 +1,7 @@
 package cn.bit101.android.features.poster.utils
 
 import android.util.Log
+import cn.bit101.android.features.poster.BuildConfig
 import cn.bit101.api.model.common.Comment
 import java.util.ArrayList
 
@@ -49,7 +50,10 @@ internal fun addCommentToComment(
 ) = comments.visit {
     // 找到对应的评论，然后插入到子评论的第一个
 
-    Log.i("CommentUtils", "addCommentToComment: ${comment.id} ${it.id}, ${comment}, $it")
+    // ⚠️ 只在 debug 打：**整条评论对象**含用户昵称与正文，不该出现在 release 的 logcat 里
+    if (BuildConfig.DEBUG) {
+        Log.i("CommentUtils", "addCommentToComment: ${comment.id} ${it.id}, ${comment}, $it")
+    }
     if(comment.id == it.id) it.copy(
         sub = ArrayList(it.sub.toMutableList().apply {
             add(0, subComment)

@@ -50,7 +50,8 @@ internal class MapViewModel @Inject constructor(
             val response = httpClient.newCall(request).execute()
             response.body?.byteStream()?.buffered()
         } catch (e: Exception) {
-            Log.i(TAG, "Get tile error: $e $url")
+            // ⚠️ 只在 debug 打：瓦片请求失败是排障信息，release 不必外泄
+            if (BuildConfig.DEBUG) Log.i(TAG, "Get tile error: $e $url")
             null
         }
     }

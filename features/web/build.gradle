@@ -33,6 +33,8 @@ android {
     }
     buildFeatures {
         compose true
+        // 供日志出口按 BuildConfig.DEBUG 区分 debug/release（AGP 8 起 library 默认关闭）
+        buildConfig true
     }
     packagingOptions {
         resources {

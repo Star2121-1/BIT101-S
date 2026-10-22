@@ -2,6 +2,7 @@ package cn.bit101.android.data.repo
 
 import android.util.Log
 import cn.bit101.android.config.user.base.LoginStatus
+import cn.bit101.android.data.BuildConfig
 import cn.bit101.android.data.net.AppHttpClients
 import cn.bit101.android.data.net.WebViewCookieSync
 import cn.bit101.android.data.repo.base.LibBorrowRepo
@@ -91,10 +92,14 @@ internal class DefaultLibBorrowRepo @Inject constructor(
             val records = LibBorrowLogic.parseRecords(body)
                 ?: return@withContext LibBorrowResult.Failed("借阅响应无法识别（门户可能已改版）")
 
-            Log.i(TAG, "appId=$appId sversion=$sversion 共 ${records.size} 条")
+            // ⚠️ 只在 debug 打：借阅记录是**用户的隐私**（看了什么书、什么时候还）
+            if (BuildConfig.DEBUG) {
+                Log.i(TAG, "appId=$appId sversion=$sversion 共 ${records.size} 条")
+            }
             LibBorrowResult.Ok(records)
         } catch (e: Exception) {
-            Log.w(TAG, "fetch appId=$appId 异常: ${e.message}")
+            // ⚠️ 异常信息可能含门户返回的片段（含学号），脱敏后再打
+            Log.w(TAG, "fetch appId=$appId 异常: ${e.message?.take(80)}")
             LibBorrowResult.Failed(e.message ?: "未知异常")
         }
     }

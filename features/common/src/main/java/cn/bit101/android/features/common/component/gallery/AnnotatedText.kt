@@ -25,6 +25,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import cn.bit101.android.features.common.BuildConfig
 import cn.bit101.android.features.common.utils.TextUtils
 import cn.bit101.api.model.common.User
 
@@ -132,11 +133,12 @@ fun AnnotatedText(
                 else {
                     when (it.action) {
                         MotionEvent.ACTION_DOWN -> {
-                            Log.d("AnnotatedText", "down")
+                            // ⚠️ 只在 debug 打：纯排障日志，release 里是噪音
+                            if (BuildConfig.DEBUG) Log.d("AnnotatedText", "down")
                             true
                         }
                         MotionEvent.ACTION_UP -> {
-                            Log.d("AnnotatedText", "up")
+                            if (BuildConfig.DEBUG) Log.d("AnnotatedText", "up")
 
                             if(url != null) {
                                 if (url.startsWith("https://bit101.cn/gallery/")) {
