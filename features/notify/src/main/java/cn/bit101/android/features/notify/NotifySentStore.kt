@@ -39,9 +39,17 @@ internal object NotifySentStore {
         prefs()?.contains(key) == true
     }.getOrDefault(false)
 
-    /** 记录「已发」。 */
+    /**
+     * 记录「已发」。
+     *
+     * ⚠️ **必须同步落盘**（`commit` 而不是 `apply`）：
+     * `apply` 是异步写盘，进程被 force-stop 时可能**还没写进去** ⇒ 重启后
+     * 判「没发过」⇒ 同一件事**再发一遍提醒**（用户体感：莫名其妙重复推送）。
+     * 提醒发送都在 Worker 线程（`NotifyFireWorker` / `NetFeeCheckWorker`），
+     * 主线程不会被这个同步写阻塞。
+     */
     fun mark(key: String, atMillis: Long = System.currentTimeMillis()) {
-        runCatching { prefs()?.edit { putLong(key, atMillis) } }
+        runCatching { prefs()?.edit(commit = true) { putLong(key, atMillis) } }
     }
 
     /** 清空（调试 / 关闭提醒时用）。 */

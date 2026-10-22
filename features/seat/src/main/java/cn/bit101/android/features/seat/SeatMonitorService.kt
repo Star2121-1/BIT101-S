@@ -210,10 +210,13 @@ class SeatMonitorService : Service() {
                 continue
             }
             // 该座位已被预约：可能是我自己订到的（服务端状态不区分归属），
-            // 用「我的预约」核对一次，是本人就直接算成功，避免重复下单
+            // 用「我的预约」核对一次，是本人就直接算成功，避免重复下单。
+            // ⚠️ 这里要认**全部仍有效的状态**（2/3/4/6）：只认 `2`（未签到）的话，
+            // 我已经刷卡在使用（3）或暂离（6）时，这条记录会被当成「别人的预约」⇒
+            // 监控任务会一直等一个我根本不会释放的座位。
             if (target.status == SeatStatus.RESERVED || target.status == SeatStatus.MINE) {
                 val isMine = seatApi.getMyReservations().getOrNull()
-                    ?.any { it.isActive && it.seatId == target.id } == true
+                    ?.any { it.isCurrent && it.seatId == target.id } == true
                 if (isMine) {
                     repository.updateStatus(task.id, TaskStatus.SUCCESS, "该座位已是你的预约（${target.no}）")
                     return

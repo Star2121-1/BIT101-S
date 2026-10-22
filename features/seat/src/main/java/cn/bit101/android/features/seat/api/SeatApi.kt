@@ -303,7 +303,12 @@ class SeatApi @Inject constructor(
      */
     suspend fun cancelSeat(seatId: String): Result<Boolean> = authed {
         val reservations = getMyReservations().getOrThrow()
+        // 优先取消「还没签到」的那条（官方 h5 也只对 status=2 给取消按钮）；
+        // 其次是仍有效的其他状态（3 使用中 / 4 已开始 / 6 暂离）；
+        // 最后才退到「已结束 / 已取消」的那条 —— 那条取消必然失败，
+        // 但仍要把它交出去，好让服务端回真话而不是我们本地编一个「没找到记录」。
         val recordId = reservations.firstOrNull { it.seatId == seatId && it.isActive }?.id
+            ?: reservations.firstOrNull { it.seatId == seatId && it.isCurrent }?.id
             ?: reservations.firstOrNull { it.seatId == seatId }?.id
             ?: throw IOException("没有这个座位的预约记录，请到「我的预约」里核对")
         cancelReservation(recordId).getOrElse { throw it }

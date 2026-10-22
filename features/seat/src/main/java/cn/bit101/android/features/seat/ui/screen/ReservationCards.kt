@@ -55,16 +55,18 @@ internal fun ReservationCard(
         SeatStatusLogic.Phase.IN_USE -> "使用中"
         SeatStatusLogic.Phase.LEAVE -> "暂离"
         SeatStatusLogic.Phase.PENDING -> "有效"
+        SeatStatusLogic.Phase.STARTED -> record.statusName ?: "预约开始提醒"
         SeatStatusLogic.Phase.OTHER -> record.statusName ?: "已结束"
     }
     val badgeColor = when {
         phase == SeatStatusLogic.Phase.IN_USE -> Color(0xFF2BD06D)
         phase == SeatStatusLogic.Phase.LEAVE -> Color(0xFFFF8E5D)
-        record.status == "4" -> Color(0xFF3B97FB)
+        phase == SeatStatusLogic.Phase.STARTED -> Color(0xFF3B97FB)
         phase == SeatStatusLogic.Phase.PENDING -> Color(0xFF2E7D32)
         else -> Color(0xFF999999)
     }
-    val signIn = if (record.status == "2" || record.status == "4") signInRow(record, now) else null
+    // 签到提示只给「还没刷到卡」的（2 = 还没到时间，4 = 已开始但还没刷）
+    val signIn = if (record.needsSignIn) signInRow(record, now) else null
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -161,13 +163,18 @@ private fun ReservationStatusRow(text: String, urgent: Boolean) {
  *
  * 复用 `ReservationRecord.signInHint` 的规则判断，但把「还剩多久」换成倒计时 ——
  * 超时的情况下必须明确说「已超时」。
+ *
+ * ⚠️ **判定与倒计时必须用同一个「现在」**（传入的 [now]）：
+ * 之前截止时刻用 `LocalDateTime.now()`、倒计时用传入的 [now]，
+ * 两个时钟不一致 ⇒ 跨零点/单测里会出现「截止时间算的是今天、倒计时算的是昨天」这种自相矛盾。
  */
 internal fun signInRow(record: ReservationRecord, now: Long): Pair<String, Boolean>? {
-    val deadline = record.signInDeadline(java.time.LocalDateTime.now()) ?: return null
+    val nowLocal = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDateTime()
+    val deadline = record.signInDeadline(nowLocal) ?: return null
     val deadlineMs = deadline.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     val (countdown, overdue) = TaskListLogic.signInCountdown(deadlineMs, now)
     val tail = if (overdue) "$countdown · 请尽快刷卡" else "$countdown（截止 ${deadline.toLocalTime().withSecond(0).withNano(0)}）"
-    val prefix = if (record.reserveDate == java.time.LocalDate.now()) "今日预约" else "次日预约"
+    val prefix = if (record.reserveDate == nowLocal.toLocalDate()) "今日预约" else "次日预约"
     return "$prefix · $tail" to overdue
 }
 

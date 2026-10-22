@@ -13,7 +13,9 @@ val DEFAULT_WEB_VPN_URLS = ApiUrlOption(
 
 val PROD_URLS = ApiUrlOption(
     bit101Url = "https://bit101.flwfdd.xyz",
-    jwmsUrl = "http://jwms.bit.edu.cn",
+    // ⚠️ 必须是 https：明文 http 在 Android 9+ 默认被禁（cleartext not permitted），
+    // 且 jwms 的 https 证书链校验通过（实测 200）。
+    jwmsUrl = "https://jwms.bit.edu.cn",
     jwcUrl = "https://jwc.bit.edu.cn",
     jxzxehallappUrl = "https://jxzxehallapp.bit.edu.cn",
     lexueUrl = "https://lexue.bit.edu.cn",
@@ -22,7 +24,7 @@ val PROD_URLS = ApiUrlOption(
 
 val DEV_URLS = ApiUrlOption(
     bit101Url = "https://bit101.flwfdd.xyz",
-    jwmsUrl = "http://jwms.bit.edu.cn",
+    jwmsUrl = "https://jwms.bit.edu.cn",
     jwcUrl = "https://jwc.bit.edu.cn",
     jxzxehallappUrl = "https://jxzxehallapp.bit.edu.cn",
     lexueUrl = "https://lexue.bit.edu.cn",

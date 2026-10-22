@@ -180,7 +180,7 @@ OSM 数据是 **ODbL** 授权，**要求署名**（`© OpenStreetMap contributor
 |---|---|---|
 | D1 ✅ | **OSM 署名** | ✅ **v1.9.16 已完成** —— 地图页右下角 `© OpenStreetMap contributors`（可点击跳版权页） |
 | D2 | 考试列表「有数据时」的真机复核 | 本学期学校还没排考，列表渲染没在真机见过（见第十七节） |
-| D3 | `NotifySentStore.mark` 改同步写 | 用 `apply` 异步落盘，被 force-stop 会丢 → 重复提醒 |
+| D3 ✅ | `NotifySentStore.mark` 改同步写 | ✅ **v1.12.0-alpha.18 已完成** —— 改 `commit()`（`apply` 异步落盘，被 force-stop 会丢 → 重复提醒）。发送在 Worker 线程，同步写不卡主线程 |
 
 ### 19.3 新功能：四个主题
 

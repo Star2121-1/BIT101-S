@@ -88,4 +88,30 @@ class ReservationTest {
                             "beginTime":"2026-09-18 11:00:00"}]"""
         assertFalse(parseReservations(JSONArray(payload)).single().isActive)
     }
+
+    // ------------------------------------------------------------ 状态语义（2/3/4/6）
+
+    private fun recordOf(status: String) = parseReservations(
+        JSONArray("""[{"id":"1","space":"1","no":"001","status":"$status",
+                        "beginTime":"2026-09-18 11:00:00"}]""")
+    ).single()
+
+    @Test
+    fun `isCurrent 认全部仍有效的状态`() {
+        // 2 未签到 / 3 使用中 / 4 已开始提醒 / 6 暂离 —— 都还是「我的预约」
+        listOf("2", "3", "4", "6").forEach { assertTrue("status=$it 应算仍有效", recordOf(it).isCurrent) }
+        // 8 结束或取消、9 未知 —— 不算
+        listOf("8", "9").forEach { assertFalse("status=$it 不应算仍有效", recordOf(it).isCurrent) }
+    }
+
+    @Test
+    fun `needsSignIn 认未刷卡的 2 与 4`() {
+        // 4 = 预约开始提醒：已经开始但还没刷，签到时限就在开始后 60 分钟 ⇒ 仍要提醒
+        assertTrue("status=2 未签到", recordOf("2").needsSignIn)
+        assertTrue("status=4 已开始但未刷卡，仍要提醒刷卡", recordOf("4").needsSignIn)
+        // 3 使用中 / 6 暂离 = 已刷过；8 结束 = 不用提醒
+        assertFalse("status=3 已刷卡", recordOf("3").needsSignIn)
+        assertFalse("status=6 已刷卡", recordOf("6").needsSignIn)
+        assertFalse("status=8 已结束", recordOf("8").needsSignIn)
+    }
 }

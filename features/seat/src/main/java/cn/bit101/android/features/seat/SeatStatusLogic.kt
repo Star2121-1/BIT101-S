@@ -48,8 +48,16 @@ object SeatStatusLogic {
         /** 临时离开（座位保留中） */
         LEAVE,
 
-        /** 已预约、尚未签到 */
+        /** 已预约、尚未签到（还没到预约时间） */
         PENDING,
+
+        /**
+         * 预约已开始、**但还没刷卡**（服务端状态名「预约开始提醒」）。
+         *
+         * 与 [PENDING] 的区别：签到时限已经开始了（开始后 60 分钟内要刷），
+         * 所以这一档**必须显示刷卡倒计时** —— 漏显示 = 用户在馆内没刷卡 = 到点记违约。
+         */
+        STARTED,
 
         /** 其他（已结束 / 已取消 / 未知） */
         OTHER,
@@ -74,12 +82,22 @@ object SeatStatusLogic {
     private val LEAVE_KEYWORDS = listOf("离开", "暂离")
     private val IN_USE_KEYWORDS = listOf("使用", "在座", "进行中")
 
+    /**
+     * 阶段判定：**状态名优先**，状态名为空时按数字兜底。
+     *
+     * ⚠️ 状态 `4` 单列一档 [Phase.STARTED]：服务端状态名是「预约开始提醒」，
+     * 意思是**预约时间已经到了、但还没刷卡**。签到时限就在开始后 60 分钟，
+     * 所以这一档必须显示刷卡倒计时，不能当成「其他」糊弄过去
+     * （否则组件既不显示倒计时，还会被 [isLive] 判成「没有有效预约」⇒
+     * 同一座位同时出现「预约开始提醒」和「已预约」两行）。
+     */
     fun phaseOf(record: ReservationRecord): Phase {
         val name = record.statusName.orEmpty()
         return when {
             LEAVE_KEYWORDS.any { name.contains(it) } -> Phase.LEAVE
             IN_USE_KEYWORDS.any { name.contains(it) } -> Phase.IN_USE
             record.status == STATUS_ACTIVE -> Phase.PENDING
+            record.status == "4" -> Phase.STARTED
             record.status == "3" && name.isBlank() -> Phase.IN_USE
             record.status == "6" && name.isBlank() -> Phase.LEAVE
             else -> Phase.OTHER
@@ -94,8 +112,9 @@ object SeatStatusLogic {
      * 展示优先级（用户此刻最关心的排在前面）：
      * 1. **使用中**（人在图书馆，最关心"还能用多久"）
      * 2. **暂离**（要赶回去，最关心"还剩几分钟"）
-     * 3. **已预约待签到**（最关心"还有多久刷卡"）
-     * 4. **进行中的监控/优先任务**（"还在抢吗"）
+     * 3. **预约开始提醒**（已到点、还没刷卡，最关心"还有多久刷卡"）
+     * 4. **已预约待签到**（还没到点，最关心"什么时候开始"）
+     * 5. **进行中的监控/优先任务**（"还在抢吗"）
      *
      * 终态失败/取消的任务不显示 —— 它们不需要用户行动，占位反而挤掉有用信息。
      */
@@ -142,8 +161,9 @@ object SeatStatusLogic {
     private fun phaseOrder(phase: Phase): Int = when (phase) {
         Phase.IN_USE -> 0
         Phase.LEAVE -> 1
-        Phase.PENDING -> 2
-        Phase.OTHER -> 3
+        Phase.STARTED -> 2
+        Phase.PENDING -> 3
+        Phase.OTHER -> 4
     }
 
     /** 记录是否「还没结束」—— 用于判断要不要用任务兜底显示"已预约"。 */
@@ -172,6 +192,17 @@ object SeatStatusLogic {
             main = seatLabel(),
             time = timeRangeText(),
             trail = signInCountdownText(this, now),
+        )
+
+        // 「预约开始提醒」：已经开始、还没刷卡 ⇒ 倒计时是这一行唯一有用的信息。
+        // 标 urgent：超过时限就是违约（累计 5 次停用 7 天），比「使用中」更需要立刻行动。
+        // 文案沿用服务端状态名（官方 h5 也是直接显示它），不自己另造一个词。
+        Phase.STARTED -> WidgetLine(
+            lead = statusName ?: "预约开始提醒",
+            main = seatLabel(),
+            time = timeRangeText(),
+            trail = signInCountdownText(this, now),
+            urgent = true,
         )
 
         Phase.OTHER -> WidgetLine(

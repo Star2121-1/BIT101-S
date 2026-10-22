@@ -19,8 +19,13 @@ import javax.inject.Singleton
  *
  * ## 为什么只给「还没签到的」
  *
- * `status == "2"` 才是有效未签到；其余状态（使用中、暂离、已结束）都不需要签到提醒。
+ * `status == "2"`（还没到预约时间）或 `status == "4"`（已到开始时间、**还没刷卡**）
+ * 才需要签到提醒；`3`（使用中）/ `6`（暂离）已经刷过了，`8` 是已结束/已取消。
  * 已错过截止的也不给 —— 违约已经记上了，这时候弹通知只会添堵。
+ *
+ * ⚠️ **`4` 不能漏**（2026-10-22 修）：状态 `4` 的服务端状态名是「预约开始提醒」，
+ * 正是「该刷卡了」的时刻，而签到时限就在开始后 60 分钟。
+ * 之前只认 `2` ⇒ 预约一开始，提醒就消失了，用户在馆内没刷卡 ⇒ 到点记违约。
  */
 @Singleton
 class DefaultSeatReminderSource @Inject constructor(
@@ -43,7 +48,7 @@ class DefaultSeatReminderSource @Inject constructor(
         if (records.isEmpty()) return emptyList()
 
         return records.mapNotNull { record ->
-            if (!record.isActive) return@mapNotNull null
+            if (!record.needsSignIn) return@mapNotNull null
             val deadline = record.signInDeadline(now) ?: return@mapNotNull null
             // 只给「还来得及」的
             if (!deadline.isAfter(now)) return@mapNotNull null

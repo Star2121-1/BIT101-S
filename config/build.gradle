@@ -44,4 +44,7 @@ dependencies {
     // hilt
     implementation "com.google.dagger:hilt-android:${versions.hilt}"
     ksp "com.google.dagger:hilt-android-compiler:${versions.hilt}"
+
+    // 单测：偏好项「真流」的时序断言需要 runTest
+    testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1"
 }

@@ -8,6 +8,7 @@
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| `v1.12.0-alpha.18` | 10-22 | 座位状态口径补齐：状态 4「预约开始提醒」不再漏掉签到倒计时与提醒；加密偏好项从「一次快照」改成真流（登录后学号不再停在旧值）；提醒去重改同步落盘 |
 | `v1.12.0-alpha.17` | 10-21 | 「座」页的预约卡片按状态渲染：使用中显示已用时长、暂离显示按规则算出的剩余时间；签到提示与取消按钮按状态收窄 |
 | `v1.11.9` | 10-14 | 未验项收口：v1.11.2 的降级渲染上了真机；`CourseWeekdayLogic`（提醒+自习共用的调休判断）补上第一条测试，组件那份重复实现收敛成一份 |
 | `v1.11.8` | 10-13 | 认楼对照扩到中关村 20 栋；修正一条写错的豁免理由 |
@@ -23,6 +24,80 @@
 | `v1.9.54` | 10-12 | 「现在去哪儿自习」上线 |
 
 > 更早的段落在下方依次排列（`v1.9.53` → `2026-08-29`）。
+
+## 2026-10-22 v1.12.0-alpha.18（功能线 1019）状态口径补齐 + 偏好项真流 + 提醒去重同步写
+
+**没有新模块、没有新页面** ⇒ 只加补丁位。功能线号段继续 `1001+`（`docs/versioning.md`）。
+
+### 一、座位：状态 `4`（预约开始提醒）被漏掉了
+
+上一版（alpha.17）把卡片按状态渲染时，把 `4` 归进了「有效」那一档，
+但**服务端状态 `4` 的状态名是「预约开始提醒」** —— 意思是「已到预约开始时间、**还没刷卡**」。
+签到时限正是「开始后 60 分钟」，**恰好在状态变成 `4` 的那一刻开始倒数**。
+
+于是漏了三处：
+
+| 位置 | 原来 | 现在 |
+|---|---|---|
+| `SeatStatusLogic.Phase` | 没有 `STARTED` 这一档，`4` 落到 `PENDING`（显示「已预约」） | 新增 `Phase.STARTED`，文案沿用服务端状态名，**标 urgent**（超时就记违约） |
+| `DefaultSeatReminderSource` | 只认 `status=="2"` ⇒ **预约一开始，签到提醒就消失** | 改用 `record.needsSignIn`（`2` 或 `4`）⇒ 该刷卡时仍在提醒 |
+| `ReservationCards` 签到行 | 条件写死 `"2" \|\| "4"`，与逻辑层不同源 | 统一用 `record.needsSignIn` |
+
+⚠️ 漏掉 `4` 的代价是**真实的**：用户人在馆内、没刷卡、App 不提醒 ⇒ 到点记违约 1 次，
+**累计 5 次停用预约 7 天**（`docs/seatlib-contract.md` §10）。
+
+### 二、座位：另外三处状态口径收窄
+
+| 位置 | 原来 | 现在 | 为什么 |
+|---|---|---|---|
+| `SeatMonitorService` | 「该座位是我自己的」判据用 `isActive`（只认 `2`） | 改用 `isCurrent`（`2/3/4/6`） | 我已经刷卡在使用（`3`）或暂离（`6`）时，原判据会把座位当成「别人的预约」⇒ 监控任务一直等一个我根本不会释放的座位 |
+| `SeatApi.cancelSeat` | 取记录只按 `isActive` → 任意 | 顺序改为 `isActive` → `isCurrent` → 任意 | 避免挑到「已结束」那条去取消（必然失败，还把真话说没了） |
+| `ReservationCards.signInRow` | 截止时刻用 `LocalDateTime.now()`、倒计时用传入的 `now` | 两处统一用同一个传入的 `now` | 两个时钟不一致 ⇒ 跨零点/单测里会自相矛盾（截止时间算今天、倒计时算昨天） |
+
+`ReservationRecord` 相应新增两个判据，并把语义写进注释：
+
+- `isCurrent` = `2/3/4/6`（「这条还是我的预约吗」）——与 `isActive`（只认 `2`，用于「还能取消吗」）**明确区分**；
+- `needsSignIn` = `2/4`（「还需要刷卡吗」）。
+
+### 三、`config`：加密偏好项从「一次快照」改成**真流**
+
+`EncryptedPreferencesItem.flow` 原本是 `flowOf(读一次)` ⇒ 拿到的是**创建那一刻的快照**，之后再也不会变。
+`toSettingItem()` 又在构造时把这个 flow 捕获下来 ⇒ **登录后学号变了，界面（登录页 / 设置页的「学号」）
+还显示旧值**。
+
+改成真流（`config` 模块内新增两个文件）：
+
+- `PreferenceChangeSource`（接口）+ `SharedPreferencesChangeSource`（Android 实现）——把变更通知包成「订阅」；
+- `PreferenceValueFlow` —— 三条约定：**订阅时先发一次当前值**、**值没变就不发**、**先注册监听再读当前值**。
+
+⚠️ 顺序很要紧：先读后注册，中间那次变更会被漏掉 ⇒ 界面停在旧值。
+⚠️ 已核实（javap 反编译 `androidx.security:security-crypto:1.0.0`）：
+`EncryptedSharedPreferences` **支持** `registerOnSharedPreferenceChangeListener`，
+`Editor.apply()` 会 `notifyListeners()`，通知里的 key 是**明文 key**（库内部把解出来的 key 放进 `mKeysChanged` 再通知）⇒ 可以按 key 精确过滤。
+但 `remove` / `clear` **不通知**（库把 key 从 `mKeysChanged` 里**删掉**而不是加进去）—— 这条写进了注释。
+另外加密项**可能读不出来**（数据损坏 / 密钥失效）⇒ 按空串处理，不让流挂掉。
+
+### 四、`notify`：提醒去重记录改同步落盘
+
+`NotifySentStore.mark` 原本用 `apply`（异步写盘）⇒ 进程被 force-stop 时可能还没写进去
+⇒ 重启后判「没发过」⇒ **同一件事再发一遍提醒**。改用 `commit()`。
+（提醒发送都在 Worker 线程：`NotifyFireWorker` / `NetFeeCheckWorker` ⇒ 主线程不会被同步写阻塞。）
+
+### 五、`api`：教务系统地址改 https
+
+`Options.kt` 的 `PROD_URLS` / `DEV_URLS` 里 `jwmsUrl` 是 `http://jwms.bit.edu.cn`
+⇒ Android 9+ 默认禁止明文 http（cleartext not permitted）。
+改成 `https://jwms.bit.edu.cn`（实测证书链校验通过、返回 200）。
+（这两个 URL 目前只用于构造 `jwmsRetrofit`，尚未被任何 Service 使用 ⇒ 属死配置，改了不改变现有行为，但别再留明文。）
+
+### 六、验证
+
+- `:config:test` 18 条（新增 `PreferenceValueFlowTest` 5 条：订阅即发当前值 / 本 key 变更才发 /
+  别的 key 不触发 / 值没变不重复发 / 先注册后读不丢事件）；
+- `:features:seat:test` 215 条（新增 `DefaultSeatReminderSourceTest` 4 条，
+  `SeatStatusLogicTest` +3 条，`ReservationTest` +2 条）；
+- **全量 `test` 2104 条断言 0 失败 / 0 错误**（190 个 XML 实点）。
+- ⚠️ **未验**：真机上「预约开始提醒（状态 4）」的实际卡片显示与提醒到达（需一条已到点未刷卡的预约）。
 
 ## 2026-10-21 v1.12.0-alpha.17（功能线 1018）「座」页接受使用中/暂离状态
 

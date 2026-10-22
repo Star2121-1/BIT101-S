@@ -99,6 +99,27 @@ class SeatStatusLogicTest {
     }
 
     @Test
+    fun `状态 4 判为已开始待签到`() {
+        // 服务端状态名是「预约开始提醒」：预约时间到了、但还没刷卡
+        assertEquals(
+            SeatStatusLogic.Phase.STARTED,
+            SeatStatusLogic.phaseOf(record(status = "4", statusName = "预约开始提醒")),
+        )
+        // 状态名缺失时也按数字兜底
+        assertEquals(SeatStatusLogic.Phase.STARTED, SeatStatusLogic.phaseOf(record(status = "4")))
+    }
+
+    @Test
+    fun `状态 4 显示刷卡倒计时而不是当成已结束`() {
+        val line = SeatStatusLogic.build(
+            listOf(record(status = "4", statusName = "预约开始提醒")), emptyList(), now,
+        ).lines.single()
+        assertEquals("预约开始提醒", line.lead)
+        assertEquals("剩 48 分钟刷卡", line.trail)
+        assertTrue("过了签到时限就是违约，必须标紧急", line.urgent)
+    }
+
+    @Test
     fun `未识别的一律归为其他，不编造状态`() {
         assertEquals(SeatStatusLogic.Phase.OTHER, SeatStatusLogic.phaseOf(record(status = "3", statusName = "已完成")))
         assertEquals(SeatStatusLogic.Phase.OTHER, SeatStatusLogic.phaseOf(record(status = "9")))
@@ -227,14 +248,15 @@ class SeatStatusLogicTest {
     // ------------------------------------------------------------ 排序与兜底
 
     @Test
-    fun `展示顺序为 使用中-暂离-已预约`() {
+    fun `展示顺序为 使用中-暂离-待签到-已预约`() {
         val records = listOf(
             record(seatNo = "018", status = "2"),                        // 已预约
             record(seatNo = "020", status = "7", statusName = "临时离开"), // 暂离
             record(seatNo = "022", status = "6", statusName = "使用中"),   // 使用中
+            record(seatNo = "024", status = "4", statusName = "预约开始提醒"), // 已开始待签到
         )
         val lines = SeatStatusLogic.build(records, emptyList(), now).lines
-        assertEquals(listOf("使用中", "暂离", "已预约"), lines.map { it.lead })
+        assertEquals(listOf("使用中", "暂离", "预约开始提醒", "已预约"), lines.map { it.lead })
     }
 
     /** 自动预约成功 → 服务端会有记录；记录缺失的空窗期才用 SUCCESS 任务兜底，避免重复。 */
