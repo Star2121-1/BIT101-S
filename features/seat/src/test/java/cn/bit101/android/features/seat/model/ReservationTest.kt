@@ -74,6 +74,28 @@ class ReservationTest {
     }
 
     @Test
+    fun `next day reservation asked on the day flips to 60 min rule pending verify`() {
+        // ⚠️ state-4 复查发现（见 report-a4-a18-fixes.md）：`signInDeadline(now)` 用 now 的日期
+        // **动态**判当日/次日。次日预约（begin=09:00）：
+        //   前一天问（status 2，now=09-18）⇒ 次日分支 ⇒ 09:00
+        //   当天问（status 4，now=09-19）⇒ begin 已是「今天」⇒ 当日分支 ⇒ begin+60 = 10:00
+        // 同一预约的截止随 now 漂移（09:00→10:00）；而提醒去重键含 deadline ⇒ 跨天键变 ⇒
+        // **同一条提醒可能双发**；若服务端真实规则是「次日恒 09:00」，则当天被高估到 10:00。
+        // 这里只**钉住当前行为**（begin+60），是否应改成「次日恒 09:00」需对
+        // `/api/index/booking_rules` 或一条真次日预约核验 —— **别在没核验前改 signInDeadline**。
+        val payload = """
+            [{"id":"1","space":"1","no":"001","status":"4",
+              "beginTime":"2026-09-19 09:00:00","endTime":"2026-09-19 22:30:00"}]
+        """.trimIndent()
+        val record = parseReservations(JSONArray(payload)).single()
+
+        // 前一天：次日分支 ⇒ 09:00
+        assertEquals(LocalDateTime.of(2026, 9, 19, 9, 0), record.signInDeadline(LocalDateTime.of(2026, 9, 18, 23, 0)))
+        // 当天：当日分支 ⇒ begin+60 = 10:00（⚠️ 与上面的 09:00 不一致，待核验后决定是否统一）
+        assertEquals(LocalDateTime.of(2026, 9, 19, 10, 0), record.signInDeadline(LocalDateTime.of(2026, 9, 19, 9, 30)))
+    }
+
+    @Test
     fun `unparseable begin time yields no hint instead of crashing`() {
         val payload = """[{"id":"1","space":"1","no":"001","status":"2","beginTime":""}]"""
         val record = parseReservations(JSONArray(payload)).single()
