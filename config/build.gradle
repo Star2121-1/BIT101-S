@@ -47,4 +47,8 @@ dependencies {
 
     // 单测：偏好项「真流」的时序断言需要 runTest
     testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1"
+
+    // 单测：SharedPreferencesChangeSource（Android 适配层）用 MockK 打桩 SharedPreferences
+    // （版本与 data / features:seat 保持一致）
+    testImplementation "io.mockk:mockk:1.14.5"
 }
