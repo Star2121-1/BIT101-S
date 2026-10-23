@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import cn.bit101.android.config.datastore.basic.EncryptedPreferencesItem
 import cn.bit101.android.config.datastore.basic.Preferences
 import cn.bit101.android.config.setting.base.FALLBACK_TIME_TABLE
 import cn.bit101.android.config.setting.base.toTimeTableString
@@ -118,8 +119,15 @@ internal class SettingDataStore @Inject constructor(
     val mapScale = PreferencesDataStoreItem(MAP_SCALE, 2f, preferences.SETTING_DATASTORE)
 
     // 乐学日程订阅链接
-    private val LEXUE_CALENDAR_URL = stringPreferencesKey("lexue_calendar_url")
-    val lexueCalendarUrl = PreferencesDataStoreItem(LEXUE_CALENDAR_URL, "", preferences.SETTING_DATASTORE)
+    //
+    // ⚠️ 2026-10-22：从明文 DataStore 迁到加密存储（备份规则整体排除 `encrypted_store`）。
+    // 它是**会话派生的私有链接**（SSO 登录后由 /calendar/export.php 现生成，非用户手填配置），
+    // 既不属于「要留住的用户设置」，也不能留在会参与云备份的 settings.preferences_pb 里
+    // ⇒ 与 fake_cookie 同一处理。旧明文值的搬迁见 UserDataStore.migrateLegacyLexueCalendarUrl（幂等）。
+    val lexueCalendarUrl = EncryptedPreferencesItem(
+        preferences.ENCRYPTED_SHARED_PREFERENCES,
+        "lexue_calendar_url",
+    )
 
     // 日程临近改变颜色天数
     private val DDL_SCHEDULE_BEFORE_DAY = longPreferencesKey("ddl_schedule_before_day")

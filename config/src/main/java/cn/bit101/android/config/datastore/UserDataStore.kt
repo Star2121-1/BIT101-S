@@ -67,7 +67,10 @@ internal class UserDataStore @Inject constructor(
     private val migrationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
-        migrationScope.launch { migrateLegacyPlainFakeCookie() }
+        migrationScope.launch {
+            migrateLegacyPlainFakeCookie()
+            migrateLegacyLexueCalendarUrl()
+        }
     }
 
     /**
@@ -110,6 +113,39 @@ internal class UserDataStore @Inject constructor(
             }
             if (runCatching { loginWebVpn.get() }.getOrDefault(false)) {
                 runCatching { loginWebVpn.set(false) }
+            }
+        }
+    }
+
+    /**
+     * 一次性迁移：明文 DataStore 的 `lexue_calendar_url` → 加密存储。
+     *
+     * 乐学日程订阅链接是**会话派生的私有链接**（SSO 登录后由 /calendar/export.php 现生成），
+     * 原先明文躺在**会参与云备份**的 settings.preferences_pb 里 ⇒ 跟着用户设置一起上了云。
+     * 规则与 [migrateLegacyPlainFakeCookie] 一致：搬旧值不覆盖新值、搬完必删旧明文 key
+     * （不删就继续被备份上云）。
+     */
+    private suspend fun migrateLegacyLexueCalendarUrl() {
+        val legacyKey = stringPreferencesKey("lexue_calendar_url")
+        val legacyPlain = runCatching {
+            preferences.SETTING_DATASTORE.data.first()[legacyKey]
+        }.getOrNull().orEmpty()
+
+        if (legacyPlain.isNotBlank()) {
+            val target = EncryptedPreferencesItem(
+                preferences.ENCRYPTED_SHARED_PREFERENCES,
+                "lexue_calendar_url",
+            )
+            val toMigrate = UserDataStoreMigration.valueToMigrate(
+                legacyPlain,
+                runCatching { target.get() }.getOrDefault(""),
+            )
+            if (toMigrate != null) {
+                runCatching { target.set(toMigrate) }
+            }
+            // ⚠️ 无论搬没搬成，旧明文 key 都要删 —— 留着它就等于继续把它备份上云
+            runCatching {
+                preferences.SETTING_DATASTORE.edit { it.remove(legacyKey) }
             }
         }
     }

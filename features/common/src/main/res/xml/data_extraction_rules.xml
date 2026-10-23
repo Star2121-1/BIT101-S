@@ -76,6 +76,11 @@
           - file/datastore/settings.preferences_pb —— 外观、提醒开关、页序、节次时间表
           - sharedpref/bit101_widget_page —— 组件页签选择
           - sharedpref/bit101_nfc_tap —— NFC 贴纸配置
+
+          ⚠️ 会话派生材料（fake_cookie 活凭据、lexue_calendar_url 日历订阅链接）
+          已**迁出** settings.preferences_pb（进加密存储 encrypted_store，被上面整条排除）⇒
+          该文件现在是**纯用户设置**，才敢整体参与备份。新增任何「登录态 / 凭据 / 会话」
+          类字段时，别放进 settings，放 encrypted_store。
         -->
     </cloud-backup>
 

@@ -8,6 +8,7 @@
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| `v1.12.0-alpha.22` | 10-22 | 备份隐私收口：乐学日程订阅链接（会话派生的私有链接）从会参与云备份的 `settings` 里迁进加密存储；另经**反编译 release 包**核验 logcat 门控（8 个模块 `BuildConfig` 全 `DEBUG=false`） |
 | `v1.12.0-alpha.21` | 10-22 | 桌面组件的座位倒计时改成渲染时现算：暂离「剩余 N 分钟」不再卡住 10 分钟（暂离到点会释放座位并记违约，签到窗口只有 60 分钟） |
 | `v1.12.0-alpha.20` | 10-22 | 备份规则落地：学号/密码/会话 cookie/成绩快照/logcat 导出不再随云备份上云；`fake_cookie` 从明文存储迁进加密存储，换机后用户设置（外观/提醒/页序）仍能留住 |
 | `v1.12.0-alpha.19` | 10-22 | release 包的 logcat 不再外泄用户内容：评论正文、被复制的文本、整条评论对象、借阅记录、举报正文、URL 全部只在 debug 打 |
@@ -27,6 +28,49 @@
 | `v1.9.54` | 10-12 | 「现在去哪儿自习」上线 |
 
 > 更早的段落在下方依次排列（`v1.9.53` → `2026-08-29`）。
+
+## 2026-10-22 v1.12.0-alpha.22（功能线 1023）备份隐私收口：乐学日程链接迁进加密存储
+
+**没有新模块、没有新页面** ⇒ 只加补丁位。
+
+### 一、审计发现：`lexue_calendar_url` 躺在会备份的文件里
+
+沿 alpha.19/20 的隐私主线做了一次**全仓审计**（备份规则 + release logcat），
+发现一个漏网项：
+
+- **乐学日程订阅链接** `lexue_calendar_url` 存在 `settings` DataStore（`settings.preferences_pb`）。
+  这个文件**参与云备份**（外观/提醒/页序要留住），所以它跟着上云了。
+- 但它**不是「用户配置」**：它是 **SSO 登录后由 `/calendar/export.php` 现生成的私有链接**
+  （会话派生），既不能被用户有意义地编辑/重建，本身又是一个**可重取的缓存**。
+- 按 alpha.20 的口径——**凭据/会话材料不上云、含学习状态的缓存要排除**——它不该跟着 `settings` 备份。
+
+**DataStore 是单个 protobuf 文件，无法按 key 排除** ⇒ 只能把它**迁出**（与 `fake_cookie` 同处理）。
+
+### 二、改法：迁进加密存储（已整体排除 + 加密）
+
+| 位置 | 改动 |
+|---|---|
+| `config/.../SettingDataStore.kt` | `lexueCalendarUrl` 从 `PreferencesDataStoreItem`（DataStore）换成 `EncryptedPreferencesItem`（加密 SP，key 名不变） |
+| `config/.../UserDataStore.kt` | 新增 `migrateLegacyLexueCalendarUrl()`（幂等，复用 `valueToMigrate`：搬旧值不覆盖新值、搬完必删旧明文 key）；`init` 里跟 `fake_cookie` 迁移一起跑 |
+| `features/common/res/xml/data_extraction_rules.xml` | 「保留」注释更新：注明 `fake_cookie`/`lexue_calendar_url` 已迁出，`settings.preferences_pb` 现为**纯用户设置** |
+
+- **无需新增备份 exclude**：加密存储 `encrypted_store` 本就整体被两份规则文件排除，
+  `lexue_calendar_url` 放进去即自动排除。`backup_rules.xml` 与 `data_extraction_rules.xml` 的
+  exclude 清单保持完全一致（12 条）。
+- DDL 页消费侧（`ddlSettings.url` 的 `SettingItem<String>`）类型不变，无感知。
+
+### 三、同批收口：release logcat 门控经反编译核验
+
+真机 logcat 被 ROM 压制，改走**反编译 alpha.21 release 包**（`dexdump`）核验 alpha.19 的门控：
+
+- 6 处用户内容 log（评论正文/整条 Comment、复制文本、借阅记录、举报正文、URL）源码全 `if (BuildConfig.DEBUG)` 包裹；
+- 8 个库模块 `BuildConfig`（data/common/map/poster/web/seat/widget/notify）**全部 `DEBUG=false`**，
+  全 APK 105 个 `DEBUG` 字段 **0 个 true**；
+- 全项目 `minify off` ⇒ 门控编译成对 false 常量的运行时判断 ⇒ release 里这些 log 永不执行。
+
+⇒ 「release logcat 干净」一项**收口**（静态 ground-truth，不依赖真机 logcat）。
+
+---
 
 ## 2026-10-22 v1.12.0-alpha.21（功能线 1022）组件的座位倒计时改成渲染时现算
 
