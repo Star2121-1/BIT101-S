@@ -1,12 +1,18 @@
 package cn.bit101.android.features.index
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -14,6 +20,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -68,6 +75,7 @@ internal fun IndexScreen(
     val indexScreenConfig = vm.indexScreenConfigFlow.collectAsState(initial = null).value ?: return
 
     val loginStatus by vm.loginStatusFlow.collectAsState(initial = null)
+    val bit101Available by vm.bit101AvailableFlow.collectAsState()
 
     val state = rememberPagerState(
         initialPage = indexScreenConfig.initialPage,
@@ -121,42 +129,68 @@ internal fun IndexScreen(
     ) { paddingValues ->
         val bottomPadding = paddingValues.calculateBottomPadding()
 
-        NavHost (
-            modifier = Modifier.padding(bottom = bottomPadding),
-            navController = navController,
-            startDestination = startRoute,
-            enterTransition = { enterTransition },
-            exitTransition = { exitTransition },
-            popEnterTransition = { popEnterTransition },
-            popExitTransition = { popExitTransition },
-        ) {
-            composable(route = PageShowOnNav.BIT101Web.toString()) {
-                WebScreen(mainController)
+        Column(modifier = Modifier.fillMaxSize()) {
+            // BIT101 服务端不可用时给一条降级提示；正常时**不渲染** ⇒ 零布局影响。
+            // 学校/座位功能仍可用，这条只解释「社区/成绩为什么刷不出来」。
+            if (!bit101Available) {
+                Bit101DegradedBanner()
             }
-            composable(route = PageShowOnNav.Gallery.toString()) {
-                WithLoginStatus(mainController, loginStatus) {
-                    GalleryScreen(mainController)
+
+            NavHost (
+                modifier = Modifier.weight(1f).padding(bottom = bottomPadding),
+                navController = navController,
+                startDestination = startRoute,
+                enterTransition = { enterTransition },
+                exitTransition = { exitTransition },
+                popEnterTransition = { popEnterTransition },
+                popExitTransition = { popExitTransition },
+            ) {
+                composable(route = PageShowOnNav.BIT101Web.toString()) {
+                    WebScreen(mainController)
                 }
-            }
-            composable(route = PageShowOnNav.Map.toString()) {
-                MapScreen(mainController)
-            }
-            composable(route = PageShowOnNav.Mine.toString()) {
-                UserScreen(mainController, id = 0)
-            }
-            composable(route = PageShowOnNav.Schedule.toString()) {
-                WithLoginStatus(mainController, loginStatus) {
-                    ScheduleScreen(mainController)
+                composable(route = PageShowOnNav.Gallery.toString()) {
+                    WithLoginStatus(mainController, loginStatus) {
+                        GalleryScreen(mainController)
+                    }
                 }
-            }
-            composable(route = PageShowOnNav.Seat.toString()) {
-                WithLoginStatus(mainController, loginStatus) {
-                    SeatScreen(mainController = mainController)
+                composable(route = PageShowOnNav.Map.toString()) {
+                    MapScreen(mainController)
+                }
+                composable(route = PageShowOnNav.Mine.toString()) {
+                    UserScreen(mainController, id = 0)
+                }
+                composable(route = PageShowOnNav.Schedule.toString()) {
+                    WithLoginStatus(mainController, loginStatus) {
+                        ScheduleScreen(mainController)
+                    }
+                }
+                composable(route = PageShowOnNav.Seat.toString()) {
+                    WithLoginStatus(mainController, loginStatus) {
+                        SeatScreen(mainController = mainController)
+                    }
                 }
             }
         }
     }
 
+}
+
+/** BIT101 服务端不可用时的顶部降级提示（正常时不渲染 ⇒ 零布局影响）。 */
+@Composable
+private fun Bit101DegradedBanner() {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding(),
+    ) {
+        Text(
+            text = "BIT101 服务暂时不可用（社区/成绩受影响）；座位与学校功能可正常使用",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+    }
 }
 
 private val enterTransition = materialSharedAxisZIn()

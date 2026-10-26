@@ -60,21 +60,21 @@ internal class DefaultLoginRepo @Inject constructor(
         }
     }
 
-    private suspend fun checkBit101Login() = withContext(Dispatchers.IO) {
-        api.user.check().isSuccessful
-    }
-
     override suspend fun checkLogin() = withContext(Dispatchers.IO) {
         loginMutex.withLock {
-            val valid = try {
-                checkBit101Login() && checkSchoolLogin()
+            // 登录态的**权威定义是学校会话**：BIT101 账号（flwfdd）只是可选能力。
+            // 它不可用（服务器被 WAF 封 IP / 宕机）不应把用户判成未登录 ——
+            // 否则连直连学校的座位/课表都会一起用不了。
+            val schoolValid = try {
+                checkSchoolLogin()
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
                 false
             }
 
-            if (valid) {
+            if (schoolValid) {
+                loginStatus.status.set(true)
                 return@withLock true
             }
 
@@ -127,15 +127,29 @@ internal class DefaultLoginRepo @Inject constructor(
 
         val smsCodeHandler = if (allowInteractive) smsCodeRequestHub.createSmsCodeHandler() else null
 
-        return try {
+        try {
             loginSchool(sid, password, smsCodeHandler)
-            loginBIT101(sid, password)
-            LoginRefreshResult.SUCCESS
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            e.classifyRefreshFailure()
+            // 只有**学校登录失败**才决定刷新结果；BIT101 的失败不参与分类。
+            return e.classifyRefreshFailure()
         }
+
+        // 学校会话已恢复 ⇒ 登录态可用。BIT101 账号（flwfdd）是可选能力，best-effort：
+        // 它挂了（服务器被 WAF 封 IP 等）不应把学校会话也判失败、更不应清除。
+        loginStatus.status.set(true)
+        try {
+            loginBIT101(sid, password)
+            loginStatus.bit101Available.value = true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // 忽略：学校会话有效即可（仅社区/成绩等 BIT101 功能受影响）
+            loginStatus.bit101Available.value = false
+        }
+
+        return LoginRefreshResult.SUCCESS
     }
 
     // 依据 BIT-Login SDK 异常类型对刷新失败分类，遍历 cause 链以便穿透 SDK 的包装
@@ -228,15 +242,29 @@ internal class DefaultLoginRepo @Inject constructor(
             sessionCleanup.clearAll()
             try {
                 loginSchool(username, password, smsCodeHandler)
-                loginBIT101(username, password)
-                loginStatus.sid.set(username)
-                loginStatus.password.set(password)
-                loginStatus.status.set(true)
-                true
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 withContext(NonCancellable) { sessionCleanup.clearAll() }
                 throw e
             }
+
+            // 学校登录成功 ⇒ 用户即可正常使用座位/课表等直连学校的功能。
+            // 随后的 BIT101 账号登录（flwfdd 代理 CAS）是 best-effort：
+            // 服务器被 WAF 封 IP / 宕机时，不应让整个登录失败，更不应清掉学校会话。
+            loginStatus.sid.set(username)
+            loginStatus.password.set(password)
+            loginStatus.status.set(true)
+            try {
+                loginBIT101(username, password)
+                loginStatus.bit101Available.value = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // 忽略：BIT101 侧不可用时仅社区/成绩等功能受影响
+                loginStatus.bit101Available.value = false
+            }
+            true
         }
     }
 

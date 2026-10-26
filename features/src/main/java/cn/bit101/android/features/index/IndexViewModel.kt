@@ -68,4 +68,7 @@ internal class IndexViewModel @Inject constructor(
     }
 
     val loginStatusFlow = loginStatus.status.flow
+
+    /** BIT101 服务端可达性（false 时主界面展示降级横幅；不影响学校/座位功能）。 */
+    val bit101AvailableFlow = loginStatus.bit101Available
 }

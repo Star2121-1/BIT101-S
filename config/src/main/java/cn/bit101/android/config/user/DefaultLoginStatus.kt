@@ -3,6 +3,7 @@ package cn.bit101.android.config.user
 import cn.bit101.android.config.common.toSettingItem
 import cn.bit101.android.config.datastore.UserDataStore
 import cn.bit101.android.config.user.base.LoginStatus
+import kotlinx.coroutines.flow.MutableStateFlow
 import java.net.CookieManager
 import java.net.CookiePolicy
 import javax.inject.Inject
@@ -17,6 +18,9 @@ internal class DefaultLoginStatus @Inject constructor(
 
 
     override val fakeCookie = userDataStore.fakeCookie.toSettingItem()
+
+    /** 运行期状态：BIT101 服务端是否可用（不落盘，默认可用）。 */
+    override val bit101Available = MutableStateFlow(true)
     override val cookieManager = CookieManager(
         userDataStore.cookieStore,
         CookiePolicy.ACCEPT_ALL

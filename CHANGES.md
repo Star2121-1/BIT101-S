@@ -8,6 +8,8 @@
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| `v1.12.0-alpha.24` | 10-26 | 补上 BIT101 降级提示：`bit101Available` + 主界面顶部横幅（服务不可用时提示「社区/成绩受影响，座位/学校正常」；正常时不渲染，零布局影响） |
+| `v1.12.0-alpha.23` | 10-26 | 登录与 BIT101 服务解耦：上游 `bit101.flwfdd.xyz` 被 WAF 封 IP / 宕机时，座位/课表等直连学校的功能仍可用，不再误判未登录、不再清座位 JWT 与监控任务；BIT101 账号改为可选能力 |
 | `v1.12.0-alpha.22` | 10-22 | 备份隐私收口：乐学日程订阅链接（会话派生的私有链接）从会参与云备份的 `settings` 里迁进加密存储；另经**反编译 release 包**核验 logcat 门控（8 个模块 `BuildConfig` 全 `DEBUG=false`） |
 | `v1.12.0-alpha.21` | 10-22 | 桌面组件的座位倒计时改成渲染时现算：暂离「剩余 N 分钟」不再卡住 10 分钟（暂离到点会释放座位并记违约，签到窗口只有 60 分钟） |
 | `v1.12.0-alpha.20` | 10-22 | 备份规则落地：学号/密码/会话 cookie/成绩快照/logcat 导出不再随云备份上云；`fake_cookie` 从明文存储迁进加密存储，换机后用户设置（外观/提醒/页序）仍能留住 |
@@ -28,6 +30,48 @@
 | `v1.9.54` | 10-12 | 「现在去哪儿自习」上线 |
 
 > 更早的段落在下方依次排列（`v1.9.53` → `2026-08-29`）。
+
+## 2026-10-26 v1.12.0-alpha.24（功能线 1025）补上 BIT101 降级横幅
+
+承接 alpha.23 的「登录解耦」，把**界面侧**的降级提示补上：
+
+- `LoginStatus.bit101Available`（运行期 `MutableStateFlow`，默认 true，不持久化）：由 `data` 层维护——
+  - `loginBIT101` 成功置 true、失败置 false（`login()` / `refreshLoginLocked()`）；
+  - 401 拦截器：2xx 置 true；`IOException`、5xx、刷新非 SUCCESS、重试仍 401 均置 false。
+- `IndexScreen` 顶部横幅：`bit101Available == false` 时显示
+  「BIT101 服务暂时不可用（社区/成绩受影响）；座位与学校功能可正常使用」。
+  **正常时不渲染**（`if (!bit101Available)`）⇒ 对现有布局零影响。
+- 未做：离线缓存（只读列表断服时展示上次数据）——范围较大，单列后续。
+
+### 测试
+- `DefaultLoginRepoTest` 增补降级标志断言：BIT101 失败 → `false`，成功 → `true`；`:data:test` 全绿。
+
+## 2026-10-26 v1.12.0-alpha.23（功能线 1024）登录与 BIT101 服务解耦
+
+**背景**：学校 WebVPN（深信服 WAF）封了上游 BIT101 服务器 `bit101.flwfdd.xyz` 的 IP ——
+该服务代理全站用户的统一身份认证（日 4000~7000 次 CAS），被当成撞库/爆破特征。
+服务器端不可改，只能让 App 在服务不可用时尽量正常用。
+
+### 一、病根：登录态被绑在 BIT101 账号上
+- `login()`：学校登录成功后再走 `loginBIT101()`（flwfdd `webVpnVerify*`），它一失败就
+  `sessionCleanup.clearAll()` 并整体抛错 ⇒ **学校登录成功也登不进**。
+- `checkLogin()` = `checkBit101Login() && checkSchoolLogin()` ⇒ flwfdd 一挂就判「未登录」，
+  连**直连学校**的课表/空教室/DDL 都报 `check login failed`。
+- 401 拦截器对非 SUCCESS 一律 `clearAll()` ⇒ 社区接口 401 会把**座位 JWT + 监控任务**一起清掉。
+
+### 二、改法（`data` 层，未动 UI）
+- `LoginStatus.status` 语义 = **学校会话**（座位/课表的权威口径）；BIT101 账号降级为可选能力。
+- `login()`：`loginSchool` 成功即 `status=true` 并存学号密码；`loginBIT101` 失败只忽略（不清、不抛）。
+- `checkLogin()`：只看学校会话；有效即 true，不再探测 `/user/check`。
+- `refreshLoginLocked()`：学校刷新成功即 SUCCESS；`loginBIT101` best-effort，失败不影响结果。
+- 401 拦截器：仅 `FAILED`（学校认证确定性失败）才清；`TRANSIENT` / `NEEDS_INTERACTIVE` / 重试仍 401 一律不清。
+
+### 三、测试
+- `DefaultLoginRepoTest` 重写/新增 4 条：BIT101 失败仍可登录、`checkLogin` 不被 BIT101 拖累、
+  refresh 在学校成功时即 SUCCESS、BUSY 用例改挂学校探测。`:data:test` 全绿。
+
+### 四、暂未做（下一轮，见 `report-b*` 规划）
+- 社区/成绩页的「BIT101 服务暂不可用」横幅与离线缓存（涉及主界面横幅与各页文案，需上模拟器看效果再定）。
 
 ## 2026-10-22 v1.12.0-alpha.22（功能线 1023）备份隐私收口：乐学日程链接迁进加密存储
 

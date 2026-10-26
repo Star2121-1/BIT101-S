@@ -85,7 +85,7 @@ class DefaultLoginRepoTest {
     }
 
     @Test
-    fun `login saves final state only after both services succeed`() = runBlocking {
+    fun `login saves school state and BIT101 fake cookie when both succeed`() = runBlocking {
         stubSuccessfulSchoolLogin(webVpn = true)
         stubSuccessfulBackendLogin()
 
@@ -97,6 +97,7 @@ class DefaultLoginRepoTest {
         assertTrue(loginStatus.status.get())
         assertTrue(loginStatus.webVpn.get())
         assertTrue(loginStatus.cookieManager.cookieStore.cookies.any { it.name == "SESSION" })
+        assertTrue("BIT101 正常 ⇒ 降级标志为 true", loginStatus.bit101Available.value)
     }
 
     @Test
@@ -112,15 +113,22 @@ class DefaultLoginRepoTest {
     }
 
     @Test
-    fun `backend login failure clears synchronized school cookies`() {
+    fun `BIT101 backend login failure keeps usable school session`() = runBlocking {
         stubSuccessfulSchoolLogin()
         coEvery { api.user.webVpnVerifyInit(any()) } throws IllegalStateException("backend failed")
 
-        assertThrows(IllegalStateException::class.java) {
-            runBlocking { repo.login("112233", "password") }
-        }
+        // 学校登录成功即可用；BIT101 账号（flwfdd）不可用不应让整个登录失败
+        assertTrue(repo.login("112233", "password"))
 
-        assertLoggedOut()
+        assertTrue("学校登录成功 ⇒ 已登录", loginStatus.status.get())
+        assertEquals("112233", loginStatus.sid.get())
+        assertEquals("password", loginStatus.password.get())
+        assertEquals("BIT101 未登录 ⇒ fakeCookie 为空", "", loginStatus.fakeCookie.get())
+        assertTrue(
+            "学校 cookie 必须保留（座位/课表直连要用）",
+            loginStatus.cookieManager.cookieStore.cookies.any { it.name == "SESSION" },
+        )
+        assertFalse("BIT101 服务端不可用 ⇒ 降级标志为 false", loginStatus.bit101Available.value)
     }
 
     @Test
@@ -262,12 +270,12 @@ class DefaultLoginRepoTest {
     fun `tryRefreshLogin returns BUSY while checkLogin holds the lock`() = runBlocking {
         loginStatus.seedLoggedIn()
         val checkStarted = CompletableDeferred<Unit>()
-        val checkGate = CompletableDeferred<Response<Unit>>()
-        coEvery { api.user.check() } coAnswers {
+        val checkGate = CompletableDeferred<String>()
+        // checkLogin 现在只探测**学校会话**（getCurrentTerm），在它上面挂起以持锁
+        coEvery { api.schoolJxzxehall.getCurrentTerm(any(), any()) } coAnswers {
             checkStarted.complete(Unit)
             checkGate.await()
         }
-        coEvery { api.schoolJxzxehall.getCurrentTerm(any(), any()) } returns "2025-2026-1"
 
         val job = async(Dispatchers.IO) { repo.checkLogin() }
         checkStarted.await()
@@ -276,7 +284,7 @@ class DefaultLoginRepoTest {
         assertEquals(LoginRefreshResult.BUSY, repo.tryRefreshLogin())
         coVerify(exactly = 0) { api.schoolLogin.login(any(), any(), any()) }
 
-        checkGate.complete(Response.success(Unit))
+        checkGate.complete("2025-2026-1")
         assertTrue(job.await())
     }
 
@@ -299,6 +307,33 @@ class DefaultLoginRepoTest {
         assertEquals(LoginRefreshResult.FAILED, repo.tryRefreshLogin())
 
         coVerify(exactly = 0) { api.schoolLogin.login(any(), any(), any()) }
+    }
+
+    @Test
+    fun `checkLogin ignores BIT101 backend outage when school session is valid`() = runBlocking {
+        loginStatus.seedLoggedIn()
+        coEvery { api.schoolJxzxehall.getCurrentTerm(any(), any()) } returns "2025-2026-1"
+        coEvery { api.user.check() } throws IOException("bit101 down")
+
+        assertTrue(repo.checkLogin())
+
+        // 已与 BIT101 探测解耦：学校会话有效即视为登录，不再调 /user/check
+        coVerify(exactly = 0) { api.user.check() }
+    }
+
+    @Test
+    fun `refreshLogin succeeds and keeps school session when BIT101 backend is down`() = runBlocking {
+        loginStatus.seedLoggedIn()
+        stubSuccessfulSchoolLogin(webVpn = true)
+        coEvery { api.user.webVpnVerifyInit(any()) } throws IOException("bit101 down")
+
+        assertEquals(LoginRefreshResult.SUCCESS, repo.refreshLogin())
+
+        assertTrue(loginStatus.status.get())
+        assertTrue(loginStatus.webVpn.get())
+        assertTrue(loginStatus.cookieManager.cookieStore.cookies.any { it.name == "SESSION" })
+        assertFalse("BIT101 不可用 ⇒ 降级标志为 false", loginStatus.bit101Available.value)
+        coVerify(exactly = 1) { api.schoolLogin.login("112233", "password", any()) }
     }
 
     private fun stubSuccessfulSchoolLogin(webVpn: Boolean = false) {
@@ -354,6 +389,7 @@ class DefaultLoginRepoTest {
         override val status = MemorySettingItem(false)
         override val webVpn = MemorySettingItem(false)
         override val fakeCookie = MemorySettingItem("")
+        override val bit101Available = MutableStateFlow(true)
         override val cookieManager = CookieManager()
 
         override suspend fun clear() {

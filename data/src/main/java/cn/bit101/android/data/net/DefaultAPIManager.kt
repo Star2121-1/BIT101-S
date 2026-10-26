@@ -15,6 +15,7 @@ import cn.bit101.api.option.PROD_URLS
 import kotlinx.coroutines.runBlocking
 import net.gotev.cookiestore.okhttp.JavaNetCookieJar
 import okhttp3.OkHttpClient
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Provider
 
@@ -62,41 +63,62 @@ internal class DefaultAPIManager @Inject constructor(
                 .addHeader("fake-cookie", fakeCookie)
                 .build()
 
-            val response = chain.proceed(request)
+            // 记录 BIT101 服务端可达性（供主界面降级横幅）；网络异常/5xx 视为不可用
+            val response = try {
+                chain.proceed(request)
+            } catch (e: IOException) {
+                loginStatus.bit101Available.value = false
+                throw e
+            }
+            if (response.isSuccessful) {
+                loginStatus.bit101Available.value = true
+            } else if (response.code in 500..599) {
+                loginStatus.bit101Available.value = false
+            }
 
             if (response.code == 401) {
-                // 已重试过，不再重试
+                // 本 client 只走 BIT101（flwfdd）侧。fakeCookie 失效**不代表**学校/座位会话也失效：
+                // 不能因为社区接口 401 就把学校登录、座位 JWT 与监控任务一起清掉。
                 if (chain.request().header(AUTH_RETRIED_HEADER) != null) {
-                    runBlocking {
-                        sessionCleanup.clearAll()
-                    }
-                } else {
-                    // 静默刷新整个会话（不弹短信验证码），成功后携带新 fake-cookie 重试一次。
-                    // 使用非阻塞 tryRefreshLogin：互斥锁被持锁流程（checkLogin/login/refreshLogin）占用时
-                    // 立即返回 BUSY，避免在该流程内部重入同一把非重入锁而死锁
-                    val refreshed = runBlocking {
-                        loginRepoProvider.get().tryRefreshLogin()
-                    }
-                    when (refreshed) {
-                        LoginRefreshResult.SUCCESS -> {
-                            val newFakeCookie = runBlocking {
-                                loginStatus.fakeCookie.get()
-                            }
-                            val retryRequest = chain.request().newBuilder()
-                                .addHeader("fake-cookie", newFakeCookie)
-                                .addHeader(AUTH_RETRIED_HEADER, "1")
-                                .build()
-                            return@addInterceptor chain.proceed(retryRequest)
-                        }
+                    // 重试后仍 401 ⇒ BIT101 侧不可用，交回调用方降级展示，不清学校会话
+                    loginStatus.bit101Available.value = false
+                    return@addInterceptor response
+                }
 
-                        // 持锁流程自身负责刷新与登录态决策，这里直接返回 401，绝不清除登录态
-                        LoginRefreshResult.BUSY ->
-                            return@addInterceptor response
-
-                        // 其他（NEEDS_INTERACTIVE / TRANSIENT / FAILED）维持原清理逻辑
-                        else -> runBlocking {
-                            sessionCleanup.clearAll()
+                // 静默刷新（不弹短信验证码）。refresh 现在以**学校会话**为准，BIT101 失败不影响结果。
+                // 使用非阻塞 tryRefreshLogin：互斥锁被持锁流程（checkLogin/login/refreshLogin）占用时
+                // 立即返回 BUSY，避免在该流程内部重入同一把非重入锁而死锁
+                val refreshed = runBlocking {
+                    loginRepoProvider.get().tryRefreshLogin()
+                }
+                when (refreshed) {
+                    LoginRefreshResult.SUCCESS -> {
+                        loginStatus.bit101Available.value = true
+                        val newFakeCookie = runBlocking {
+                            loginStatus.fakeCookie.get()
                         }
+                        val retryRequest = chain.request().newBuilder()
+                            .addHeader("fake-cookie", newFakeCookie)
+                            .addHeader(AUTH_RETRIED_HEADER, "1")
+                            .build()
+                        return@addInterceptor chain.proceed(retryRequest)
+                    }
+
+                    // 持锁流程自身负责刷新与登录态决策，这里直接返回 401，绝不清除登录态
+                    LoginRefreshResult.BUSY ->
+                        return@addInterceptor response
+
+                    // 确定性认证失败（学校会话已确认失效）→ 清；与旧行为保持一致
+                    LoginRefreshResult.FAILED -> {
+                        loginStatus.bit101Available.value = false
+                        runBlocking { sessionCleanup.clearAll() }
+                    }
+
+                    // NEEDS_INTERACTIVE / TRANSIENT：只说明「这次不知道」或需要用户介入，
+                    // 不应清学校/座位会话
+                    else -> {
+                        loginStatus.bit101Available.value = false
+                        return@addInterceptor response
                     }
                 }
             }
