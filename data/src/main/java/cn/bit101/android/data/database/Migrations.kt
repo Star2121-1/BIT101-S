@@ -82,7 +82,7 @@ private fun recreateCourseOverlay(db: SupportSQLiteDatabase) {
             "`type`, `category`, `department`, `updatedAtMillis`) " +
             "SELECT `id`, `kind`, `term`, `anchorNumber`, `anchorWeekday`, `anchorStartSection`, " +
             "`number`, `name`, `teacher`, `classroom`, `description`, `weeks`, " +
-            "`weekday`, `startSection`, `endSection`, `campus`, `CAST(`credit` AS REAL)`, " +
+            "`weekday`, `startSection`, `endSection`, `campus`, CAST(`credit` AS REAL), " +
             "`hour`, `type`, `category`, `department`, `updatedAtMillis` " +
             "FROM `course_overlay`"
     )
