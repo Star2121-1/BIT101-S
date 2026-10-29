@@ -35,12 +35,14 @@ import cn.bit101.android.data.database.entity.ExamScheduleEntity
          */
         CourseOverlayEntity::class,
     ],
-    version = 3,
+    version = 4,
 //    exportSchema = false  // 不知道为什么原来要禁用, developer.android.com 似乎推荐保留数据库架构历史, 而且启用的话数据库迁移会方便很多, 所以我注释掉了
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         // 2 → 3：只新增了一张表，Room 能自动迁移（schema 已导出 1/2/3.json）
         AutoMigration(from = 2, to = 3),
+        // 3 → 4：`credit` INTEGER → REAL，SQLite 不支持 ALTER COLUMN ⇒ **手写迁移**，
+        // 见 Migrations.kt::MIGRATION_3_4（在 DatabaseModule 里注册）
     ]
 )
 @TypeConverters(Converters::class)

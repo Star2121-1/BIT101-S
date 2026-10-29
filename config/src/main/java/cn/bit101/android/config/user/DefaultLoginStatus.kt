@@ -19,6 +19,10 @@ internal class DefaultLoginStatus @Inject constructor(
 
     override val fakeCookie = userDataStore.fakeCookie.toSettingItem()
 
+    /** 学校身份验证失败的冷却（见 LoginRetryPolicy）。 */
+    override val identityRetryAt = userDataStore.loginIdentityRetryAt.toSettingItem()
+    override val identityAttempts = userDataStore.loginIdentityAttempts.toSettingItem()
+
     /** 运行期状态：BIT101 服务端是否可用（不落盘，默认可用）。 */
     override val bit101Available = MutableStateFlow(true)
     override val cookieManager = CookieManager(
@@ -40,6 +44,9 @@ internal class DefaultLoginStatus @Inject constructor(
         sid.set("")
         password.set("")
         fakeCookie.set("")
+        // 换号/登出后必须解除冷却：新账号不该继承上一个账号的退避窗口
+        identityRetryAt.set(0L)
+        identityAttempts.set(0)
         cookieManager.cookieStore.removeAll()
     }
 }

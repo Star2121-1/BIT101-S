@@ -46,6 +46,24 @@ interface LoginStatus {
     val bit101Available: MutableStateFlow<Boolean>
 
     /**
+     * **学校身份验证的冷却截止时间**（毫秒时间戳，0 = 无冷却）。
+     *
+     * 为什么需要：BIT101 服务端代所有用户做学校统一身份认证，2026-10-30 该机被学校 WAF
+     * 整 IP 封禁（一天 4000~7000 次 CAS 登录被判撞库）。客户端失败后若立刻重试，
+     * 会把这台机器的请求量继续放大。⇒ 失败一次就按 [LoginRetryPolicy] 冷却，
+     * 期间**一律不再发起学校登录**（包括交互式，避免凌晨给人发短信）。
+     *
+     * ⚠️ 必须持久化：不落盘的话重启 App 就重置，冷却形同虚设。
+     */
+    val identityRetryAt: SettingItem<Long>
+
+    /**
+     * **学校身份验证的连续失败次数**，驱动 [identityRetryAt] 的指数退避。
+     * 登录成功即清零；`clear()` 也清零。
+     */
+    val identityAttempts: SettingItem<Int>
+
+    /**
      * 清除登录状态，包括 sid、password、status、cookie
      */
     suspend fun clear()

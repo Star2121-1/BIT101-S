@@ -132,6 +132,17 @@ internal class DefaultAPIManager @Inject constructor(
     private val localUrls = if(BuildConfig.DEBUG) DEV_URLS else PROD_URLS
     private val webVpnUrls = if(BuildConfig.DEBUG) DEV_URLS else DEFAULT_WEB_VPN_URLS
 
+    /**
+     * 只随 BIT101 后端同源请求发出的客户端标识（上游 1.4.5 起服务端按此区分客户端）。
+     *
+     * ⚠️ 刻意**不发 `X-BIT101-Version-Code`**：上游测试里明确断言它为 null。
+     *    服务端要的是展示版本号，不是号段（我们的号段是 1001+ 的功能线，语义不同）。
+     */
+    private val bit101Headers = mapOf(
+        "X-BIT101-Platform" to "android",
+        "X-BIT101-Version" to BuildConfig.VERSION_NAME,
+    )
+
     private var _api = createApi(webVpn)
 
     private fun createApi(webVpn: Boolean) = Bit101ApiFactory.create(
@@ -141,6 +152,7 @@ internal class DefaultAPIManager @Inject constructor(
             localUrls = localUrls,
             webVpnUrls = webVpnUrls,
             webVpn = webVpn,
+            bit101Headers = bit101Headers,
         ),
         logger = androidLogger,
     )

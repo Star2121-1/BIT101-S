@@ -26,6 +26,10 @@ internal class DatabaseModule {
             context,
             BIT101Database::class.java,
             FILE_NAME
-        ).build()
+        )
+            // 3 → 4 是列类型变更（credit INTEGER→REAL），Room 的 AutoMigration 处理不了，
+            // 必须注册手写迁移；漏了这条，老用户升级会直接抛 IllegalStateException。
+            .addMigrations(MIGRATION_3_4)
+            .build()
     }
 }

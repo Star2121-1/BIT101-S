@@ -20,6 +20,16 @@ enum class LoginRefreshResult {
 
     /** 互斥锁被占用（正处于 checkLogin/login/refreshLogin 流程），无法在此刷新；调用方不应清理登录态，交由外层持锁流程处理 */
     BUSY,
+
+    /**
+     * 处于**失败冷却期**，本轮不发起任何学校登录。
+     *
+     * 触发源是 [LoginRetryPolicy]：身份验证连续失败后按 24h/48h/96h/192h 退避。
+     * 目的是在 BIT101 服务端被学校 WAF 封 IP 时，不再放大 CAS 登录请求量。
+     *
+     * 语义上等同于「暂时不可用」：**不清登录态**，也不该提示用户"密码错了"。
+     */
+    COOLDOWN,
 }
 
 interface LoginRepo {

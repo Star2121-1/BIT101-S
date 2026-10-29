@@ -50,7 +50,7 @@ class WidgetLogicTest {
         end_section = end,
         campus = campus,
         number = "MATH1001",
-        credit = 4,
+        credit = 4.0,
         hour = 64,
         type = "必修",
         category = "文化课",

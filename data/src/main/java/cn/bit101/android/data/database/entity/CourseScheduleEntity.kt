@@ -69,8 +69,12 @@ data class CourseScheduleEntity(
 
     /**
      * 学分
+     *
+     * ⚠️ 用 `Double` 而不是 `Int`：学校会返回小数学分（如 1.5）。
+     * Gson 用 `Int` 反序列化 `1.5` 会抛 `JsonSyntaxException`，**整个课表响应失败**。
+     * 上游 1.4.4 踩过这个坑（`fractional credits ... do not break the whole timetable`）。
      */
-    val credit: Int,
+    val credit: Double,
 
     /**
      * 学时
@@ -116,7 +120,7 @@ internal fun CourseForSchedule.toEntity(): CourseScheduleEntity {
         this.JSJC ?: 0,
         this.XXXQMC ?: "",
         this.KCH ?: "",
-        this.XF ?: 0,
+        this.XF ?: 0.0,
         this.XS ?: 0,
         this.KCXZDM_DISPLAY ?: "",
         this.KCLBDM_DISPLAY ?: "",

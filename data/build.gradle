@@ -13,6 +13,10 @@ android {
         minSdk versions.minSdk
         targetSdk versions.targetSdk
 
+        // library 模块的 BuildConfig 默认**没有** VERSION_NAME（那是 application 的默认项），
+        // 但 `X-BIT101-Version` 请求头需要它 ⇒ 显式注入，值与 app 的 versionName 同源。
+        buildConfigField "String", "VERSION_NAME", "\"${versions.versionName}\""
+
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles "consumer-rules.pro"
     }

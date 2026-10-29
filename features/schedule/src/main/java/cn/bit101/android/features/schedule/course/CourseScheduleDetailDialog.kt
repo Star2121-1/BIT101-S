@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import cn.bit101.android.data.common.CreditFormat
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.ExamScheduleEntity
 import cn.bit101.android.features.common.component.schedule.Item
@@ -65,7 +66,7 @@ internal fun CourseScheduleDetailDialog(
                     }
                     Item("课程号：", course.number)
                     Item("授课教师：", course.teacher)
-                    Item("学分：", course.credit.toString())
+                    Item("学分：", CreditFormat.text(course.credit))
                     Item("学时：", course.hour.toString())
                     Item("课程性质：", course.type)
                     Item("课程类别：", course.category)
@@ -221,7 +222,7 @@ private fun CourseDetailPreview() {
             2,
             "良乡校区",
             "123456",
-            4,
+            4.0,
             64,
             "必修",
             "文化课",

@@ -172,12 +172,67 @@ class DefaultLoginRepoTest {
 
         val result = repo.doOperationRequiresLogin {
             calls++
-            if (calls == 1) throw IllegalStateException("expired request")
+            // 只有 401 才算「会话真的失效」⇒ 触发一次重登
+            if (calls == 1) throw http401()
             "success"
         }
 
         assertEquals("success", result)
         assertEquals(2, calls)
+    }
+
+    /**
+     * P0-3 的核心断言：**非 401 的异常不许触发登录**。
+     *
+     * 背景：服务端被学校 WAF 封 IP 期间，任何失败都会变成一次 CAS 尝试，
+     * 用户越多流量越大。这里用超时/5xx 最常见的几类异常钉住这个边界。
+     */
+    @Test
+    fun `non authentication failures never trigger a login`() = runBlocking {
+        loginStatus.seedLoggedIn()
+        stubValidChecks()
+
+        for (failure in listOf(
+            IllegalStateException("expired request"),
+            java.io.IOException("timeout"),
+            httpError(500),
+            httpError(403),
+        )) {
+            var calls = 0
+            assertThrows(Exception::class.java) {
+                runBlocking {
+                    repo.doOperationRequiresLogin {
+                        calls++
+                        throw failure
+                    }
+                }
+            }
+            assertEquals("${failure.javaClass.simpleName} 不该被重试", 1, calls)
+        }
+        // 一次登录都不该发生
+        coVerify(exactly = 0) { api.schoolLogin.login(any(), any(), any()) }
+    }
+
+    /** 冷却期内即使遇到 401 也不登录。 */
+    @Test
+    fun `cooldown blocks relogin even on 401`() = runBlocking {
+        loginStatus.seedLoggedIn()
+        stubValidChecks()
+        // 冷却到 1 小时后
+        loginStatus.identityRetryAt.set(System.currentTimeMillis() + 60 * 60_000L)
+
+        var calls = 0
+        assertThrows(Exception::class.java) {
+            runBlocking {
+                repo.doOperationRequiresLogin {
+                    calls++
+                    throw http401()
+                }
+            }
+        }
+
+        assertEquals(1, calls)
+        coVerify(exactly = 0) { api.schoolLogin.login(any(), any(), any()) }
     }
 
     @Test
@@ -383,12 +438,21 @@ class DefaultLoginRepoTest {
         assertTrue(loginStatus.cookieManager.cookieStore.cookies.isEmpty())
     }
 
+    /** 构造一个真实的 Retrofit 401 —— `doOperationRequiresLogin` 只认它。 */
+    private fun httpError(code: Int): retrofit2.HttpException = retrofit2.HttpException(
+        retrofit2.Response.error<Any>(code, okhttp3.ResponseBody.create(null, "")),
+    )
+
+    private fun http401(): retrofit2.HttpException = httpError(401)
+
     private class MemoryLoginStatus : LoginStatus {
         override val sid = MemorySettingItem("")
         override val password = MemorySettingItem("")
         override val status = MemorySettingItem(false)
         override val webVpn = MemorySettingItem(false)
         override val fakeCookie = MemorySettingItem("")
+        override val identityRetryAt = MemorySettingItem(0L)
+        override val identityAttempts = MemorySettingItem(0)
         override val bit101Available = MutableStateFlow(true)
         override val cookieManager = CookieManager()
 
@@ -398,6 +462,8 @@ class DefaultLoginRepoTest {
             sid.set("")
             password.set("")
             fakeCookie.set("")
+            identityRetryAt.set(0L)
+            identityAttempts.set(0)
             cookieManager.cookieStore.removeAll()
         }
 

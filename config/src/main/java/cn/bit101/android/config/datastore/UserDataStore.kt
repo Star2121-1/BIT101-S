@@ -2,6 +2,8 @@ package cn.bit101.android.config.datastore
 
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import cn.bit101.android.config.datastore.basic.EncryptedPreferencesItem
 import cn.bit101.android.config.datastore.basic.Preferences
@@ -40,6 +42,14 @@ internal class UserDataStore @Inject constructor(
 
     private val LOGIN_WEB_VPN = booleanPreferencesKey("login_web_vpn")
     val loginWebVpn = PreferencesDataStoreItem(LOGIN_WEB_VPN, false, preferences.SETTING_DATASTORE)
+
+    // 学校身份验证失败后的冷却（见 LoginRetryPolicy）。
+    // 0 = 无冷却；必须落盘，否则重启 App 就重置、冷却形同虚设。
+    private val LOGIN_IDENTITY_RETRY_AT = longPreferencesKey("login_identity_retry_at")
+    val loginIdentityRetryAt = PreferencesDataStoreItem(LOGIN_IDENTITY_RETRY_AT, 0L, preferences.SETTING_DATASTORE)
+
+    private val LOGIN_IDENTITY_ATTEMPTS = intPreferencesKey("login_identity_attempts")
+    val loginIdentityAttempts = PreferencesDataStoreItem(LOGIN_IDENTITY_ATTEMPTS, 0, preferences.SETTING_DATASTORE)
 
     // 下面都是加密存储
     // 登陆学号

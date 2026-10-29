@@ -54,7 +54,7 @@ class NotifyLogicTest {
         end_section = end,
         campus = "中关村校区",
         number = number,
-        credit = 3,
+        credit = 3.0,
         hour = 48,
         type = "必修",
         category = "专业课",

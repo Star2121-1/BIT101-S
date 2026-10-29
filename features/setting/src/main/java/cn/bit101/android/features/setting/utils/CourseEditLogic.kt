@@ -51,7 +51,8 @@ data class CourseForm(
     val startSection: Int = 1,
     val endSection: Int = 1,
     val campus: String = "",
-    val credit: Int = 0,
+    /** 学分；用 `Double` 以支持 1.5 这种小数学分（与 [CourseScheduleEntity.credit] 一致）。 */
+    val credit: Double = 0.0,
     val hour: Int = 0,
     val type: String = "",
     val category: String = "",

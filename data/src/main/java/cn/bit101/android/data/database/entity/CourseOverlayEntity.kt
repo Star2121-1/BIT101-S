@@ -71,7 +71,8 @@ data class CourseOverlayEntity(
     val startSection: Int,
     val endSection: Int,
     val campus: String,
-    val credit: Int,
+    /** 学分；与 [CourseScheduleEntity.credit] 保持一致用 `Double`（支持小数）。 */
+    val credit: Double,
     val hour: Int,
     val type: String,
     val category: String,

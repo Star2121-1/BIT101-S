@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.data.common.CreditFormat
 import cn.bit101.android.data.database.entity.CourseOverlayEntity
 import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.features.common.MainController
@@ -358,7 +359,7 @@ private fun CourseFormDialog(
     var endSection by remember(initial) { mutableStateOf(initial.endSection.toString()) }
     var number by remember(initial) { mutableStateOf(initial.number) }
     var campus by remember(initial) { mutableStateOf(initial.campus) }
-    var credit by remember(initial) { mutableStateOf(initial.credit.toString()) }
+    var credit by remember(initial) { mutableStateOf(CreditFormat.text(initial.credit)) }
     var hour by remember(initial) { mutableStateOf(initial.hour.toString()) }
     var type by remember(initial) { mutableStateOf(initial.type) }
     var category by remember(initial) { mutableStateOf(initial.category) }
@@ -498,7 +499,7 @@ private fun CourseFormDialog(
                         startSection = startSection.toIntOrNull() ?: 0,
                         endSection = endSection.toIntOrNull() ?: 0,
                         campus = campus,
-                        credit = credit.toIntOrNull() ?: 0,
+                        credit = credit.toDoubleOrNull() ?: 0.0,
                         hour = hour.toIntOrNull() ?: 0,
                         type = type,
                         category = category,

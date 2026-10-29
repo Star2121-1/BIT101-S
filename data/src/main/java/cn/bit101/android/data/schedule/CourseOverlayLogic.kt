@@ -210,7 +210,7 @@ object CourseOverlayLogic {
         startSection: Int = this.startSection,
         endSection: Int = this.endSection,
         campus: String = this.campus,
-        credit: Int = this.credit,
+        credit: Double = this.credit,
         hour: Int = this.hour,
         type: String = this.type,
         category: String = this.category,
