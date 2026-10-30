@@ -31,9 +31,25 @@ internal class AccountViewModel @Inject constructor(
     private val _checkLoginStateFlow = MutableStateFlow<SimpleState?>(null)
     val checkLoginStateFlow = _checkLoginStateFlow
 
+    /**
+     * 整体登录态（= 校园账号会话是否有效，即 [LoginStatus.status]）。
+     * 同时作为「校园账号」连接状态的展示来源，以及个人信息/退出登录的开关。
+     */
     val loginStatusFlow = loginStatus.status.flow
 
     val sidFlow = loginStatus.sid.flow
+
+    /**
+     * BIT101 社区账号密码摘要（非空表示已配置社区独立密码，可走 `/user/login` 轻量登录）。
+     * 作为「BIT101 社区」连接状态的展示来源。
+     */
+    val communityDigestFlow = loginStatus.communityPasswordDigest.flow
+
+    /**
+     * BIT101 服务端运行期可达性（降级提示用，不持久化）。
+     * 与服务端社区连接状态组合，用于在摘要非空但服务端不可达时给出「已连接 · 服务端暂不可用」。
+     */
+    val bit101AvailableFlow = loginStatus.bit101Available
 
     private val _updateUserInfoStateFlow = MutableStateFlow<SimpleState?>(null)
     val updateUserInfoStateFlow = _updateUserInfoStateFlow

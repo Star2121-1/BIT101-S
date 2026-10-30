@@ -32,7 +32,7 @@ internal fun LogoutPage(
     ) {
         val underlineColor = MaterialTheme.colorScheme.secondaryContainer
         Text(
-            "已经登陆",
+            "已经登录",
             style = MaterialTheme.typography.headlineLarge.copy(color = MaterialTheme.colorScheme.primary),
             modifier = Modifier.drawBehind {
                 val strokeWidth = 10.dp.toPx()
@@ -48,7 +48,7 @@ internal fun LogoutPage(
         )
         Spacer(modifier = Modifier.height(5.dp))
         Text(
-            text = sid ?: "无法获取sid",
+            text = sid ?: "无法获取学号",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
         )

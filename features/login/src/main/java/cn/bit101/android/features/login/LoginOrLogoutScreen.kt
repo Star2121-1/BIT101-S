@@ -52,7 +52,7 @@ fun LoginOrLogoutScreen(
             // 点击热区落在 y≈48px，等于被状态栏吃掉一半）
             Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
                 TabRow(selectedTabIndex = if (communityOnly) 1 else 0) {
-                    listOf("校园账号", "BIT101").forEachIndexed { index, title ->
+                    listOf("校园账号", "BIT101 社区").forEachIndexed { index, title ->
                         Tab(
                             selected = communityOnly == (index == 1),
                             enabled = !loading,
@@ -69,7 +69,7 @@ fun LoginOrLogoutScreen(
                 key(communityOnly) {
                     LoginPage(
                         loginState = postLoginState,
-                        title = if (communityOnly) "登录 BIT101" else "登录校园账号",
+                        title = if (communityOnly) "登录 BIT101 社区" else "登录校园账号",
                         description = if (communityOnly) {
                             "「统一身份认证」用学校账号密码连接 BIT101；" +
                                 "「密码登录」用已有 BIT101 账号的独立密码，不经过学校认证。"
@@ -93,10 +93,10 @@ fun LoginOrLogoutScreen(
                         ),
                         onLoginSuccess = {
                             mainController.popBackStack()
-                            mainController.snackbar(if (communityOnly) "BIT101 已连接" else "登录成功OvO")
+                            mainController.snackbar(if (communityOnly) "BIT101 社区已连接OvO" else "校园账号已连接OvO")
                         },
                         onLoginFailed = {
-                            mainController.snackbar(if (communityOnly) "BIT101 连接失败" else "登录失败Orz")
+                            mainController.snackbar(if (communityOnly) "BIT101 社区连接失败Orz" else "校园账号连接失败Orz")
                         },
                         // 放在 Column 里要给 weight，否则 fillMaxSize 会和上面的 TabRow 抢高度
                         modifier = Modifier.weight(1f),

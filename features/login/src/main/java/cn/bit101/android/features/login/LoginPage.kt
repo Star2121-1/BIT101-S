@@ -54,8 +54,8 @@ internal data class LoginAction(
 internal fun LoginPage(
     loginState: SimpleState?,
 
-    title: String = "登录BIT101",
-    description: String = "使用学校统一身份认证账号密码进行登录。",
+    title: String = "登录",
+    description: String = "「校园账号」用学校统一身份认证登录；「BIT101 社区」可用统一认证或社区密码登录。",
     initialSid: String = "",
     usernameEnabled: Boolean = true,
     actions: List<LoginAction>,

@@ -39,6 +39,8 @@ private fun AccountPageContent(
     onCheckLogin: () -> Unit,
     onLogout: () -> Unit,
     onLogin: () -> Unit,
+    schoolConnected: Boolean,
+    communityStatusText: String,
 ) {
     val infoItems = listOf(
         SettingItemData.Custom(
@@ -76,13 +78,23 @@ private fun AccountPageContent(
     )
 
     val loginItems = listOf(
+        // 两路独立连接状态（与新的双 Tab 登录页概念一致）
+        SettingItemData.Card(
+            title = "校园账号",
+            subTitle = "学校统一身份认证会话（座位、课表等校内功能需要）",
+            text = if (schoolConnected) "已连接" else "未连接",
+        ),
+        SettingItemData.Card(
+            title = "BIT101 社区",
+            subTitle = "社区独立账号（成绩、社区动态等需要；与校园账号相互独立）",
+            text = communityStatusText,
+        ),
+
         SettingItemData.Button(
             title = "登录状态检查",
-            subTitle = "登录分为两步，首先进行学校统一身份认证，然后登录BIT101。\n" +
-                    "点击检查二者登录状态，如果检查登录的结果为“未登录”，APP会根据之前自动加密保存的密码尝试重新登录。",
+            subTitle = "点击检查并自动恢复两路连接。APP 会使用已保存的凭据分别尝试恢复「校园账号」与「BIT101 社区」，恢复后上方状态会实时更新。",
             onClick = onCheckLogin,
             enable = !checkingLogin,
-            text = if (ifLogin) "已登录" else "未登录",
         ),
 
         if(ifLogin) SettingItemData.Button(
@@ -159,6 +171,10 @@ internal fun AccountPage(
 
     val sid by vm.sidFlow.collectAsState(initial = null)
 
+    val communityDigest by vm.communityDigestFlow.collectAsState(initial = "")
+
+    val bit101Available by vm.bit101AvailableFlow.collectAsState(initial = true)
+
     val updateAvatarState by vm.updateAvatarStateFlow.collectAsState()
 
     val updateUserInfoState by vm.updateUserInfoStateFlow.collectAsState()
@@ -201,6 +217,13 @@ internal fun AccountPage(
 
     val user = (getUserInfoState as? SimpleDataState.Success)?.data?.user
 
+    val communityConnected = communityDigest.isNotBlank()
+    val communityStatusText = when {
+        !communityConnected -> "未连接"
+        !bit101Available -> "已连接 · 服务端暂不可用"
+        else -> "已连接"
+    }
+
     AccountPageContent(
         user = user,
         sid = sid,
@@ -212,7 +235,9 @@ internal fun AccountPage(
         onOpenEditMottoDialog = { showMottoEditDialog = true },
         onCheckLogin = vm::checkLogin,
         onLogout = vm::logout,
-        onLogin = onLogin
+        onLogin = onLogin,
+        schoolConnected = ifLogin,
+        communityStatusText = communityStatusText,
     )
 
     if(showNicknameEditDialog && user != null) {
