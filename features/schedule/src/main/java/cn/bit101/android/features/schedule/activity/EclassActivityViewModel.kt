@@ -6,6 +6,7 @@ import cn.bit101.android.config.setting.base.ActivitySettings
 import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.eclass.EclassRefreshBus
 import cn.bit101.android.data.repo.base.EclassRepo
+import cn.bit101.android.data.repo.base.EclassSessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -92,6 +93,14 @@ internal class EclassActivityViewModel @Inject constructor(
     private val _sessionAlive = MutableStateFlow(true)
     val sessionAlive: StateFlow<Boolean> = _sessionAlive.asStateFlow()
 
+    /**
+     * 三态会话状态（未登录 / 服务端不可用 / 可用）。
+     *
+     * 页面据此给不同文案与按钮 —— 「服务器 500」不该让用户去重新登录。
+     */
+    private val _sessionState = MutableStateFlow(EclassSessionState.ALIVE)
+    val sessionState: StateFlow<EclassSessionState> = _sessionState.asStateFlow()
+
     init {
         refresh()
         // 条数上限是取数参数（repo 按它截断），改了必须重新拉一次
@@ -132,13 +141,16 @@ internal class EclassActivityViewModel @Inject constructor(
                 val list = runCatching { eclassRepo.fetchActivities(fetchLimit) }
                     .getOrDefault(emptyList())
                 _rawActivities.value = list
-                _sessionAlive.value = if (list.isNotEmpty()) {
-                    true
+                val state = if (list.isNotEmpty()) {
+                    EclassSessionState.ALIVE
                 } else {
-                    // 空的时候再确认一次会话 —— 失败一律当作「未登录」，
-                    // 这样至少能把登录入口给出来，而不是让用户对着空页面发呆
-                    runCatching { eclassRepo.isSessionAlive() }.getOrDefault(false)
+                    // 空的时候再确认一次会话。⚠️ 要拿到三态：5xx/网络故障不能报成「未登录」，
+                    // 否则用户会对着「还没登录延河课堂」反复重登，而问题其实在学校服务器那边。
+                    runCatching { eclassRepo.sessionState() }
+                        .getOrDefault(EclassSessionState.UNAVAILABLE)
                 }
+                _sessionState.value = state
+                _sessionAlive.value = state == EclassSessionState.ALIVE
             } finally {
                 _loading.value = false
             }

@@ -7,6 +7,7 @@ import cn.bit101.android.data.eclass.EclassDdlLogic
 import cn.bit101.android.data.net.WebViewCookieSync
 import cn.bit101.android.data.net.base.APIManager
 import cn.bit101.android.data.repo.base.EclassRepo
+import cn.bit101.android.data.repo.base.EclassSessionState
 import cn.bit101.api.model.http.eclass.GetEclassActivitiesDataModel.Activity
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -61,15 +62,21 @@ internal class DefaultEclassRepo @Inject constructor(
      * 所以这里：① 先把 WebView 的 cookie 同步过来（登录刚完成时 OkHttp
      * 的 jar 里可能还是旧会话）；② 失败再试一次，两次都失败才说未登录。
      */
-    override suspend fun isSessionAlive(): Boolean {
+    override suspend fun sessionState(): EclassSessionState {
         syncCookies()
         repeat(2) {
-            val ok = runCatching { apiManager.api.eclass.getVisitedCourses() }
-                .map { it.isSuccessful }
-                .getOrDefault(false)
-            if (ok) return true
+            val response = runCatching { apiManager.api.eclass.getVisitedCourses() }.getOrNull()
+            when {
+                // 网络层失败（超时/DNS/TLS）：重试一次，两次都失败视为不可用
+                response == null -> Unit
+                response.isSuccessful -> return EclassSessionState.ALIVE
+                // 明确未登录：服务端把请求挡在门外
+                response.code() == 401 || response.code() == 403 -> return EclassSessionState.NEEDS_LOGIN
+                // 5xx / 其它非 2xx：**学校侧的问题**，不是用户掉登录
+                else -> return EclassSessionState.UNAVAILABLE
+            }
         }
-        return false
+        return EclassSessionState.UNAVAILABLE
     }
 
     override suspend fun fetchHomework(now: LocalDateTime): List<EclassDdlItem> =

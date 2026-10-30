@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
@@ -41,6 +42,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.config.common.FocusKeys
 import cn.bit101.android.data.eclass.EclassActivityLogic
 import cn.bit101.android.data.eclass.EclassDdlLogic
+import cn.bit101.android.data.repo.base.EclassSessionState
 import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.common.MainController
 import cn.bit101.android.features.common.component.PageFab
@@ -72,7 +74,7 @@ internal fun EclassActivityScreen(mainController: MainController) {
 
     val activities by vm.activities.collectAsState()
     val loading by vm.loading.collectAsState()
-    val sessionAlive by vm.sessionAlive.collectAsState()
+    val sessionState by vm.sessionState.collectAsState()
 
     val now = LocalDateTime.now()
 
@@ -127,8 +129,8 @@ internal fun EclassActivityScreen(mainController: MainController) {
                         }
                     } else {
                         ActivityEmptyCard(
-                            // 未登录 / 会话失效 → 给登录入口；否则只是「暂时没有」
-                            loggedIn = sessionAlive,
+                            // 三态：可用 / 未登录 / 服务器不可用，各自给不同文案与按钮
+                            state = sessionState,
                             onOpenEclass = { mainController.openWebPage(EclassDdlLogic.LOGIN_URL) },
                             onRetry = vm::refresh,
                         )
@@ -220,10 +222,11 @@ private fun ActivityRow(
 
 @Composable
 private fun ActivityEmptyCard(
-    loggedIn: Boolean,
+    state: EclassSessionState,
     onOpenEclass: () -> Unit,
     onRetry: () -> Unit,
 ) {
+    val alive = state == EclassSessionState.ALIVE
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -234,27 +237,40 @@ private fun ActivityEmptyCard(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = if (loggedIn) "暂时没有课程动态" else "还没登录延河课堂",
+            text = when (state) {
+                EclassSessionState.ALIVE -> "暂时没有课程动态"
+                EclassSessionState.NEEDS_LOGIN -> "还没登录延河课堂"
+                // ⚠️ 服务器 5xx / 网络不通时**不能**说"没登录"：那会让用户去重登，
+                //    而重登进去只会看到 Keycloak 的 500 页（2026-10-30 实测过）
+                EclassSessionState.UNAVAILABLE -> "延河课堂暂时打不开"
+            },
             color = MaterialTheme.colorScheme.onSecondaryContainer,
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = if (loggedIn) {
-                "老师发布资料或作业后，这里会显示出来"
-            } else {
-                "登录后即可看到课程动态（作业、资料、公告）"
+            text = when (state) {
+                EclassSessionState.ALIVE -> "老师发布资料或作业后，这里会显示出来"
+                EclassSessionState.NEEDS_LOGIN -> "登录后即可看到课程动态（作业、资料、公告）"
+                EclassSessionState.UNAVAILABLE -> "学校那边没响应，不是你没登录。稍后再试即可"
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f),
         )
         Spacer(modifier = Modifier.height(10.dp))
         Row {
-            Button(onClick = onOpenEclass) {
-                Text(if (loggedIn) "打开延河课堂" else "去登录")
-            }
-            if (loggedIn) {
+            if (state == EclassSessionState.UNAVAILABLE) {
+                // 服务器故障时主按钮给「刷新」，别把用户往登录页赶
+                Button(onClick = onRetry) { Text("重试") }
                 Spacer(modifier = Modifier.size(8.dp))
-                Button(onClick = onRetry) { Text("刷新") }
+                TextButton(onClick = onOpenEclass) { Text("打开延河课堂") }
+            } else {
+                Button(onClick = onOpenEclass) {
+                    Text(if (alive) "打开延河课堂" else "去登录")
+                }
+                if (alive) {
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Button(onClick = onRetry) { Text("刷新") }
+                }
             }
         }
     }
