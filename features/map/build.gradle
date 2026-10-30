@@ -47,9 +47,6 @@ dependencies {
     // 地图
     implementation 'ovh.plrapps:mapcompose:2.5.0'
 
-    // 官方矢量校园图（SVG）渲染
-    implementation "io.coil-kt:coil-compose:2.5.0"
-
     // hilt
     implementation "androidx.hilt:hilt-navigation-compose:1.1.0"
     implementation "com.google.dagger:hilt-android:${versions.hilt}"
