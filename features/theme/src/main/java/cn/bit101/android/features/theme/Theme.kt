@@ -139,7 +139,7 @@ internal class ThemeViewModel @Inject constructor(
             darkThemeMode = runCatching { themeSettings.darkThemeMode.get() }
                 .getOrDefault(DarkThemeMode.System),
             appPalette = runCatching { themeSettings.appPalette.get() }
-                .getOrDefault(AppPalette.Warm),
+                .getOrDefault(AppPalette.Brand),
             appSkin = runCatching { themeSettings.appSkin.get() }
                 .getOrDefault(AppSkin.Classic),
             courseColorFamily = runCatching { courseScheduleSettings.courseColorFamily.get() }

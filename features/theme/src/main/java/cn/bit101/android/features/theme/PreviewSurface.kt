@@ -30,7 +30,7 @@ import cn.bit101.android.features.theme.palette.Palettes
 fun PreviewSurface(
     modifier: Modifier = Modifier,
     darkTheme: Boolean = false,
-    palette: AppPalette = AppPalette.Warm,
+    palette: AppPalette = AppPalette.Brand,
     content: @Composable () -> Unit,
 ) {
     val scheme = Palettes.scheme(palette, isDark = darkTheme)

@@ -18,7 +18,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
+import cn.bit101.android.config.setting.base.CourseColorFamily
 import cn.bit101.android.config.setting.base.TimeTable
+import cn.bit101.android.config.setting.base.toCourseColorFamilyData
 import cn.bit101.android.config.setting.base.toTimeTableString
 import cn.bit101.android.data.database.entity.CustomScheduleEntity
 import cn.bit101.android.features.common.component.schedule.AddEditScheduleDialog
@@ -51,6 +53,8 @@ private fun CalendarSettingPageContent(
     onOpenTimeTable: () -> Unit,
     onOpenCustomSchedules: () -> Unit,
     onSettingChange: (SettingData) -> Unit,
+    courseColorFamily: CourseColorFamily,
+    onOpenCourseColorDialog: () -> Unit,
 ) {
     val dataSettings = listOf(
         SettingItemData.Button(
@@ -95,6 +99,12 @@ private fun CalendarSettingPageContent(
     )
 
     val displaySettings = listOf(
+        SettingItemData.Button(
+            title = "课表颜色",
+            subTitle = "原版统色 / 经典 12 色 / 莫兰迪 12 色，可切换",
+            onClick = onOpenCourseColorDialog,
+            text = courseColorFamily.toCourseColorFamilyData().name,
+        ),
         SettingItemData.Switch(
             title = "显示周六",
             onClick = { onSettingChange(settingData.copy(showSaturday = it)) },
@@ -332,6 +342,51 @@ private fun CustomScheduleDialog(
     )
 }
 
+// 选择课表颜色族对话框
+@Composable
+private fun CourseColorDialog(
+    current: CourseColorFamily,
+    onSelect: (CourseColorFamily) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("课表颜色") },
+        text = {
+            Column {
+                CourseColorFamily.allFamilies.forEach { family ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = family.available) { onSelect(family) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = family == current,
+                            onClick = { onSelect(family) },
+                            enabled = family.available,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(text = family.toCourseColorFamilyData().name)
+                            if (family.experimental) {
+                                Text(
+                                    text = "（实验性）",
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("返回") }
+        },
+    )
+}
+
 @Composable
 internal fun CalendarSettingPage(
     onSnackBar: (String) -> Unit
@@ -342,6 +397,10 @@ internal fun CalendarSettingPage(
     val firstDay by vm.firstDayFlow.collectAsState(initial = null)
 
     val settingData by vm.settingDataFlow.collectAsState(initial = SettingData.default)
+
+    val courseColorFamily by vm.courseColorFamilyFlow.collectAsState(initial = CourseColorFamily.Legacy)
+
+    var showCourseColorDialog by rememberSaveable { mutableStateOf(false) }
 
     val getFirstDayState by vm.getFirstDayStateLiveData.observeAsState()
 
@@ -435,7 +494,9 @@ internal fun CalendarSettingPage(
         onGetExams = vm::getExams,
         onOpenTimeTable = { showTimeTableDialog = true },
         onOpenCustomSchedules = { showCustomSchedulesDialog = true },
-        onSettingChange = vm::setSettingData
+        onSettingChange = vm::setSettingData,
+        courseColorFamily = courseColorFamily,
+        onOpenCourseColorDialog = { showCourseColorDialog = true },
     )
 
     if(showTermListDialog) {
@@ -455,6 +516,17 @@ internal fun CalendarSettingPage(
             errorMessage = if(setTimeTableState is SimpleState.Fail) "格式错误" else "",
             onSetTimeTable = vm::setTimeTable,
             onDismiss = { showTimeTableDialog = false }
+        )
+    }
+
+    if(showCourseColorDialog) {
+        CourseColorDialog(
+            current = courseColorFamily,
+            onSelect = {
+                vm.setCourseColorFamily(it)
+                showCourseColorDialog = false
+            },
+            onDismiss = { showCourseColorDialog = false },
         )
     }
 

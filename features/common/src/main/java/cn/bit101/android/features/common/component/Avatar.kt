@@ -31,7 +31,9 @@ fun Avatar(
     user: User? = null,
     low: Boolean? = true,
     onClick: ((User?) -> Unit)? = null,
-    showIdentity: Boolean = true
+    showIdentity: Boolean = true,
+    /** 非空且 ≥0 时改用本机生成的随机头像（不上传，仅本机显示）。 */
+    localSeed: Int? = null,
 ) {
     val ctx = LocalContext.current
 
@@ -54,20 +56,24 @@ fun Avatar(
                 }
             }
 
-            AsyncImage(
-                modifier = modifier,
-                contentScale = ContentScale.FillBounds,
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(if(low == true) user?.avatar?.lowUrl else user?.avatar?.url)
-                    .crossfade(true)
-                    .dispatcher(Dispatchers.IO)
-                    .build(),
-                imageLoader = getImageLoader(ctx),
-                placeholder = painter,
-                error = painter,
-                fallback = painter,
-                contentDescription = "avatar"
-            )
+            if (localSeed != null && localSeed >= 0) {
+                GeneratedAvatar(seed = localSeed, size = size, modifier = modifier)
+            } else {
+                AsyncImage(
+                    modifier = modifier,
+                    contentScale = ContentScale.FillBounds,
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(if(low == true) user?.avatar?.lowUrl else user?.avatar?.url)
+                        .crossfade(true)
+                        .dispatcher(Dispatchers.IO)
+                        .build(),
+                    imageLoader = getImageLoader(ctx),
+                    placeholder = painter,
+                    error = painter,
+                    fallback = painter,
+                    contentDescription = "avatar"
+                )
+            }
         }
 
         if(user != null && user.identity.id != 0 && showIdentity) {

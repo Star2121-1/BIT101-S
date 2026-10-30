@@ -67,6 +67,19 @@ internal class CourseScheduleViewModel @Inject constructor(
 
     val firstDayFlow = courseScheduleSettings.firstDay.flow
 
+    // 单课颜色覆盖（课名 → 色号），用于「点开课程单独调色」
+    val courseColorOverridesFlow = courseScheduleSettings.courseColorOverrides.flow
+
+    fun setCourseColor(name: String, index: Int) = withScope {
+        val cur = courseScheduleSettings.courseColorOverrides.get()
+        courseScheduleSettings.courseColorOverrides.set(cur + (name to index))
+    }
+
+    fun clearCourseColor(name: String) = withScope {
+        val cur = courseScheduleSettings.courseColorOverrides.get()
+        courseScheduleSettings.courseColorOverrides.set(cur - name)
+    }
+
     private val _weekFlow = MutableStateFlow(Int.MAX_VALUE)
     val weekFlow: StateFlow<Int> = _weekFlow.asStateFlow()
 

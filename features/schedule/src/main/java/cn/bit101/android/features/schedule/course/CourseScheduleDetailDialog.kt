@@ -8,6 +8,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -23,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import cn.bit101.android.data.common.CreditFormat
@@ -30,6 +39,7 @@ import cn.bit101.android.data.database.entity.CourseScheduleEntity
 import cn.bit101.android.data.database.entity.ExamScheduleEntity
 import cn.bit101.android.features.common.component.schedule.Item
 import cn.bit101.android.features.map.CampusPlaces
+import cn.bit101.android.features.theme.GridTheme
 import java.time.temporal.ChronoUnit
 
 // 课程详情对话框
@@ -39,6 +49,12 @@ internal fun CourseScheduleDetailDialog(
     onDismiss: () -> Unit,
     /** 点「在地图上查看」时回调**教室原文**，由调用方决定跳不跳（匹配不到要给提示）。 */
     onLocate: (String) -> Unit,
+    /** 当前生效色号（0..11）；-1 表示未知（预览用）。 */
+    currentColorIndex: Int = -1,
+    /** 选中某色号。 */
+    onPickColor: (Int) -> Unit = {},
+    /** 清除单课覆盖、回到跟随主题默认。 */
+    onResetColor: () -> Unit = {},
 ) {
     AlertDialog(
         modifier = Modifier.fillMaxSize(0.9f),
@@ -71,6 +87,12 @@ internal fun CourseScheduleDetailDialog(
                     Item("课程性质：", course.type)
                     Item("课程类别：", course.category)
                     Item("开课单位：", course.department)
+
+                    Spacer(modifier = Modifier.padding(6.dp))
+                    Text(text = "课程颜色", style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.padding(2.dp))
+                    CourseColorSwatches(currentColorIndex, onPickColor)
+                    TextButton(onClick = onResetColor) { Text("跟随主题默认颜色") }
                 }
             }
         },
@@ -202,6 +224,38 @@ private fun ColumnScope.LocateOnMapChip(
             )
         }
     )
+}
+
+/** 12 色调色板（取当前族表的 fill），点一颗即选中。 */
+@Composable
+private fun CourseColorSwatches(
+    currentIndex: Int,
+    onPick: (Int) -> Unit,
+) {
+    val palette = GridTheme.tokens.coursePalette
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        palette.forEachIndexed { i, c ->
+            val selected = i == currentIndex
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(c.fill)
+                    .border(
+                        width = if (selected) 3.dp else 1.dp,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outline,
+                        shape = CircleShape,
+                    )
+                    .clickable { onPick(i) }
+            )
+        }
+    }
 }
 
 @Preview(showBackground = true)

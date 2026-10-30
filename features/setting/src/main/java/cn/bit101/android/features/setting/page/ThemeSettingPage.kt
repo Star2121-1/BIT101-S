@@ -223,7 +223,7 @@ internal fun ThemeSettingPage() {
     val dynamic by vm.dynamicTheme.flow.collectAsState(initial = false)
     val darkMode by vm.darkThemeMode.flow.collectAsState(initial = DarkThemeMode.System)
     val rotate by vm.autoRotate.flow.collectAsState(initial = false)
-    val palette by vm.appPalette.flow.collectAsState(initial = AppPalette.Warm)
+    val palette by vm.appPalette.flow.collectAsState(initial = AppPalette.Brand)
 
     var showDarkModeDialog by rememberSaveable { mutableStateOf(false) }
     var showPaletteDialog by rememberSaveable { mutableStateOf(false) }

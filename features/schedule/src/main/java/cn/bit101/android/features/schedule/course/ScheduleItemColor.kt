@@ -24,8 +24,10 @@ internal data class ScheduleItemColor(
  * 哈希实现在 `:data` 的 `CourseColorLogic`（全仓唯一，组件/通知同源），
  * 这里只调它 + 收拢越界 —— **禁止**在本模块再写一份哈希（守卫 S3 有单测盯着）。
  */
-internal fun itemColorIndex(item: ScheduleItem): Int =
-    Math.floorMod(CourseColorLogic.of(item.title), CourseColorLogic.PALETTE_SIZE)
+internal fun itemColorIndex(item: ScheduleItem, overrides: Map<String, Int> = emptyMap()): Int {
+    val idx = overrides[item.title] ?: CourseColorLogic.of(item.title)
+    return Math.floorMod(idx, CourseColorLogic.PALETTE_SIZE)
+}
 
 /**
  * 「教学安排覆盖」给那一列的卡片定的**色调**。

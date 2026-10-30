@@ -51,13 +51,17 @@ internal class SettingDataStore @Inject constructor(
     private val SETTING_APP_SKIN = stringPreferencesKey("setting_app_skin")
     val settingAppSkin = PreferencesDataStoreItem(SETTING_APP_SKIN, "classic", preferences.SETTING_DATASTORE)
 
-    // 配色方案：classic 原版 / warm 一格 GRID 暖棕 / brand 北理工（占位·实验性）
+    // 配色方案：classic 原版 / warm 一格 GRID 暖棕 / brand 北理工（默认）
     private val SETTING_APP_PALETTE = stringPreferencesKey("setting_app_palette")
-    val settingAppPalette = PreferencesDataStoreItem(SETTING_APP_PALETTE, "warm", preferences.SETTING_DATASTORE)
+    val settingAppPalette = PreferencesDataStoreItem(SETTING_APP_PALETTE, "brand", preferences.SETTING_DATASTORE)
 
-    // 课程配色族：auto 跟随（按 palette 解析）/ legacy 统色 / classic 12色 / morandi / brand
+    // 课程配色族：legacy 统色（默认）/ classic 12色 / morandi / brand / auto 跟随
     private val COURSE_SCHEDULE_COLOR_FAMILY = stringPreferencesKey("course_schedule_color_family")
-    val courseScheduleColorFamily = PreferencesDataStoreItem(COURSE_SCHEDULE_COLOR_FAMILY, "auto", preferences.SETTING_DATASTORE)
+    val courseScheduleColorFamily = PreferencesDataStoreItem(COURSE_SCHEDULE_COLOR_FAMILY, "legacy", preferences.SETTING_DATASTORE)
+
+    // 单课颜色覆盖：课名 → 色号(0..11)，编码见 CourseScheduleSettings.toColorOverridesString
+    private val COURSE_SCHEDULE_COLOR_OVERRIDES = stringPreferencesKey("course_schedule_color_overrides")
+    val courseScheduleColorOverrides = PreferencesDataStoreItem(COURSE_SCHEDULE_COLOR_OVERRIDES, "", preferences.SETTING_DATASTORE)
 
     // 外观升级一次性说明卡是否已读（稳定线用户 palette 静默迁移时，在我的页/首屏展示）
     private val SETTING_APPEARANCE_TIP_READ = booleanPreferencesKey("setting_appearance_tip_read")

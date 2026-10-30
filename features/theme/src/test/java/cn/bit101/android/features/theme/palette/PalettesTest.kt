@@ -176,4 +176,44 @@ class PalettesTest {
             Palettes.scheme(AppPalette.Classic, isDark = true).background,
         )
     }
+
+    // ── ⑥ 课程配色族真的会换表（「选项是假的」守卫）───────────────────
+
+    /**
+     * 曾经的真 bug：`tokens(..., Brand)` 直接复用 `CoursePalette.light/dark`，
+     * 于是设置里「经典 12 色 ⇄ 北理蓝 12 色」切了**毫无变化** —— 用户以为没生效。
+     * 这里对每一族取 12 支 fill 的签名，要求**各族两两不等**。
+     */
+    @Test
+    fun 课程配色族_每族取到不同色表() {
+        val families = listOf(
+            CourseColorFamily.Legacy,
+            CourseColorFamily.Classic,
+            CourseColorFamily.Morandi,
+            CourseColorFamily.Brand,
+        )
+        for (isDark in listOf(false, true)) {
+            val signatures = families.associateWith { family ->
+                Palettes.tokens(AppPalette.Brand, isDark, family).coursePalette.map { it.fill }
+            }
+            families.forEach { a ->
+                assertEquals("族 $a 应给 12 支：isDark=$isDark", 12, signatures.getValue(a).size)
+                families.filter { it != a }.forEach { b ->
+                    assertNotEquals(
+                        "族 $a 与 $b 的 12 支色表完全相同（isDark=$isDark）——「切了没效果」",
+                        signatures.getValue(a),
+                        signatures.getValue(b),
+                    )
+                }
+            }
+            // 同一族内部 12 支也不能全同（Legacy 统色是唯一例外，它就是设计成同值的）
+            families.filter { it != CourseColorFamily.Legacy }.forEach { family ->
+                assertEquals(
+                    "族 $family 的 12 支应互不相同：isDark=$isDark",
+                    12,
+                    signatures.getValue(family).toSet().size,
+                )
+            }
+        }
+    }
 }

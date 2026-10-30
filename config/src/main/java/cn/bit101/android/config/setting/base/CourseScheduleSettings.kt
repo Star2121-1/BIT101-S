@@ -87,8 +87,11 @@ enum class CourseColorFamily(
     /** 莫兰迪 12 色：低饱和柔和 */
     Morandi,
 
-    /** 北理蓝 12 色：占位（待官方 VI，[experimental] = true） */
-    Brand(experimental = true),
+    /**
+     * 北理蓝 12 色：围绕校色 #1B4F9C 的蓝色系。
+     * 不再是占位——Brand 已成为默认 App 配色，再挂「实验性」自相矛盾。
+     */
+    Brand,
     ;
 
     /**
@@ -102,17 +105,16 @@ enum class CourseColorFamily(
 
         /**
          * 全部族（UI 展示序：Auto 在前）。
-         * ⚠️ **展示序 ≠ 默认值**：首个是 Auto，默认也是 Auto——本枚举恰好一致；
-         * 但 [AppPalette] 不一致，那边不能图省事用 `first()` 兜底。
+         * 默认值 = Legacy（原版统色，用户拍板）。
          */
         val allFamilies: List<CourseColorFamily>
             get() = entries
 
         /**
-         * 通过 datastore 字符串取族，**脏值回落显式默认值**（Auto，不是 `first()`）。
+         * 通过 datastore 字符串取族，**脏值回落显式默认值**（Legacy，原版统色）。
          */
         fun getFamily(value: String): CourseColorFamily =
-            entries.firstOrNull { it.value == value } ?: Auto
+            entries.firstOrNull { it.value == value } ?: Legacy
     }
 }
 
@@ -137,6 +139,27 @@ fun CourseColorFamily.toCourseColorFamilyData() = CourseColorFamilyData(
     },
     value,
 )
+
+private const val OVERRIDE_KV_SEP = "\u0001"
+
+/**
+ * 单课颜色覆盖：课名 → 色号(0..11)。编码为每行 `课名\u0001色号`；
+ * 课名里的换行/分隔符替换为空格（课程名极少数含换行，如考试前缀）。
+ */
+fun Map<String, Int>.toColorOverridesString(): String =
+    entries.joinToString("\n") { (name, idx) ->
+        "${name.replace("\n", " ").replace(OVERRIDE_KV_SEP, " ")}$OVERRIDE_KV_SEP$idx"
+    }
+
+/** 解析 [toColorOverridesString] 的产物；脏行忽略，色号收拢到 0..11。 */
+fun String.toColorOverrides(): Map<String, Int> =
+    lineSequence().mapNotNull { line ->
+        if (line.isBlank()) return@mapNotNull null
+        val i = line.lastIndexOf(OVERRIDE_KV_SEP)
+        if (i <= 0) return@mapNotNull null
+        val idx = line.substring(i + 1).toIntOrNull() ?: return@mapNotNull null
+        line.substring(0, i) to idx.coerceIn(0, 11)
+    }.toMap()
 
 /**
  * 课程表设置
@@ -194,7 +217,12 @@ interface CourseScheduleSettings {
     val timeTable: SettingItem<TimeTable>
 
     /**
-     * 课程配色族（默认 Auto = 跟随外观，按 palette 解析）
+     * 课程配色族（默认 Legacy = 原版统色）
      */
     val courseColorFamily: SettingItem<CourseColorFamily>
+
+    /**
+     * 单课颜色覆盖（课名 → 色号 0..11）。空 = 全部跟随族/hash。
+     */
+    val courseColorOverrides: SettingItem<Map<String, Int>>
 }

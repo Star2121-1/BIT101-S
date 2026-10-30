@@ -1,5 +1,10 @@
 package cn.bit101.android.features.setting.page
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
@@ -13,9 +18,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.features.common.component.Avatar
+import cn.bit101.android.features.common.component.GeneratedAvatar
 import cn.bit101.android.features.common.helper.SimpleDataState
 import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.common.helper.rememberImagePicker
@@ -24,6 +32,7 @@ import cn.bit101.android.features.setting.component.SettingsColumn
 import cn.bit101.android.features.setting.component.SettingsGroup
 import cn.bit101.android.features.setting.viewmodel.AccountViewModel
 import cn.bit101.api.model.common.User
+import kotlin.random.Random
 
 
 @Composable
@@ -41,6 +50,8 @@ private fun AccountPageContent(
     onLogin: () -> Unit,
     schoolConnected: Boolean,
     communityStatusText: String,
+    localAvatarSeed: Int,
+    onOpenRandomAvatarDialog: () -> Unit,
 ) {
     val infoItems = listOf(
         SettingItemData.Custom(
@@ -52,8 +63,15 @@ private fun AccountPageContent(
                     user = user,
                     low = false,
                     showIdentity = false,
+                    localSeed = localAvatarSeed.takeIf { it >= 0 },
                 )
             }
+        ),
+        SettingItemData.Button(
+            title = "随机头像",
+            subTitle = "本机生成（不上传），可换底色与动物",
+            enable = !updatingUserInfo,
+            onClick = onOpenRandomAvatarDialog,
         ),
         SettingItemData.Button(
             title = "昵称",
@@ -210,6 +228,8 @@ internal fun AccountPage(
 
     var showNicknameEditDialog by rememberSaveable { mutableStateOf(false) }
     var showMottoEditDialog by rememberSaveable { mutableStateOf(false) }
+    var localAvatarSeed by rememberSaveable { mutableStateOf(-1) }
+    var showRandomAvatarDialog by rememberSaveable { mutableStateOf(false) }
 
     val imagePicker = rememberImagePicker(
         vm::updateAvatar
@@ -238,6 +258,8 @@ internal fun AccountPage(
         onLogin = onLogin,
         schoolConnected = ifLogin,
         communityStatusText = communityStatusText,
+        localAvatarSeed = localAvatarSeed,
+        onOpenRandomAvatarDialog = { showRandomAvatarDialog = true },
     )
 
     if(showNicknameEditDialog && user != null) {
@@ -261,4 +283,46 @@ internal fun AccountPage(
             onConfirm = { vm.updateUserInfo(motto = editingMotto) }
         )
     }
+
+    if(showRandomAvatarDialog) {
+        RandomAvatarDialog(
+            currentSeed = localAvatarSeed,
+            onApply = {
+                localAvatarSeed = it
+                showRandomAvatarDialog = false
+            },
+            onDismiss = { showRandomAvatarDialog = false },
+        )
+    }
+}
+
+// 随机头像对话框（本机生成，不上传）
+@Composable
+private fun RandomAvatarDialog(
+    currentSeed: Int,
+    onApply: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var seed by rememberSaveable {
+        mutableStateOf(if (currentSeed >= 0) currentSeed else Random.nextInt(0, 100000))
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("随机头像（本机）") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                GeneratedAvatar(seed = seed, size = 96.dp)
+                Spacer(Modifier.height(12.dp))
+                Row {
+                    TextButton(onClick = { seed = Random.nextInt(0, 100000) }) { Text("换一个") }
+                    TextButton(onClick = { onApply(seed) }) { Text("使用") }
+                }
+                TextButton(onClick = { onApply(-1) }) { Text("恢复原头像") }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }

@@ -47,13 +47,25 @@ internal object Palettes {
      * （num 三档 / state 三档 / success·accent·info 族）来自
      * [SharedGridTokens]（§5.2：语义色不随品牌变）。
      *
-     * TODO(P5-D)：[family] 形参本轮**只作占位、不消费**——一律返回现有
-     * [CoursePalette]（Classic 12 色）。族注册表（CoursePalettes）与
-     * auto 解析（CourseColorResolver.resolve）落地后按族取表。
+     * [family] 决定课程 12 支颜料取哪套族表（原版统色 / 经典 12 色 / 莫兰迪 / 北理蓝）。
+     * Auto 按 palette 解析（Classic⇒Legacy 统色，Warm/Brand⇒Classic 12 色）——此规则与
+     * `:data` 的 `CourseColorResolver.resolve` 同义（此处内联一份，避免 :theme 反向依赖 :data）。
      */
     fun tokens(palette: AppPalette, isDark: Boolean, family: CourseColorFamily): GridTokens {
         val ps = paletteSchemeByName(palette.name, isDark)
         val shared = if (isDark) sharedGridTokensDark else sharedGridTokensLight
+        val courses = when (family) {
+            CourseColorFamily.Legacy -> if (isDark) CoursePalette.legacyDark else CoursePalette.legacyLight
+            CourseColorFamily.Morandi -> if (isDark) CoursePalette.morandiDark else CoursePalette.morandiLight
+            CourseColorFamily.Classic -> if (isDark) CoursePalette.dark else CoursePalette.light
+            // 北理蓝：围绕校色 #1B4F9C 的蓝色系 12 支（与经典 12 色的彩虹系明确区分）
+            CourseColorFamily.Brand -> if (isDark) CoursePalette.brandDark else CoursePalette.brandLight
+            // Auto：按 palette 解析（同 CourseColorResolver.resolve）
+            CourseColorFamily.Auto -> when (palette) {
+                AppPalette.Classic -> if (isDark) CoursePalette.legacyDark else CoursePalette.legacyLight
+                AppPalette.Warm, AppPalette.Brand -> if (isDark) CoursePalette.dark else CoursePalette.light
+            }
+        }
         return GridTokens(
             // ── 随 palette（PaletteScheme）──
             surface2 = ps.surface2,
@@ -82,8 +94,8 @@ internal object Palettes {
             numMd = shared.numMd,
             numSm = shared.numSm,
 
-            // ── 第三轴：本轮占位（TODO P5-D 按 family 取族表）──
-            coursePalette = if (isDark) CoursePalette.dark else CoursePalette.light,
+            // ── 第三轴：按 family 取族表（Auto 已在此按 palette 解析）──
+            coursePalette = courses,
         )
     }
 

@@ -7,6 +7,8 @@ import cn.bit101.android.config.datastore.SettingDataStore
 import cn.bit101.android.config.setting.base.CourseColorFamily
 import cn.bit101.android.config.setting.base.CourseScheduleSettings
 import cn.bit101.android.config.setting.base.TimeTable
+import cn.bit101.android.config.setting.base.toColorOverrides
+import cn.bit101.android.config.setting.base.toColorOverridesString
 import cn.bit101.android.config.setting.base.toTimeTable
 import cn.bit101.android.config.setting.base.toTimeTableString
 import java.time.LocalDate
@@ -56,6 +58,12 @@ internal class DefaultCourseScheduleSettings @Inject constructor(
         override fun invokeFrom(value: CourseColorFamily) = value.value
     }
 
+    /** 单课颜色覆盖的转换器 */
+    private val colorOverridesTransformer = object : Transformer<String, Map<String, Int>> {
+        override fun invokeTo(value: String) = value.toColorOverrides()
+        override fun invokeFrom(value: Map<String, Int>) = value.toColorOverridesString()
+    }
+
     override val term = settingDataStore.courseScheduleTerm.toSettingItem()
 
     override val firstDay = settingDataStore.courseScheduleFirstDay.toSettingItem().map(firstDayTransformer)
@@ -77,4 +85,6 @@ internal class DefaultCourseScheduleSettings @Inject constructor(
     override val timeTable = settingDataStore.courseScheduleTimeTable.toSettingItem().map(timeTableTransformer)
 
     override val courseColorFamily = settingDataStore.courseScheduleColorFamily.toSettingItem().map(courseColorFamilyTransformer)
+
+    override val courseColorOverrides = settingDataStore.courseScheduleColorOverrides.toSettingItem().map(colorOverridesTransformer)
 }

@@ -54,19 +54,22 @@ class CourseColorResolverTest {
     }
 
     /**
-     * 脏值链路：存盘字符串脏 ⇒ 枚举回落显式默认（Auto）⇒ 再按 palette 解析，不崩不白屏。
-     * 同时锁「默认 palette 链路下 auto ⇒ Classic 12 色」——alpha 用户观感零变化的那条路。
+     * 脏值链路：存盘字符串脏 ⇒ 枚举回落显式默认（族 Legacy / palette Brand）⇒ 再解析，不崩不白屏。
+     *
+     * ⚠️ 两条默认值都改过一次（族 Auto⇒Legacy、palette Warm⇒Brand），本用例跟着改：
+     * 它锁的是「**当前**显式默认」，不是历史值 —— 默认值搬家时这里必须同步，否则
+     * 脏值链路和首帧初值会各说各话。
      */
     @Test
     fun 脏值链路回落默认值() {
         val stored = CourseColorFamily.getFamily("not-a-family")
-        assertEquals(CourseColorFamily.Auto, stored)
+        assertEquals(CourseColorFamily.Legacy, stored)
 
         val palette = AppPalette.getPalette("also-garbage")
-        assertEquals(AppPalette.Warm, palette)
+        assertEquals(AppPalette.Brand, palette)
 
         assertEquals(
-            CourseColorFamily.Classic,
+            CourseColorFamily.Legacy,
             CourseColorResolver.resolve(stored, palette),
         )
     }

@@ -54,6 +54,84 @@ object CoursePalette {
         CourseColors(Color(0xFF234D2B), Color(0xFFC7EACE), Color(0xFFC7EACE)), // 11 竹青
     )
 
+    /**
+     * 原版统色 12 支：12 支同值（还原 master 课表「所有课一个颜色」的观感）。
+     * 族 = [cn.bit101.android.config.setting.base.CourseColorFamily.Legacy]，也是默认族。
+     */
+    val legacyLight: List<CourseColors> = List(PALETTE_SIZE) {
+        CourseColors(Color(0xFFE7ECF3), Color(0xFF3D5573), Color(0xFF5B7BA6))
+    }
+    val legacyDark: List<CourseColors> = List(PALETTE_SIZE) {
+        CourseColors(Color(0xFF2C3542), Color(0xFFC6D3E3), Color(0xFFC6D3E3))
+    }
+
+    /** 莫兰迪 12 支（低饱和柔和）。族 = CourseColorFamily.Morandi。 */
+    val morandiLight: List<CourseColors> = listOf(
+        CourseColors(Color(0xFFD9DCE1), Color(0xFF4A4F58), Color(0xFF8A929E)), // 灰蓝
+        CourseColors(Color(0xFFE3D9CF), Color(0xFF5C4A3A), Color(0xFFA08A72)), // 陶土
+        CourseColors(Color(0xFFCFDCD3), Color(0xFF3F5245), Color(0xFF7E9A88)), // 灰绿
+        CourseColors(Color(0xFFE2D2D3), Color(0xFF5A3D40), Color(0xFFA27578)), // 灰玫
+        CourseColors(Color(0xFFD3DFE4), Color(0xFF3A5058), Color(0xFF77929C)), // 灰青
+        CourseColors(Color(0xFFDEDBC6), Color(0xFF54503A), Color(0xFF948E6E)), // 灰黄
+        CourseColors(Color(0xFFD9D1DE), Color(0xFF4C3D55), Color(0xFF8A7594)), // 灰紫
+        CourseColors(Color(0xFFD5DCC9), Color(0xFF44503A), Color(0xFF869472)), // 灰橄榄
+        CourseColors(Color(0xFFE0CFC9), Color(0xFF5A3F38), Color(0xFFA17E74)), // 灰砖
+        CourseColors(Color(0xFFC9DCDC), Color(0xFF384F4F), Color(0xFF6E9494)), // 灰青绿
+        CourseColors(Color(0xFFDCCBDA), Color(0xFF523A4E), Color(0xFF947289)), // 灰梅
+        CourseColors(Color(0xFFCFDACB), Color(0xFF3E5040), Color(0xFF779075)), // 灰苔
+    )
+    val morandiDark: List<CourseColors> = listOf(
+        CourseColors(Color(0xFF353A42), Color(0xFFC3CAD6), Color(0xFFC3CAD6)),
+        CourseColors(Color(0xFF453B31), Color(0xFFD8C9B6), Color(0xFFD8C9B6)),
+        CourseColors(Color(0xFF33403A), Color(0xFFC2D3C6), Color(0xFFC2D3C6)),
+        CourseColors(Color(0xFF423234), Color(0xFFD6C0C2), Color(0xFFD6C0C2)),
+        CourseColors(Color(0xFF2F3B40), Color(0xFFBFD0D6), Color(0xFFBFD0D6)),
+        CourseColors(Color(0xFF3B382B), Color(0xFFD6D2BE), Color(0xFFD6D2BE)),
+        CourseColors(Color(0xFF3A3240), Color(0xFFCDBFD4), Color(0xFFCDBFD4)),
+        CourseColors(Color(0xFF353D2F), Color(0xFFC8D4BC), Color(0xFFC8D4BC)),
+        CourseColors(Color(0xFF40322D), Color(0xFFD8C4BD), Color(0xFFD8C4BD)),
+        CourseColors(Color(0xFF2B3838), Color(0xFFBCD2D2), Color(0xFFBCD2D2)),
+        CourseColors(Color(0xFF3B2F3A), Color(0xFFD3BFCD), Color(0xFFD3BFCD)),
+        CourseColors(Color(0xFF313B30), Color(0xFFC4D2C1), Color(0xFFC4D2C1)),
+    )
+
+    /**
+     * 北理蓝 12 支 —— 围绕校色 #1B4F9C 的**蓝色系**，族 = CourseColorFamily.Brand。
+     *
+     * ⚠️ 这套表不能省：早先 `Palettes.tokens` 把 Brand 直接指到 [light]/[dark]，
+     * 结果用户在设置里切「经典 12 色 ⇄ 北理蓝 12 色」**看不出任何差别** —— 选项是假的。
+     * 这里 11 支落在 200°~250° 蓝色带内（靠色相 + 明度拉开），第 11 号用品牌金
+     * （tertiary #7A5A00）做收尾，避免整屏深浅蓝糊成一片。
+     */
+    val brandLight: List<CourseColors> = listOf(
+        CourseColors(Color(0xFFD6E2F5), Color(0xFF10315E), Color(0xFF1B4F9C)), // 0 校色蓝
+        CourseColors(Color(0xFFCCE0F0), Color(0xFF0B3350), Color(0xFF1E6FA6)), // 1 青蓝
+        CourseColors(Color(0xFFD3DAF0), Color(0xFF141F52), Color(0xFF2C3D9C)), // 2 靛蓝
+        CourseColors(Color(0xFFC9E4EC), Color(0xFF073039), Color(0xFF14788A)), // 3 湖蓝
+        CourseColors(Color(0xFFE1E6F7), Color(0xFF1B2255), Color(0xFF3E4FA0)), // 4 雾蓝
+        CourseColors(Color(0xFFBFD3EA), Color(0xFF0A2740), Color(0xFF2A5C90)), // 5 钢蓝
+        CourseColors(Color(0xFFD8D3EE), Color(0xFF231C55), Color(0xFF5A45A0)), // 6 蓝紫
+        CourseColors(Color(0xFFCBE8E6), Color(0xFF06322F), Color(0xFF126F69)), // 7 蓝绿
+        CourseColors(Color(0xFFE4EAF2), Color(0xFF1B2530), Color(0xFF46586E)), // 8 灰蓝
+        CourseColors(Color(0xFFC7D9F0), Color(0xFF0C2A4E), Color(0xFF245FA8)), // 9 天蓝
+        CourseColors(Color(0xFFDDE7F4), Color(0xFF122A45), Color(0xFF356FA8)), // 10 浅钢蓝
+        CourseColors(Color(0xFFEDE3C8), Color(0xFF3A2E08), Color(0xFF7A5A00)), // 11 品牌金
+    )
+    val brandDark: List<CourseColors> = listOf(
+        CourseColors(Color(0xFF16305A), Color(0xFFC9D9F2), Color(0xFFC9D9F2)),
+        CourseColors(Color(0xFF123A52), Color(0xFFC2DDEE), Color(0xFFC2DDEE)),
+        CourseColors(Color(0xFF1B2358), Color(0xFFCCD3F0), Color(0xFFCCD3F0)),
+        CourseColors(Color(0xFF0C3540), Color(0xFFBCE3EC), Color(0xFFBCE3EC)),
+        CourseColors(Color(0xFF232A62), Color(0xFFD5DBF2), Color(0xFFD5DBF2)),
+        CourseColors(Color(0xFF123048), Color(0xFFC0D6E8), Color(0xFFC0D6E8)),
+        CourseColors(Color(0xFF2A2662), Color(0xFFD6D0F0), Color(0xFFD6D0F0)),
+        CourseColors(Color(0xFF08383A), Color(0xFFBCE6E3), Color(0xFFBCE6E3)),
+        CourseColors(Color(0xFF1E2836), Color(0xFFC8D2DE), Color(0xFFC8D2DE)),
+        CourseColors(Color(0xFF10314F), Color(0xFFC0D8EC), Color(0xFFC0D8EC)),
+        CourseColors(Color(0xFF182C46), Color(0xFFC3D4E6), Color(0xFFC3D4E6)),
+        CourseColors(Color(0xFF3A2E0A), Color(0xFFEBDDBA), Color(0xFFEBDDBA)),
+    )
+
     /** 按色号取一套课程色。 */
     fun colors(index: Int, isDark: Boolean): CourseColors =
         (if (isDark) dark else light)[Math.floorMod(index, PALETTE_SIZE)]

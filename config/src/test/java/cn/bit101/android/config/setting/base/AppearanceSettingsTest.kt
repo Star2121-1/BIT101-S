@@ -61,13 +61,11 @@ class AppearanceSettingsTest {
     }
 
     @Test
-    fun appPalette_脏值回落显式默认值_不是展示序首个() {
-        // ⚠️ 这条是「不能用 first()」的哨兵：展示序第一个是 Brand，默认却是 Warm。
-        // 若兜底写成 allPalettes.first()，脏值用户会莫名变成 BIT101经典配色——本测试立刻红。
-        assertEquals(AppPalette.Warm, AppPalette.getPalette(""))
-        assertEquals(AppPalette.Warm, AppPalette.getPalette("不存在的配色"))
-        assertEquals(AppPalette.Warm, AppPalette.getPalette("WARM")) // 大小写不匹配即脏值
-        assertNotEquals(AppPalette.allPalettes.first(), AppPalette.getPalette("脏值"))
+    fun appPalette_脏值回落显式默认值() {
+        // 默认配色 = Brand（用户拍板）。兜底写显式 Brand，不依赖 allPalettes.first()。
+        assertEquals(AppPalette.Brand, AppPalette.getPalette(""))
+        assertEquals(AppPalette.Brand, AppPalette.getPalette("不存在的配色"))
+        assertEquals(AppPalette.Brand, AppPalette.getPalette("WARM")) // 大小写不匹配即脏值
     }
 
     @Test
@@ -77,8 +75,8 @@ class AppearanceSettingsTest {
         assertEquals("brand", AppPalette.Brand.value)
         // 展示名契约（P5-C + 后续两轮用户拍板正名）：
         // value 字符串（持久化键）不变，展示名是设置页直接显示给用户的字。
-        // Brand = 深蓝占位 ⇒「BIT101经典配色」，展示首位（官方校色经章程查证为绿+墨绿+褐，
-        //   深蓝占位不蹭学校名故去「北理工」冠名；experimental 仍保留）；
+        // Brand = 深蓝占位 ⇒「BIT101经典配色」，展示首位 + 默认（官方校色经章程查证为绿+墨绿+褐，
+        //   深蓝占位不蹭学校名故去「北理工」冠名；用户拍板设默认，不再标 experimental）；
         // Classic = master 回迁（桃粉+暖橙）⇒「暖棕配色」，不冠「原版」；
         // Warm = P1 分支现状（白底+青绿）⇒「清新青绿配色」。旧名「一格 GRID 暖棕配色」
         // 名不副实已废（初稿 §119 意图暖棕、实现出来青绿）；新名刻意不含「一格 GRID」
@@ -91,7 +89,7 @@ class AppearanceSettingsTest {
     @Test
     fun appPalette_展示序_Brand首位() {
         // P5-C 后续用户拍板：BIT101经典配色（Brand）提至展示首位，Classic/Warm 顺延。
-        // ⚠️ 展示序 ≠ 默认值：首位是 Brand，默认仍是 Warm（由上面「脏值回落」测试盯着）。
+        // 默认值已改为 Brand（与首位一致，用户拍板）。
         assertEquals(
             listOf(AppPalette.Brand, AppPalette.Classic, AppPalette.Warm),
             AppPalette.allPalettes,
@@ -105,9 +103,9 @@ class AppearanceSettingsTest {
         assertFalse(AppPalette.Classic.experimental)
         assertTrue(AppPalette.Warm.available)
         assertFalse(AppPalette.Warm.experimental)
-        // Brand：可选但标「实验性」（占位值待官方 VI；若 Q2 改置灰只翻 available）
+        // Brand：默认配色，不再标实验性（占位色值仍在，但用户拍板设为默认）
         assertTrue(AppPalette.Brand.available)
-        assertTrue(AppPalette.Brand.experimental)
+        assertFalse(AppPalette.Brand.experimental)
     }
 
     // ── CourseColorFamily ──────────────────────────────────────────────
@@ -122,14 +120,12 @@ class AppearanceSettingsTest {
     }
 
     @Test
-    fun courseColorFamily_脏值回落显式默认值_不是展示序首个() {
-        // Auto 恰好在展示序首位且是默认值；这条断言同时锁「回落值 == Auto」与「== first()」
-        // 两个性质，将来若调整展示序（如把 Classic 提前），first() 实现会立刻红。
-        assertEquals(CourseColorFamily.Auto, CourseColorFamily.getFamily(""))
-        assertEquals(CourseColorFamily.Auto, CourseColorFamily.getFamily("不存在的族"))
-        assertEquals(CourseColorFamily.Auto, CourseColorFamily.getFamily("LEGACY"))
-        assertNotEquals(CourseColorFamily.allFamilies.firstOrNull { it != CourseColorFamily.Auto },
-            CourseColorFamily.getFamily("脏值"))
+    fun courseColorFamily_脏值回落显式默认值() {
+        // 默认族 = Legacy（原版统色，用户拍板）。兜底写显式 Legacy，不依赖 first()（first=Auto）。
+        assertEquals(CourseColorFamily.Legacy, CourseColorFamily.getFamily(""))
+        assertEquals(CourseColorFamily.Legacy, CourseColorFamily.getFamily("不存在的族"))
+        assertEquals(CourseColorFamily.Legacy, CourseColorFamily.getFamily("LEGACY")) // 大小写不匹配即脏值
+        assertNotEquals(CourseColorFamily.allFamilies.first(), CourseColorFamily.getFamily("脏值"))
     }
 
     @Test
@@ -148,17 +144,17 @@ class AppearanceSettingsTest {
 
     @Test
     fun courseColorFamily_available与experimental标记() {
-        // Auto / Legacy / Classic / Morandi 可直接选；Brand 占位待官方 VI ⇒ 可选但标实验性
+        // 五族全部可直接选、且都不再打「实验性」标：Brand 已成为默认 App 配色，
+        // 再把它自己的课程族标成实验性会自相矛盾（CoursePalette.brandLight 已落真表）。
         listOf(
             CourseColorFamily.Auto,
             CourseColorFamily.Legacy,
             CourseColorFamily.Classic,
             CourseColorFamily.Morandi,
+            CourseColorFamily.Brand,
         ).forEach {
             assertTrue(it.available)
             assertFalse(it.experimental)
         }
-        assertTrue(CourseColorFamily.Brand.available)
-        assertTrue(CourseColorFamily.Brand.experimental)
     }
 }

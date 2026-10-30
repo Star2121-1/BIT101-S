@@ -71,6 +71,8 @@ internal fun CourseScheduleCalendar(
     week: Int,
     settingData: SettingData,
     timeTable: TimeTable,
+    /** 单课颜色覆盖（课名 → 色号）；优先于 hash。 */
+    colorOverrides: Map<String, Int>,
 
     onConfig: () -> Unit,
     onChangeWeek: (Int) -> Unit,
@@ -322,7 +324,7 @@ internal fun CourseScheduleCalendar(
                                 if (settingData.showBorder) {
                                     modifier = modifier.border(
                                         1.dp,
-                                        itemColors[itemColorIndex(it)].boarderColor,
+                                        itemColors[itemColorIndex(it, colorOverrides)].boarderColor,
                                         shape = CardDefaults.shape
                                     )
                                 }
@@ -334,7 +336,7 @@ internal fun CourseScheduleCalendar(
                                         .clickable(onClick = it.onClick),
                                     week = week,
                                     item = it,
-                                    color = itemColors[itemColorIndex(it)],
+                                    color = itemColors[itemColorIndex(it, colorOverrides)],
                                 )
                             }
                         }

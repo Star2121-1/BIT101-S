@@ -21,11 +21,11 @@ enum class AppPalette(
     val experimental: Boolean = false,
 ) {
     /**
-     * BIT101经典配色（展示名，P5-C 后续用户拍板：保持深蓝占位色值、提至展示首位、
-     * 去「北理工」冠名——官方校色经《章程》查证为绿+墨绿+褐，深蓝占位与之不符）。
-     * 值仍是未验证占位，故 [experimental] = true 保留，UI 仍标「实验性」。
+     * BIT101经典配色（默认配色）。
+     * 色值仍是未验证占位（官方校色经《章程》查证为绿+墨绿+褐，深蓝占位与之不符）；
+     * 用户拍板：作为首屏默认配色，故不再标「实验性」。
      */
-    Brand(experimental = true),
+    Brand,
 
     /**
      * 暖棕配色（展示名，P5-C 起；master Color.kt 回迁，观感桃粉+暖橙）。
@@ -47,19 +47,18 @@ enum class AppPalette(
     companion object {
 
         /**
-         * 全部配色（UI 展示序：Brand 在前——P5-C 后续用户拍板「BIT101经典配色」提至
-         * 首位，Classic/Warm 顺延）。
-         * ⚠️ **展示序 ≠ 默认值**：首个是 Brand，默认却是 Warm
-         * ⇒ 兜底必须用显式默认值，用 `first()` 会把脏值回落成 Brand（用户莫名变经典配色）。
+         * 全部配色（UI 展示序：Brand 在前——P5-C 后续用户拍板「BIT101经典配色」提至首位，
+         * Classic/Warm 顺延）。
+         * 默认值 = Brand（与展示序首个一致，用户拍板）。兜底仍写显式 Brand，别依赖 `first()`。
          */
         val allPalettes: List<AppPalette>
             get() = entries
 
         /**
-         * 通过 datastore 字符串取配色，**脏值回落显式默认值**（Warm，不是 `first()`）。
+         * 通过 datastore 字符串取配色，**脏值回落显式默认值**（Brand）。
          */
         fun getPalette(value: String): AppPalette =
-            entries.firstOrNull { it.value == value } ?: Warm
+            entries.firstOrNull { it.value == value } ?: Brand
     }
 }
 

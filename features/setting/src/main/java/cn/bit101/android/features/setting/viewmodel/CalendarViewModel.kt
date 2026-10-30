@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cn.bit101.android.config.setting.base.CourseColorFamily
 import cn.bit101.android.config.setting.base.CourseScheduleSettings
 import cn.bit101.android.config.setting.base.toTimeTable
 import cn.bit101.android.data.database.entity.CustomScheduleEntity
@@ -57,6 +58,13 @@ internal class CalendarViewModel @Inject constructor(
 
     // 当前学期的第一天
     val firstDayFlow = courseScheduleSettings.firstDay.flow
+
+    // 课程配色族（默认 Legacy 原版统色）
+    val courseColorFamilyFlow = courseScheduleSettings.courseColorFamily.flow
+
+    fun setCourseColorFamily(family: CourseColorFamily) = withScope {
+        courseScheduleSettings.courseColorFamily.set(family)
+    }
 
     val settingDataFlow = combine(
         courseScheduleSettings.showSaturday.flow,

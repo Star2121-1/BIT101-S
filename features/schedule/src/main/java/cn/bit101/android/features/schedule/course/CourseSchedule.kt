@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import cn.bit101.android.data.database.entity.CustomScheduleEntity
+import cn.bit101.android.data.schedule.CourseColorLogic
 import cn.bit101.android.data.school.TeachingAdjustmentEntry
 import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.common.MainController
@@ -117,6 +118,8 @@ internal fun CourseSchedule(
     val showExamInfo by vm.showExamInfoFlow.collectAsState(initial = null)
 
     val showCourseDetailState by vm.showCourseDetail.collectAsState()
+
+    val colorOverrides by vm.courseColorOverridesFlow.collectAsState(initial = emptyMap<String, Int>())
 
     val showExamDetailState by vm.showExamDetail.collectAsState()
 
@@ -267,6 +270,7 @@ internal fun CourseSchedule(
                     week = week,
                     timeTable = timeTable!!,
                     settingData = settingData,
+                    colorOverrides = colorOverrides,
 
                     onConfig = { mainController.navigate(NavDest.Setting("calendar")) },
                     onChangeWeek = { vm.changeWeek(it) },
@@ -280,6 +284,15 @@ internal fun CourseSchedule(
                     // 课程详情对话框
                     CourseScheduleDetailDialog(
                         course = showCourseDetailState!!,
+                        currentColorIndex = run {
+                            val name = showCourseDetailState!!.name
+                            Math.floorMod(
+                                colorOverrides[name] ?: CourseColorLogic.of(name),
+                                CourseColorLogic.PALETTE_SIZE,
+                            )
+                        },
+                        onPickColor = { idx -> vm.setCourseColor(showCourseDetailState!!.name, idx) },
+                        onResetColor = { vm.clearCourseColor(showCourseDetailState!!.name) },
                         onDismiss = vm::clearShowCourseDetail,
                         onLocate = { locateOnMap(mainController, it) },
                     )
