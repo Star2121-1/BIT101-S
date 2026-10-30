@@ -64,6 +64,8 @@ fun MapScreen(mainController: MainController) {
     // ⚠️ 必须给一句反馈：地图本身能拖，不说的话「定位好了」和「没跳转」看起来一样。
     // 用 rememberSaveable 保证旋转一次不会重复弹。
     var announcedTarget by rememberSaveable { mutableStateOf(false) }
+    // 地图模式：true=矢量示意图（默认）/ false=在线 OSM 瓦片
+    var vectorMode by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         val label = vm.pendingLabel
         if (!announcedTarget && label != null) {
@@ -75,12 +77,19 @@ fun MapScreen(mainController: MainController) {
     Box {
         // 地图界面
         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-            MapUI(
-                modifier = Modifier
-                    .fillMaxSize(1f / scale)
-                    .scale(scale),
-                state = vm.state,
-            )
+            if (vectorMode) {
+                OfficialCampusMap(
+                    campusName = vm.currentCampus.name,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                MapUI(
+                    modifier = Modifier
+                        .fillMaxSize(1f / scale)
+                        .scale(scale),
+                    state = vm.state,
+                )
+            }
         }
 
         // 第否显示底部设置栏
@@ -93,6 +102,15 @@ fun MapScreen(mainController: MainController) {
                 .statusBarsPadding(),
         ) {
             val fabSize = 50.dp
+            FloatingActionButton(
+                modifier = Modifier.size(fabSize),
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.secondary,
+                onClick = { vectorMode = !vectorMode },
+            ) {
+                Text(if (vectorMode) "瓦" else "矢")
+            }
+            Spacer(modifier = Modifier.height(10.dp))
             FloatingActionButton(
                 modifier = Modifier.size(fabSize),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -201,6 +219,7 @@ fun MapScreen(mainController: MainController) {
         // 位置选右下角：左上角是 FAB 列、底部中间是设置栏（弹出时），只有右下是空的。
         // 设置栏弹出期间会临时盖住它，关掉就露出来 —— 可接受。
         val uriHandler = LocalUriHandler.current
+        if (!vectorMode) {
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -220,6 +239,7 @@ fun MapScreen(mainController: MainController) {
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             )
+        }
         }
     }
 }
