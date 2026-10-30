@@ -116,6 +116,11 @@ internal fun EclassActivityScreen(mainController: MainController) {
                 .nestedScroll(pullState.nestedScrollConnection),
         ) {
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            // 手里有数据、但这次没拉到 ⇒ 顶部加一条提示，**不动列表内容**。
+            // 一次 5xx 就把用户手里的动态清空，等于「刷新一下反而没了」，体验很差。
+            if (activities.isNotEmpty() && sessionState == EclassSessionState.UNAVAILABLE) {
+                item { StaleDataBanner(onRetry = vm::refresh) }
+            }
             if (activities.isEmpty()) {
                 item {
                     if (loading) {
@@ -217,6 +222,33 @@ private fun ActivityRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f),
         )
+    }
+}
+
+/**
+ * 「服务器暂时连不上，以下是上次的数据」。
+ *
+ * 与 [ActivityEmptyCard] 的区别：这条是**有数据时**才出现的横幅 ——
+ * 它不占掉列表，只说明一句，并给一个「重试」。用户手里的内容不会被一次网络抖动清空。
+ */
+@Composable
+private fun StaleDataBanner(onRetry: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(10.dp, 5.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "延河课堂暂时连不上，以下是上次的数据",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onRetry) { Text("重试") }
     }
 }
 

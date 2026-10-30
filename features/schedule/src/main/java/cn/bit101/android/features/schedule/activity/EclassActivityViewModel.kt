@@ -138,19 +138,29 @@ internal class EclassActivityViewModel @Inject constructor(
                     .getOrDefault(false)
                 val fetchLimit = EclassActivityLogic.fetchLimit(limit, onlyHomework)
 
-                val list = runCatching { eclassRepo.fetchActivities(fetchLimit) }
-                    .getOrDefault(emptyList())
-                _rawActivities.value = list
-                val state = if (list.isNotEmpty()) {
-                    EclassSessionState.ALIVE
+                val list = runCatching { eclassRepo.fetchActivities(fetchLimit) }.getOrNull()
+
+                if (list != null && list.isNotEmpty()) {
+                    // 拿到数据 ⇒ 刷新缓存，会话可用
+                    _rawActivities.value = list
+                    _sessionState.value = EclassSessionState.ALIVE
                 } else {
-                    // 空的时候再确认一次会话。⚠️ 要拿到三态：5xx/网络故障不能报成「未登录」，
-                    // 否则用户会对着「还没登录延河课堂」反复重登，而问题其实在学校服务器那边。
-                    runCatching { eclassRepo.sessionState() }
+                    // 空或失败：再确认一次会话，区分「真空」「未登录」「服务器挂了」
+                    val state = runCatching { eclassRepo.sessionState() }
                         .getOrDefault(EclassSessionState.UNAVAILABLE)
+                    _sessionState.value = state
+
+                    when (state) {
+                        // 会话正常、确实没有动态 ⇒ 清空是对的
+                        EclassSessionState.ALIVE -> _rawActivities.value = emptyList()
+                        // ⚠️ 服务器不可用 ⇒ **保留上次的数据**，只在页面上加一条提示条。
+                        //    一次 5xx 就把用户手里的列表清空，等于"刷新一下反而没了"。
+                        EclassSessionState.UNAVAILABLE -> Unit
+                        // 明确未登录 ⇒ 清空（数据可能属于上个账号，不能留下来串号）
+                        EclassSessionState.NEEDS_LOGIN -> _rawActivities.value = emptyList()
+                    }
                 }
-                _sessionState.value = state
-                _sessionAlive.value = state == EclassSessionState.ALIVE
+                _sessionAlive.value = _sessionState.value == EclassSessionState.ALIVE
             } finally {
                 _loading.value = false
             }
