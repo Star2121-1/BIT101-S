@@ -11,6 +11,7 @@ import cn.bit101.android.data.repo.base.LoginRefreshResult
 import cn.bit101.api.Bit101Api
 import cn.bit101.api.model.common.SchoolCookie
 import cn.bit101.api.model.common.SchoolLoginResult
+import cn.bit101.api.model.http.bit101.PostLoginDataModel
 import cn.bit101.api.model.http.bit101.PostRegisterDataModel
 import cn.bit101.api.model.http.bit101.PostWebvpnVerifyDataModel
 import cn.bit101.api.model.http.bit101.PostWebvpnVerifyInitDataModel
@@ -38,6 +39,7 @@ import java.net.CookieManager
 
 class DefaultLoginRepoTest {
     private lateinit var api: Bit101Api
+    private lateinit var userApi: cn.bit101.api.service.bit101.UserApiService
     private lateinit var apiManager: APIManager
     private lateinit var loginStatus: MemoryLoginStatus
     private lateinit var seatLoginStatus: MemorySeatLoginStatus
@@ -51,6 +53,12 @@ class DefaultLoginRepoTest {
         loginStatus = MemoryLoginStatus()
         seatLoginStatus = MemorySeatLoginStatus()
         seatTaskStore = MemorySeatTaskStore()
+        // 显式给出 api.user 的 mock：
+        // ① strict mock 下直接读属性会抛 MockKException
+        // ② 提前取好引用后，`coVerify(exactly = 0) { userApi.xxx() }` 不会把 `getUser()`
+        //    这次属性访问也算进 exactly = 0（mockk 把 getter 当一次交互，之前踩过）
+        userApi = mockk()
+        every { api.user } returns userApi
         every { apiManager.api } returns api
         coEvery { apiManager.switch(any()) } answers {
             runBlocking { loginStatus.webVpn.set(firstArg()) }
@@ -98,6 +106,96 @@ class DefaultLoginRepoTest {
         assertTrue(loginStatus.webVpn.get())
         assertTrue(loginStatus.cookieManager.cookieStore.cookies.any { it.name == "SESSION" })
         assertTrue("BIT101 正常 ⇒ 降级标志为 true", loginStatus.bit101Available.value)
+    }
+
+    /**
+     * ⚠️ 这一组守的是「别再往学校 WAF 上撞」。
+     *
+     * 两条路代价差一个数量级：
+     * - `/user/login`：服务端只校验一次密码
+     * - `webVpnVerify`：服务端**代用户做一遍学校 CAS**（2026-10-30 被封 IP 的根因）
+     *
+     * 所以一旦有了社区密码摘要，就不许再走后者。
+     */
+    @Test
+    fun `有社区摘要时只走轻量登录且不触发统一认证`() = runBlocking {
+        stubSuccessfulSchoolLogin()
+        val digest = cn.bit101.android.data.common.HashUtils.md5("password")
+        loginStatus.communityPasswordDigest.set(digest)
+        coEvery { api.user.login(any()) } returns Response.success(
+            PostLoginDataModel.Response(fakeCookie = "community-cookie"),
+        )
+
+        assertTrue(repo.login("112233", "password"))
+
+        coVerify(exactly = 1) {
+            api.user.login(match { it.sid == "112233" && it.password == digest })
+        }
+        coVerify(exactly = 0) { userApi.webVpnVerifyInit(any()) }
+        assertEquals("community-cookie", loginStatus.fakeCookie.get())
+        assertTrue("BIT101 可用", loginStatus.bit101Available.value)
+    }
+
+    @Test
+    fun `无摘要时用学校密码 md5 试轻量登录并记住摘要`() = runBlocking {
+        stubSuccessfulSchoolLogin()
+        coEvery { api.user.login(any()) } returns Response.success(
+            PostLoginDataModel.Response(fakeCookie = "community-cookie"),
+        )
+
+        assertTrue(repo.login("112233", "password"))
+
+        assertEquals(
+            "应记住学校密码的 md5，下次不再走 CAS",
+            cn.bit101.android.data.common.HashUtils.md5("password"),
+            loginStatus.communityPasswordDigest.get(),
+        )
+        coVerify(exactly = 0) { userApi.webVpnVerifyInit(any()) }
+    }
+
+    @Test
+    fun `有摘要但轻量登录失败时不降级到统一认证`() = runBlocking {
+        stubSuccessfulSchoolLogin()
+        loginStatus.communityPasswordDigest.set("stale-digest")
+        coEvery { api.user.login(any()) } throws IllegalStateException("wrong password")
+        // 统一认证的 stub 就绪也不许被调用：降级等于把一次密码错放大成一次 CAS 请求
+        stubSuccessfulBackendLogin()
+
+        assertTrue("学校登录仍应成功", repo.login("112233", "password"))
+
+        coVerify(exactly = 0) { userApi.webVpnVerifyInit(any()) }
+        assertFalse("BIT101 应标记不可用", loginStatus.bit101Available.value)
+        assertEquals(
+            "摘要不该被一次失败覆盖",
+            "stale-digest",
+            loginStatus.communityPasswordDigest.get(),
+        )
+    }
+
+    @Test
+    fun `loginCommunity 用统一认证时不保存密码摘要`() = runBlocking {
+        stubSuccessfulBackendLogin()
+
+        assertTrue(repo.loginCommunity("112233", "password", useSchoolIdentity = true))
+
+        // 统一认证没有验证过社区密码，不能把学校密码当"已验证"存下来
+        assertEquals("", loginStatus.communityPasswordDigest.get())
+        assertEquals("fake-cookie", loginStatus.fakeCookie.get())
+    }
+
+    @Test
+    fun `loginCommunity 用密码登录时保存摘要`() = runBlocking {
+        coEvery { api.user.login(any()) } returns Response.success(
+            PostLoginDataModel.Response(fakeCookie = "community-cookie"),
+        )
+
+        assertTrue(repo.loginCommunity("112233", "pass", useSchoolIdentity = false))
+
+        assertEquals(
+            cn.bit101.android.data.common.HashUtils.md5("pass"),
+            loginStatus.communityPasswordDigest.get(),
+        )
+        assertEquals("community-cookie", loginStatus.fakeCookie.get())
     }
 
     @Test
@@ -238,10 +336,13 @@ class DefaultLoginRepoTest {
     @Test
     fun `logout clears credentials state and cookies`() = runBlocking {
         loginStatus.seedLoggedIn()
+        loginStatus.communityPasswordDigest.set("digest")
 
         repo.logout()
 
         assertLoggedOut()
+        // 主动登出必须清掉社区密码摘要：否则换号后会带着上个账号的摘要去 /user/login
+        assertEquals("", loginStatus.communityPasswordDigest.get())
     }
 
     @Test
@@ -451,6 +552,7 @@ class DefaultLoginRepoTest {
         override val status = MemorySettingItem(false)
         override val webVpn = MemorySettingItem(false)
         override val fakeCookie = MemorySettingItem("")
+        override val communityPasswordDigest = MemorySettingItem("")
         override val identityRetryAt = MemorySettingItem(0L)
         override val identityAttempts = MemorySettingItem(0)
         override val bit101Available = MutableStateFlow(true)
@@ -462,6 +564,7 @@ class DefaultLoginRepoTest {
             sid.set("")
             password.set("")
             fakeCookie.set("")
+            // 与生产实现一致：clear() **不**清社区密码摘要（只有 logout 才清）
             identityRetryAt.set(0L)
             identityAttempts.set(0)
             cookieManager.cookieStore.removeAll()

@@ -12,6 +12,7 @@ import cn.bit101.android.data.repo.base.LoginRefreshResult
 import cn.bit101.android.data.repo.base.LoginRepo
 import cn.bit101.android.data.repo.base.LoginRetryPolicy
 import cn.bit101.api.model.common.SmsCodeHandler
+import cn.bit101.api.model.http.bit101.PostLoginDataModel
 import cn.bit101.api.model.http.bit101.PostRegisterDataModel
 import cn.bit101.api.model.http.bit101.PostWebvpnVerifyDataModel
 import cn.bit101.api.model.http.bit101.PostWebvpnVerifyInitDataModel
@@ -229,44 +230,130 @@ internal class DefaultLoginRepo @Inject constructor(
         true
     }
 
-    private suspend fun loginBIT101(username: String, password: String) = withContext(Dispatchers.IO) {
-        val initData = api.user.webVpnVerifyInit(
-            PostWebvpnVerifyInitDataModel.Body(
-                sid = username,
-            )
-        ).body() ?: throw Exception("init bit101 login error")
+    /**
+     * 连接 BIT101 社区（校园登录成功后 best-effort 调用）。
+     *
+     * ⚠️ **顺序很重要：先试轻量的 `/user/login`，失败才走统一身份认证。**
+     *
+     * 两条路的服务器代价差一个数量级：
+     * - `/user/login`：服务器只校验一次密码，**不碰学校 CAS**
+     * - `webVpnVerify`：服务器**代用户做一遍学校统一身份认证**
+     *
+     * 2026-10-30 学校 WAF 整 IP 封禁 BIT101 认证主机，根因正是后者一天 4000~7000 次集发。
+     * 所以只要能走前者就不许走后者。
+     */
+    private suspend fun loginBIT101(username: String, password: String) {
+        // 1) 已有社区密码摘要 ⇒ **只走轻量路径**。
+        //    失败**不**降级到统一认证：那等于把一次密码错放大成一次 CAS 请求，
+        //    正好与我们压流量的目的相反。失败就让社区功能暂时不可用，
+        //    用户可以去「BIT101 → 密码登录」重新输入密码（会刷新摘要）。
+        val saved = loginStatus.communityPasswordDigest.get()
+        if (saved.isNotBlank()) {
+            if (loginCommunityWithDigest(username, saved)) return
+            throw IllegalStateException("BIT101 密码登录失败：社区密码可能已变更")
+        }
 
-        val salt = initData.salt
-        val execution = initData.execution
-        val cookie = initData.cookie
-        val encryptedPassword = AESUtils.encryptPassword(password, salt)
+        // 2) 没有摘要（首次 / 刚升级）⇒ 拿「学校密码的 md5」试一次：
+        //    首次统一认证注册时社区密码就是学校密码，多数老用户属于这种情况。
+        //    成功就存下来 —— 从此这台设备再也不走 CAS。
+        val schoolDigest = HashUtils.md5(password)
+        if (schoolDigest.isNotBlank() && loginCommunityWithDigest(username, schoolDigest)) {
+            loginStatus.communityPasswordDigest.set(schoolDigest)
+            return
+        }
 
-        val verifyData = api.user.webVpnVerify(
-            PostWebvpnVerifyDataModel.Body(
-                sid = username,
-                password = encryptedPassword,
-                execution = execution,
-                cookie = cookie,
-                salt = salt,
-                captcha = ""
-            )
-        ).body() ?: throw Exception("get webVpnVerify response error")
-        val md5Password = HashUtils.md5(password)
-        val token = verifyData.token
-        val code = verifyData.code
+        // 3) 都不行 ⇒ 只能统一身份认证。这一步保证「首次」一定能连上社区；
+        //    一旦有了摘要就再也不会走到这里。
+        loginBIT101WithSchoolIdentity(username, password)
+    }
 
-        val fakeCookie = api.user.register(
-            PostRegisterDataModel.Body(
-                password = md5Password,
-                token = token,
-                code = code,
-                loginMode = true
-            )
-        ).body()?.fakeCookie ?: throw Exception("get register response error")
+    /**
+     * **轻量路径**：`POST /user/login` 用社区密码换 fakeCookie。
+     *
+     * 失败**不抛异常**（返回 false）—— 它是"先试一下"的路径，失败要能继续降级到统一认证。
+     * 但协程取消必须原样抛出。
+     */
+    private suspend fun loginCommunityWithDigest(username: String, digest: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val fakeCookie = api.user.login(
+                    PostLoginDataModel.Body(sid = username, password = digest)
+                ).body()?.fakeCookie
+                if (fakeCookie.isNullOrBlank()) return@withContext false
+                loginStatus.fakeCookie.set(fakeCookie)
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                false
+            }
+        }
 
-        loginStatus.fakeCookie.set(fakeCookie)
+    /** **重路径**：统一身份认证（服务端代做学校 CAS）。 */
+    private suspend fun loginBIT101WithSchoolIdentity(username: String, password: String) =
+        withContext(Dispatchers.IO) {
+            val initData = api.user.webVpnVerifyInit(
+                PostWebvpnVerifyInitDataModel.Body(
+                    sid = username,
+                )
+            ).body() ?: throw Exception("init bit101 login error")
 
-        true
+            val salt = initData.salt
+            val execution = initData.execution
+            val cookie = initData.cookie
+            val encryptedPassword = AESUtils.encryptPassword(password, salt)
+
+            val verifyData = api.user.webVpnVerify(
+                PostWebvpnVerifyDataModel.Body(
+                    sid = username,
+                    password = encryptedPassword,
+                    execution = execution,
+                    cookie = cookie,
+                    salt = salt,
+                    captcha = ""
+                )
+            ).body() ?: throw Exception("get webVpnVerify response error")
+            val md5Password = HashUtils.md5(password)
+            val token = verifyData.token
+            val code = verifyData.code
+
+            val fakeCookie = api.user.register(
+                PostRegisterDataModel.Body(
+                    password = md5Password,
+                    token = token,
+                    code = code,
+                    loginMode = true
+                )
+            ).body()?.fakeCookie ?: throw Exception("get register response error")
+
+            loginStatus.fakeCookie.set(fakeCookie)
+            // ⚠️ 统一认证**没有验证过社区密码**，不能把学校密码当成"已验证的社区密码"存下来。
+            //    （否则下次会拿一个可能错误的摘要去撞 /user/login）
+            true
+        }
+
+    override suspend fun loginCommunity(
+        username: String,
+        password: String,
+        useSchoolIdentity: Boolean,
+    ): Boolean = withContext(Dispatchers.IO) {
+        loginMutex.withLock {
+            if (useSchoolIdentity) {
+                loginBIT101WithSchoolIdentity(username, password)
+            } else {
+                val digest = HashUtils.md5(password)
+                if (!loginCommunityWithDigest(username, digest)) {
+                    throw IllegalStateException("BIT101 登录失败：学号或密码不正确")
+                }
+                // 只有真用密码登录成功过，这个摘要才算「已验证」
+                loginStatus.communityPasswordDigest.set(digest)
+            }
+            // 社区账号就是学号：写进 sid 供登录页预填。
+            // ⚠️ 不写 password（那是学校密码，社区密码不能混进去，否则会被拿去登学校）。
+            if (loginStatus.sid.get().isBlank()) loginStatus.sid.set(username)
+            loginStatus.bit101Available.value = true
+            true
+        }
     }
 
     override suspend fun login(
@@ -306,7 +393,12 @@ internal class DefaultLoginRepo @Inject constructor(
 
     override suspend fun logout() = withContext(Dispatchers.IO) {
         loginMutex.withLock {
-            withContext(NonCancellable) { sessionCleanup.clearAll() }
+            withContext(NonCancellable) {
+                sessionCleanup.clearAll()
+                // ⚠️ 只有主动登出才清社区密码摘要（clearAll 出于"登录中途不清"的考虑不碰它，
+                //    见 DefaultLoginStatus.clear 的注释）。不清的话换号后会拿着上个账号的摘要。
+                loginStatus.communityPasswordDigest.set("")
+            }
         }
     }
 

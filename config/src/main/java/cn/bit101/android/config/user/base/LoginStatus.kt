@@ -46,6 +46,17 @@ interface LoginStatus {
     val bit101Available: MutableStateFlow<Boolean>
 
     /**
+     * **BIT101 社区账号自己的密码摘要**（md5），与 [password]（学校密码）**分开**。
+     *
+     * 存在它就能走 `/user/login` 轻量登录 —— 服务器只校验密码、不代做学校 CAS。
+     * 学校 WAF 2026-10-30 整 IP 封禁 BIT101 认证主机，根因就是 CAS 请求集发；
+     * 这个字段是把请求量压下来的关键之一。
+     *
+     * 空串 = 「还没验证过社区密码」，此时只能走统一身份认证。
+     */
+    val communityPasswordDigest: SettingItem<String>
+
+    /**
      * **学校身份验证的冷却截止时间**（毫秒时间戳，0 = 无冷却）。
      *
      * 为什么需要：BIT101 服务端代所有用户做学校统一身份认证，2026-10-30 该机被学校 WAF

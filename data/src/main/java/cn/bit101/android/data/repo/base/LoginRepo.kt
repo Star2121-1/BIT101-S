@@ -57,6 +57,19 @@ interface LoginRepo {
     suspend fun tryRefreshLogin(): LoginRefreshResult
 
     /**
+     * **只**登录 BIT101 社区账号，**不动**校园（学校）会话。
+     *
+     * 供登录页的「BIT101」分页使用：用户可以只连社区、不登校园。
+     *
+     * @param useSchoolIdentity `true` = 统一身份认证（服务端代做学校 CAS，代价高）；
+     *   `false` = 用 **BIT101 账号自己的密码**走 `/user/login`
+     *   （服务端只校验一次密码，**完全不碰 CAS**）。
+     *   后者是把 CAS 请求量压下来的关键路径 —— 封 IP 的根因就是 CAS 集发。
+     * @return 成功与否；失败抛异常（密码错 / 服务不可用）
+     */
+    suspend fun loginCommunity(username: String, password: String, useSchoolIdentity: Boolean): Boolean
+
+    /**
      * 登录，并保存登录状态
      * 若学校统一身份认证要求短信二次验证，将通过 [smsCodeHandler] 请求验证码
      */

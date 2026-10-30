@@ -38,12 +38,29 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import cn.bit101.android.features.common.helper.SimpleState
 
+/**
+ * 登录页上的一个动作按钮。
+ *
+ * 为什么用列表而不是写死一个按钮：登录页分「校园账号 / BIT101」两个 tab，
+ * BIT101 那边有**两个**登录方式（统一认证 / 社区密码），按钮数量和文案都不一样。
+ */
+internal data class LoginAction(
+    val label: String,
+    val onLogin: (String, String) -> Unit,
+)
+
 // 登录界面
 @Composable
 internal fun LoginPage(
     loginState: SimpleState?,
 
-    onLogin: (String, String) -> Unit,
+    title: String = "登录BIT101",
+    description: String = "使用学校统一身份认证账号密码进行登录。",
+    initialSid: String = "",
+    usernameEnabled: Boolean = true,
+    actions: List<LoginAction>,
+
+    modifier: Modifier = Modifier,
     onLoginSuccess: () -> Unit = {},
     onLoginFailed: () -> Unit = {},
 ) {
@@ -78,12 +95,12 @@ internal fun LoginPage(
     }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        var sid by rememberSaveable { mutableStateOf("") }
+        var sid by rememberSaveable(initialSid) { mutableStateOf(initialSid) }
         var password by rememberSaveable { mutableStateOf("") }
         var passwordHidden by rememberSaveable { mutableStateOf(true) }
         Column(
@@ -94,7 +111,7 @@ internal fun LoginPage(
         ) {
             val underlineColor = MaterialTheme.colorScheme.secondaryContainer
             Text(
-                "登录BIT101",
+                title,
                 style = MaterialTheme.typography.headlineLarge.copy(color = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.drawBehind {
                     val strokeWidth = 10.dp.toPx()
@@ -115,6 +132,7 @@ internal fun LoginPage(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.extraLarge,
                 singleLine = true,
+                enabled = usernameEnabled,
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Outlined.AccountCircle,
@@ -149,21 +167,23 @@ internal fun LoginPage(
                     }
                 }
             )
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !loading,
-                onClick = {
-                    onLogin(sid, password)
-                },
-            ) {
-                if (loading) CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp
-                )
-                else Text(text = "登录")
+            actions.forEach { action ->
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading,
+                    onClick = {
+                        action.onLogin(sid, password)
+                    },
+                ) {
+                    if (loading) CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                    else Text(text = action.label)
+                }
             }
             Text(
-                text = "Tips：使用学校统一身份认证账号密码进行登录，若未注册过BIT101账号将会自动注册。BIT101尊重您的隐私，密码只会经不可逆加密后传输到服务器。",
+                text = description,
                 style = MaterialTheme.typography.bodyMedium.copy(
                     color = MaterialTheme.colorScheme.onSurface.copy(
                         alpha = 0.5f

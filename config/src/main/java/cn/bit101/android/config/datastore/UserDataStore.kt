@@ -60,6 +60,21 @@ internal class UserDataStore @Inject constructor(
     private val LOGIN_PASSWORD = "login_password"
     val loginPassword = EncryptedPreferencesItem(preferences.ENCRYPTED_SHARED_PREFERENCES, LOGIN_PASSWORD)
 
+    /**
+     * **BIT101 社区账号自己的密码摘要**（md5），与学校密码**分开存**。
+     *
+     * 为什么需要它：BIT101 服务端代所有用户做学校统一身份认证，一天几千次 CAS 登录
+     * 被学校 WAF 判成撞库、整 IP 封禁（2026-10-30）。而 `/user/login` 是**普通密码登录**，
+     * 服务器只校验一次密码、**完全不碰学校 CAS**。
+     *
+     * ⇒ 有了摘要就可以走轻量路径，把 CAS 请求量压掉一个数量级。
+     * ⚠️ 必须是**加密存储**：它是可重放的登录凭据。
+     * ⚠️ 只有「用户用社区密码成功登录过」才写入；走统一认证时不写（那时并没验证过社区密码）。
+     */
+    private val COMMUNITY_PASSWORD_DIGEST = "community_password_digest"
+    val communityPasswordDigest =
+        EncryptedPreferencesItem(preferences.ENCRYPTED_SHARED_PREFERENCES, COMMUNITY_PASSWORD_DIGEST)
+
     // 座位预约（seatlib）JWT，与学校会话独立，见 SeatLoginStatus
     private val SEAT_TOKEN = "seat_token"
     val seatToken = EncryptedPreferencesItem(preferences.ENCRYPTED_SHARED_PREFERENCES, SEAT_TOKEN)

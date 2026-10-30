@@ -19,6 +19,9 @@ internal class DefaultLoginStatus @Inject constructor(
 
     override val fakeCookie = userDataStore.fakeCookie.toSettingItem()
 
+    /** BIT101 社区账号自己的密码摘要（与学校密码分开，见 LoginStatus 注释）。 */
+    override val communityPasswordDigest = userDataStore.communityPasswordDigest.toSettingItem()
+
     /** 学校身份验证失败的冷却（见 LoginRetryPolicy）。 */
     override val identityRetryAt = userDataStore.loginIdentityRetryAt.toSettingItem()
     override val identityAttempts = userDataStore.loginIdentityAttempts.toSettingItem()
@@ -44,6 +47,10 @@ internal class DefaultLoginStatus @Inject constructor(
         sid.set("")
         password.set("")
         fakeCookie.set("")
+        // ⚠️ 这里**不清** communityPasswordDigest：
+        //   本方法也被「登录过程中的 clearAll()」调用，清了它会让每次手动登录
+        //   都丢掉社区密码摘要 ⇒ 每次退回统一身份认证 ⇒ 又去撞学校 CAS。
+        //   只有**主动登出**才清（见 DefaultLoginRepo.logout）。
         // 换号/登出后必须解除冷却：新账号不该继承上一个账号的退避窗口
         identityRetryAt.set(0L)
         identityAttempts.set(0)
