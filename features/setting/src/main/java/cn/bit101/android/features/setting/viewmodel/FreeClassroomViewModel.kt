@@ -55,11 +55,17 @@ internal class FreeClassroomViewModel @Inject constructor(
         freeClassroomSettings.freeMinutesThreshold.set(freeMinutesThreshold)
     }
 
-    fun setSettingData(settingData: FreeClassroomSettingData) = withScope {
-        freeClassroomSettings.currentCampusCode.set(settingData.currentCampus.code)
-        freeClassroomSettings.currentCampusDisplayName.set(settingData.currentCampus.displayName)
-        freeClassroomSettings.hideBusyClassroom.set(settingData.hideBusyClassroom)
-        freeClassroomSettings.freeMinutesThreshold.set(settingData.freeMinutesThreshold)
+    /**
+     * 只改「隐藏当前不空闲的教室」这一个开关。
+     *
+     * ⚠️ 原来这里叫 `setSettingData(data)`，一次写 4 个 key，基准是页面首帧的
+     * [FreeClassroomSettingData.default]（校区是 `CampusInfo("", "")`、阈值 5）。
+     * 在校区/阈值真值到位前点一下这个开关，就会把**默认校区清空、阈值重置成 5** ——
+     * 比课表那次更疼。校区与阈值各有独立 setter（[setCampus] / [setFreeMinutesThreshold]），
+     * 本来就不该经过这里。
+     */
+    fun setHideBusyClassroom(hide: Boolean) = withScope {
+        freeClassroomSettings.hideBusyClassroom.set(hide)
     }
 
     val getBuildingTypeStatusLiveData = MutableLiveData<SimpleDataState<List<CampusInfo>>?>(null)

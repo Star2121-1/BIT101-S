@@ -103,7 +103,7 @@ private fun FreeClassroomSettingPageContent(
     onOpenEditCampusDialog: () -> Unit,
     onOpenFreeMinutesThresholdInputDialog: () -> Unit,
 
-    onSettingChange: (FreeClassroomSettingData) -> Unit,
+    onToggleHideBusyClassroom: (Boolean) -> Unit,
 ) {
     val hideSettings = listOf(
         SettingItemData.Button(
@@ -116,7 +116,7 @@ private fun FreeClassroomSettingPageContent(
         ),
         SettingItemData.Switch(
             title = "隐藏当前不空闲的教室",
-            onClick = { onSettingChange(settingData.copy(hideBusyClassroom = it)) },
+            onClick = { onToggleHideBusyClassroom(it) },
             checked = settingData.hideBusyClassroom,
         ),
         SettingItemData.Button(
@@ -196,6 +196,6 @@ internal fun FreeClassroomSettingPage(
         settingData = settingData,
         onOpenEditCampusDialog = { showCampusSelectDialog = true },
         onOpenFreeMinutesThresholdInputDialog = { showFreeMinutesThresholdInputDialog = true },
-        onSettingChange = vm::setSettingData
+        onToggleHideBusyClassroom = vm::setHideBusyClassroom
     )
 }

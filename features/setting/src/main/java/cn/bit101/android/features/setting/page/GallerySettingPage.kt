@@ -31,6 +31,7 @@ import cn.bit101.android.features.setting.component.SettingItemData
 import cn.bit101.android.features.setting.component.SettingsColumn
 import cn.bit101.android.features.setting.component.SettingsGroup
 import cn.bit101.android.features.setting.viewmodel.GallerySettingData
+import cn.bit101.android.features.setting.viewmodel.GalleryToggle
 import cn.bit101.android.features.setting.viewmodel.GalleryViewModel
 import cn.bit101.api.model.common.User
 
@@ -42,19 +43,19 @@ private fun GallerySettingPageContent(
 
     onOpenHideUserListDialog: () -> Unit,
     onHideAnonymousChange: () -> Unit,
-    onSettingChange: (GallerySettingData) -> Unit,
+    onToggle: (GalleryToggle, Boolean) -> Unit,
 ) {
     val hideSettings = listOf(
         SettingItemData.Switch(
             title = "在话廊中隐藏机器人 Poster",
             subTitle = "搜索栏、关注列表中的不受影响. 理论效果和网页端相同.",
-            onClick = { onSettingChange(settingData.copy(hideBotPoster = it)) },
+            onClick = { onToggle(GalleryToggle.HideBotPoster, it) },
             checked = settingData.hideBotPoster,
         ),
         SettingItemData.Switch(
             title = "也隐藏搜索栏中的机器人 Poster",
             subTitle = "未开启隐藏机器人 Poster 时不生效",
-            onClick = { onSettingChange(settingData.copy(hideBotPosterInSearch = it)) },
+            onClick = { onToggle(GalleryToggle.HideBotPosterInSearch, it) },
             checked = settingData.hideBotPosterInSearch,
             enable = settingData.hideBotPoster,
         ),
@@ -72,7 +73,7 @@ private fun GallerySettingPageContent(
         SettingItemData.Switch(
             title = "严格模式",
             subTitle = "额外隐藏其他人对被隐藏用户的回复.",
-            onClick = { onSettingChange(settingData.copy(hideStrictMode = it)) },
+            onClick = { onToggle(GalleryToggle.HideStrictMode, it) },
             checked = settingData.hideStrictMode,
         ),
     )
@@ -81,7 +82,7 @@ private fun GallerySettingPageContent(
         SettingItemData.Switch(
             title = "允许横向滑动",
             subTitle = "可以横向滑动来切换选项卡, 可能导致误触",
-            onClick = { onSettingChange(settingData.copy(allowHorizontalScroll = it)) },
+            onClick = { onToggle(GalleryToggle.AllowHorizontalScroll, it) },
             checked = settingData.allowHorizontalScroll,
         ),
     )
@@ -229,6 +230,6 @@ internal fun GallerySettingPage(
         settingData = settingData,
         onHideAnonymousChange = vm::switchShowAnonymous,
         onOpenHideUserListDialog = { showHideUsersDialog = true },
-        onSettingChange = vm::setSettingData
+        onToggle = vm::setToggle
     )
 }

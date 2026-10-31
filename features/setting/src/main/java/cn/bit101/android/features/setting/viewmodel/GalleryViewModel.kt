@@ -30,6 +30,22 @@ internal data class GallerySettingData(
     }
 }
 
+/**
+ * 话廊设置里**单个**开关的身份。
+ *
+ * ⚠️ 与 [CalendarToggle] 同一个理由：页面原来每个开关都调
+ * `onSettingChange(settingData.copy(x = it))`，ViewModel 再把 4 个 key 全写一遍。
+ * 而 `settingData` 首帧是 [GallerySettingData.default]（`hide*` 全 false、
+ * `allowHorizontalScroll` 却是 **true**）—— 在这段占位窗口里点任意一个开关，
+ * 其余三个会被写成默认值（用户开着「允许横向滑动」会被悄悄打开/关掉，反之亦然）。
+ */
+internal enum class GalleryToggle {
+    HideBotPoster,
+    HideBotPosterInSearch,
+    HideStrictMode,
+    AllowHorizontalScroll,
+}
+
 @HiltViewModel
 internal class GalleryViewModel @Inject constructor(
     private val gallerySettings: GallerySettings,
@@ -82,10 +98,18 @@ internal class GalleryViewModel @Inject constructor(
         }
     }
 
-    fun setSettingData(settingData: GallerySettingData) = withScope {
-        gallerySettings.hideBotPoster.set(settingData.hideBotPoster)
-        gallerySettings.hideBotPosterInSearch.set(settingData.hideBotPosterInSearch)
-        gallerySettings.hideStrictMode.set(settingData.hideStrictMode)
-        gallerySettings.allowHorizontalScroll.set(settingData.allowHorizontalScroll)
+    /**
+     * 改写**单个**开关（见 [GalleryToggle] 的说明）。
+     *
+     * 不要再回到「把整个 GallerySettingData 写一遍」：首帧占位值会把用户没碰过的
+     * 开关覆盖掉。
+     */
+    fun setToggle(toggle: GalleryToggle, value: Boolean) = withScope {
+        when (toggle) {
+            GalleryToggle.HideBotPoster -> gallerySettings.hideBotPoster.set(value)
+            GalleryToggle.HideBotPosterInSearch -> gallerySettings.hideBotPosterInSearch.set(value)
+            GalleryToggle.HideStrictMode -> gallerySettings.hideStrictMode.set(value)
+            GalleryToggle.AllowHorizontalScroll -> gallerySettings.allowHorizontalScroll.set(value)
+        }
     }
 }
