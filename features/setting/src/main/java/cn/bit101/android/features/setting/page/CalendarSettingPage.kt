@@ -30,6 +30,7 @@ import cn.bit101.android.features.common.helper.SimpleState
 import cn.bit101.android.features.setting.component.SettingItemData
 import cn.bit101.android.features.setting.component.SettingsColumn
 import cn.bit101.android.features.setting.component.SettingsGroup
+import cn.bit101.android.features.setting.viewmodel.CalendarToggle
 import cn.bit101.android.features.setting.viewmodel.CalendarViewModel
 import cn.bit101.android.features.setting.viewmodel.SettingData
 import java.time.LocalDate
@@ -52,7 +53,7 @@ private fun CalendarSettingPageContent(
     onGetExams: () -> Unit,
     onOpenTimeTable: () -> Unit,
     onOpenCustomSchedules: () -> Unit,
-    onSettingChange: (SettingData) -> Unit,
+    onToggle: (CalendarToggle, Boolean) -> Unit,
     courseColorFamily: CourseColorFamily,
     onOpenCourseColorDialog: () -> Unit,
 ) {
@@ -107,38 +108,38 @@ private fun CalendarSettingPageContent(
         ),
         SettingItemData.Switch(
             title = "显示周六",
-            onClick = { onSettingChange(settingData.copy(showSaturday = it)) },
+            onClick = { onToggle(CalendarToggle.Saturday, it) },
             checked = settingData.showSaturday,
         ),
         SettingItemData.Switch(
             title = "显示周日",
-            onClick = { onSettingChange(settingData.copy(showSunday = it)) },
+            onClick = { onToggle(CalendarToggle.Sunday, it) },
             checked = settingData.showSunday,
         ),
         SettingItemData.Switch(
             title = "显示课程卡片边框",
-            onClick = { onSettingChange(settingData.copy(showBorder = it)) },
+            onClick = { onToggle(CalendarToggle.Border, it) },
             checked = settingData.showBorder,
         ),
         SettingItemData.Switch(
             title = "高亮今日",
-            onClick = { onSettingChange(settingData.copy(showHighlightToday = it)) },
+            onClick = { onToggle(CalendarToggle.HighlightToday, it) },
             checked = settingData.showHighlightToday,
         ),
         SettingItemData.Switch(
             title = "显示节次分割线",
-            onClick = { onSettingChange(settingData.copy(showDivider = it)) },
+            onClick = { onToggle(CalendarToggle.Divider, it) },
             checked = settingData.showDivider,
         ),
         SettingItemData.Switch(
             title = "显示当前时间线",
-            onClick = { onSettingChange(settingData.copy(showCurrentTime = it)) },
+            onClick = { onToggle(CalendarToggle.CurrentTime, it) },
             checked = settingData.showCurrentTime,
         ),
         SettingItemData.Switch(
             title = "显示考试安排",
             subTitle = "考试安排更新时需手动刷新才能更新\n仅供参考, 错过考试概不负责 XP",
-            onClick = { onSettingChange(settingData.copy(showExamInfo = it)) },
+            onClick = { onToggle(CalendarToggle.ExamInfo, it) },
             checked = settingData.showExamInfo,
         ),
     )
@@ -494,7 +495,7 @@ internal fun CalendarSettingPage(
         onGetExams = vm::getExams,
         onOpenTimeTable = { showTimeTableDialog = true },
         onOpenCustomSchedules = { showCustomSchedulesDialog = true },
-        onSettingChange = vm::setSettingData,
+        onToggle = vm::setToggle,
         courseColorFamily = courseColorFamily,
         onOpenCourseColorDialog = { showCourseColorDialog = true },
     )

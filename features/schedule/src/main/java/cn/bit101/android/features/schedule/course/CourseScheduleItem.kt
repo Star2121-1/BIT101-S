@@ -14,11 +14,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import cn.bit101.android.data.schedule.CourseColorLogic
 
 /**
  * @author flwfdd
@@ -41,10 +43,18 @@ internal fun CourseScheduleItem(
     item: ScheduleItem,
     color: ScheduleItemColor
 ) {
+    // 块与块之间的深浅层次。
+    //
+    // 原版这里是 `Math.random() * 0.5f + 0.5f` —— 所以「统色」族下一片蓝也有层次，
+    // 代价是同一门课每次进来深浅都不一样。GRID 重构时我把它整个删了，结果同色号的块
+    // 长得一模一样，整屏像贴纸（用户原话：「之前虽然颜色都是蓝的，但还是有差距的」）。
+    // 现在改由**课名哈希**取档：同一门课深浅恒定（可跨端重算），不同课之间仍有层次。
+    val fillAlpha = remember(item.title) { CourseColorLogic.fillAlphaOf(item.title) }
+
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = color.containerColor,
+            containerColor = color.containerColor.copy(alpha = fillAlpha),
             contentColor = color.contextColor,
         ),
     ) {

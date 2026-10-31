@@ -41,6 +41,32 @@ object CourseColorLogic {
      */
     fun of(name: String): Int = (fnv1a32(name) % PALETTE_SIZE).toInt()
 
+    /** 深淡档数（课块之间的深浅层次共几档）。 */
+    const val SHADE_STEPS = 9
+
+    /**
+     * 课名 → 深淡档（0..[SHADE_STEPS]-1，0 = 最深/最实）。
+     *
+     * ## 为什么需要它
+     * 原版课表每张块有一个 `Math.random()` 的透明度（0.5~1.0），所以「统色」族下
+     * 一片蓝也能看得出层次。GRID 重构时为了「跨端同色」把它整个删掉了 —— 结果是
+     * 同一色号的块**完全一模一样**，一整屏像贴纸，反而更像丢了东西。
+     *
+     * 这里用**哈希高位**取档（低 8 位已被 [of] 的 `% 12` 用掉，两者互不干扰），
+     * 于是：同一门课永远同一个深浅（重进不闪、跨端可重算），不同课之间有层次。
+     * ⚠️ 不要换回 `Math.random()`：那会让同一门课每次进来深浅都变，也断掉
+     * 桌面组件 / 通知「按名字重算」的路。
+     */
+    fun shadeOf(name: String): Int = ((fnv1a32(name) ushr 8) % SHADE_STEPS).toInt()
+
+    /**
+     * 课名 → 块底透明度（1.0 = 最实，0.64 = 最淡）。
+     *
+     * 只在 Compose 侧用来做层次；跨端（RemoteViews / 通知）拿不到透明度叠加效果时
+     * 直接用 [of] 的纯色即可 —— 色相仍然一致，只是没有这层深浅。
+     */
+    fun fillAlphaOf(name: String): Float = 1f - shadeOf(name) * 0.045f
+
     /** FNV-1a 32 位，返回**无符号** 32 位值（Long 承载）。 */
     fun fnv1a32(input: String): Long {
         var h = FNV_OFFSET

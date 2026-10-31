@@ -136,6 +136,30 @@ class CourseColorLogicTest {
     }
 
     @Test
+    fun `shadeOf - 深浅档确定、落在范围内、且真的分出层次`() {
+        val names = listOf(
+            "操作系统", "计算机视觉", "计算机系统导论", "汇编语言与接口技术",
+            "计算机新技术专题", "值班", "强化学习", "开源软件开发",
+            "移动互联系统分析与设计", "数据结构 & 大学英语(三)", "高等数学A", "大学物理",
+        )
+        names.forEach { name ->
+            val s = CourseColorLogic.shadeOf(name)
+            assertEquals("$name 的档位应可重算", s, CourseColorLogic.shadeOf(name))
+            assertTrue("$name 档位越界：$s", s in 0 until CourseColorLogic.SHADE_STEPS)
+            val a = CourseColorLogic.fillAlphaOf(name)
+            assertTrue("$name 透明度越界：$a", a > 0.6f && a <= 1f)
+        }
+
+        // 关键：必须有层次。原版靠 Math.random() 保证「一片蓝也有深浅差」，
+        // 删掉后同色号块完全一样 —— 这条断言就是盯这件事别偷偷退化。
+        val distinct = names.map { CourseColorLogic.shadeOf(it) }.toSet()
+        assertTrue(
+            "12 门课只落到 ${distinct.size} 个深浅档，层次感没了（期望 >= 4）",
+            distinct.size >= 4,
+        )
+    }
+
+    @Test
     fun `守卫S3 - 引用方必须走 import 而不是复制定义`() {
         val root = repoRoot()
         val bad = mutableListOf<String>()

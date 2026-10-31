@@ -46,6 +46,27 @@ internal data class SettingData(
     }
 }
 
+/**
+ * 课表显示设置里**单个**开关的身份。
+ *
+ * ⚠️ 存在的理由是一次真事故：设置页原来每个开关都调 `onSettingChange(settingData.copy(x = it))`，
+ * ViewModel 再 `setSettingData(...)` 把 **7 个 key 全写一遍**。而 `settingData` 的首帧是
+ * [SettingData.default]（全 false，`collectAsState(initial=…)` 到 DataStore 真值发射之间
+ * 有几十~几百毫秒）——在这段窗口里点任意一个开关，其余 6 个会被一起写成 false。
+ * 用户看到的现象就是「我没动它，课表上的时间线/分割线自己没了」。
+ *
+ * 所以每个开关只准写自己那一个 key，靠这个枚举分派。
+ */
+internal enum class CalendarToggle {
+    Saturday,
+    Sunday,
+    Border,
+    HighlightToday,
+    Divider,
+    CurrentTime,
+    ExamInfo,
+}
+
 @HiltViewModel
 internal class CalendarViewModel @Inject constructor(
     private val coursesRepo: CoursesRepo,
@@ -188,14 +209,22 @@ internal class CalendarViewModel @Inject constructor(
         )
     }
 
-    fun setSettingData(settingData: SettingData) = withScope {
-        courseScheduleSettings.showDivider.set(settingData.showDivider)
-        courseScheduleSettings.showSaturday.set(settingData.showSaturday)
-        courseScheduleSettings.showSunday.set(settingData.showSunday)
-        courseScheduleSettings.highlightToday.set(settingData.showHighlightToday)
-        courseScheduleSettings.showBorder.set(settingData.showBorder)
-        courseScheduleSettings.showCurrentTime.set(settingData.showCurrentTime)
-        courseScheduleSettings.showExamInfo.set(settingData.showExamInfo)
+    /**
+     * 改写**单个**显示开关（见 [CalendarToggle] 的事故说明）。
+     *
+     * 绝不要再回到「把整个 SettingData 写一遍」：那会让首帧占位值（全 false）
+     * 顺手把用户没碰过的开关关掉。
+     */
+    fun setToggle(toggle: CalendarToggle, value: Boolean) = withScope {
+        when (toggle) {
+            CalendarToggle.Saturday -> courseScheduleSettings.showSaturday.set(value)
+            CalendarToggle.Sunday -> courseScheduleSettings.showSunday.set(value)
+            CalendarToggle.Border -> courseScheduleSettings.showBorder.set(value)
+            CalendarToggle.HighlightToday -> courseScheduleSettings.highlightToday.set(value)
+            CalendarToggle.Divider -> courseScheduleSettings.showDivider.set(value)
+            CalendarToggle.CurrentTime -> courseScheduleSettings.showCurrentTime.set(value)
+            CalendarToggle.ExamInfo -> courseScheduleSettings.showExamInfo.set(value)
+        }
     }
 
     private suspend fun getFirstDayWithoutState() {
