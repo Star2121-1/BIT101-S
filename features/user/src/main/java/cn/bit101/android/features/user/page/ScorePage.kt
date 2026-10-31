@@ -1,5 +1,8 @@
 package cn.bit101.android.features.user.page
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +25,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.OpenInBrowser
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
@@ -47,10 +52,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cn.bit101.android.data.score.ScoreCsv
 import cn.bit101.android.data.score.ScoreTable
 import cn.bit101.android.features.user.ScoreViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 /**
@@ -101,6 +110,26 @@ internal fun ScorePage(
     }
 
     var detailRow by remember { mutableStateOf<ScoreTable.Row?>(null) }
+    var showFormula by remember { mutableStateOf(false) }
+
+    // 导出走系统「另存为」：不申请存储权限、不写死路径，用户自己选地方。
+    val context = LocalContext.current
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val exported = rows.size
+        val ok = runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(ScoreCsv.of(rows).toByteArray(Charsets.UTF_8))
+            } ?: error("无法写入所选位置")
+        }.isSuccess
+        Toast.makeText(
+            context,
+            if (ok) "已导出 $exported 条成绩" else "导出失败，换个位置再试",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
 
     Scaffold(
         topBar = {
@@ -112,6 +141,14 @@ internal fun ScorePage(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showFormula = true }) {
+                        Icon(Icons.Outlined.Info, contentDescription = "计算口径")
+                    }
+                    if (rows.isNotEmpty()) {
+                        IconButton(onClick = { exportLauncher.launch(exportFileName()) }) {
+                            Icon(Icons.Outlined.FileDownload, contentDescription = "导出 CSV")
+                        }
+                    }
                     IconButton(onClick = onOpenWeb) {
                         Icon(Icons.Outlined.OpenInBrowser, contentDescription = "在网页里打开教务成绩")
                     }
@@ -226,6 +263,88 @@ internal fun ScorePage(
 
     detailRow?.let { row ->
         ScoreDetailDialog(row = row, onDismiss = { detailRow = null })
+    }
+
+    if (showFormula) {
+        FormulaDialog(onDismiss = { showFormula = false })
+    }
+}
+
+/** 导出的默认文件名（用户可在「另存为」里改）。 */
+private fun exportFileName(): String {
+    val stamp = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+    return "成绩-$stamp.csv"
+}
+
+/**
+ * 「计算口径」说明。
+ *
+ * ## 为什么要有这个弹窗
+ *
+ * 我们的绩点**故意**跟 BIT101 网页版不一样（网页版把不及格整门剔除、也没有逐课舍入，
+ * 会系统性偏高，能差到 2.0）。用户拿两个数一对就会来问，所以把依据、
+ * 以及「为什么和网页版不同」直接写在页面上，而不是等他来质疑。
+ */
+@Composable
+private fun FormulaDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
+        title = { Text("计算口径") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "依据教务处《本科生学分绩点计算办法（试行）》教〔2022〕16号，\n" +
+                        "以及《本科生学籍管理细则》办发〔2019〕75号。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                FormulaLine(
+                    "平均学分绩点",
+                    "GPA = Σ(学分 × 课程绩点) ÷ Σ学分",
+                )
+                FormulaLine(
+                    "课程绩点",
+                    "X < 60 记 0；否则 4 − 3 × (100 − X)² ÷ 1600，\n结果四舍五入到小数点后一位。\n" +
+                        "（例：90 → 3.8，85 → 3.6，80 → 3.3，60 → 1.0）",
+                )
+                FormulaLine(
+                    "五级制",
+                    "优秀 4.0 / 良好 3.6 / 中等 2.8 / 及格 1.7 / 不及格 0",
+                )
+                FormulaLine(
+                    "哪些算进来",
+                    "· 在读期间修读的所有课程都算；\n" +
+                        "· 不及格按 0 绩点算，但学分仍计入分母；\n" +
+                        "· 只有校公选课的不及格不计入；\n" +
+                        "· 缺考 / 旷考 / 作弊按 0 分记；\n" +
+                        "· 缓考、免修、0 学分暂不计入；\n" +
+                        "· 同一门课多次修读只取最高成绩。",
+                )
+                FormulaLine(
+                    "和网页版为什么不同",
+                    "BIT101 网页版把所有不及格整门剔除（学分也不进分母），\n" +
+                        "且没有上面那条四舍五入 —— 它的绩点会偏高，极端时能差 2.0 以上。\n" +
+                        "这里以学校文件为准。",
+                )
+                Text(
+                    "「加权均分」是百分制加权平均，和 GPA 是两个不同指标；" +
+                        "「已获学分」只算及格的课，所以会小于「算进绩点的学分」。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun FormulaLine(label: String, body: String) {
+    Column {
+        Text(text = label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        Text(text = body, style = MaterialTheme.typography.bodySmall)
     }
 }
 
