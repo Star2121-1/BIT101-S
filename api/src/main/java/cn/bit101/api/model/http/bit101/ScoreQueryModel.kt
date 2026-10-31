@@ -19,10 +19,45 @@ class ScoreQueryModel private constructor() {
         val username: String,
         val password: String,
         val challengeId: String? = null,
+        /**
+         * **开课时间 / 开课学期**（教务那边叫 `kksj`）—— 这是「按学期查」的参数。
+         *
+         * 契约来自认证主机的 OpenAPI（`/openapi.json` 的 `JwbScoreRequest`，
+         * 2026-10-31 核实）。留 `null` 时不序列化，行为由服务端决定
+         * （**实测前不确定**是不是等价于「全部学期」）。
+         *
+         * ⚠️ 取值格式**未实测**：教务界面上这个下拉一般是 `2025-2026-2` 这种，
+         * 也可能要 `2025-2026学年第二学期`。别在下拉里硬编码，先按接口返回的
+         * 学期串原样回传（见 `ScoreTable.Table.terms`）。
+         */
+        val kksj: String? = null,
+        /**
+         * 是否附带**每门课的详情**（平均分 / 班级占比 / 专业占比 / 最高分…）。
+         *
+         * 与 [detailed] 的区别**服务端没文档**：两个字段都在 `JwbScoreRequest` 里，
+         * `detail` 是 `bool`（默认 false），`detailed` 是 `bool|null`。
+         * 大概率 `detailed` 是后来的同义字段（或 `detail` 的弃用替身），
+         * 所以两个一起传 true —— 多传一个不存在的字段服务端会忽略。
+         */
+        val detail: Boolean = false,
+        val detailed: Boolean? = null,
     )
 
-    /** 挑战详情（`202` 响应体里的 `detail` 字段）。 */
-    data class Challenge(
+    /**
+     * `/api/jwb/all_score`（「Get all scores」）的请求体。
+     *
+     * 单独一个类而不是复用 [Body]：这个接口的契约里**没有 `kksj` / `detail`**，
+     * 只有 `detailed`（OpenAPI 的 `JwbAllScoreRequest`）。虽然 FastAPI 默认会忽略
+     * 多余字段，但契约不一致的字段传过去只会让将来排障更乱。
+     */
+    data class AllScoreBody(
+        val username: String,
+        val password: String,
+        val challengeId: String? = null,
+        val detailed: Boolean? = null,
+    )
+
+    /** 挑战详情（`202` 响应体里的 `detail` 字段）。 */    data class Challenge(
         val challengeId: String? = null,
         val accessToken: String? = null,
         /** `running` / `waiting_sms` / `authenticated` / `failed` / `expired` */

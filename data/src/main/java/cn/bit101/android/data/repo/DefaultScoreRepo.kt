@@ -206,14 +206,56 @@ internal class DefaultScoreRepo @Inject constructor(
             }
             if (!ready) return@runCatching Query.Err(ScoreCheckStore.Code.TIMEOUT)
 
+            // ⚠️ `detail` / `detailed` 是**必须传的**：不传的话服务端不回
+            // 「平均分 / 班级占比 / 专业占比 / 最高分」这几列，详情弹窗就没什么可看。
+            // 两个字段都在契约里（OpenAPI `JwbScoreRequest`），语义服务端没写文档，
+            // 一起传 —— 不存在的会被忽略。
             val table = api.fetch(
-                body = ScoreQueryModel.Body(username = sid, password = password, challengeId = challengeId),
+                body = ScoreQueryModel.Body(
+                    username = sid,
+                    password = password,
+                    challengeId = challengeId,
+                    detail = true,
+                    detailed = true,
+                ),
                 authorization = "Bearer $token",
             ).body()?.data?.takeIf { it.isJsonArray }
                 ?: return@runCatching Query.Err(ScoreCheckStore.Code.FAILED)
 
+            // 空表先别下结论：`/api/jwb/bit101/score` 不带 `kksj` 时很可能**只查当前学期**，
+            // 而「本学期还没出分」和「历史成绩没查」在这条路上长得一模一样。
+            // 所以空表时再向「全部学期」要一次，谁有数据用谁。
+            if (ScoreLogic.rowsOf(table).isEmpty()) {
+                val all = runCatching {
+                    api.allScore(
+                        body = ScoreQueryModel.AllScoreBody(
+                            username = sid,
+                            password = password,
+                            challengeId = challengeId,
+                            detailed = true,
+                        ),
+                        authorization = "Bearer $token",
+                    ).body()?.data?.takeIf { it.isJsonArray }
+                }.getOrNull()
+                if (all != null && ScoreLogic.rowsOf(all).isNotEmpty()) {
+                    dumpForDiagnosis("score_debug_all.json", all)
+                    return@runCatching Query.Ok(all)
+                }
+                // 两个接口都空 ⇒ 才是「真的没成绩」。把两份原文都留下，
+                // 下次再有人问「为什么没成绩」，直接 adb pull 出来看形状。
+                dumpForDiagnosis("score_debug_cur.json", table)
+                all?.let { dumpForDiagnosis("score_debug_all.json", it) }
+            }
+
             Query.Ok(table)
         }.getOrElse { Query.Err(ScoreCheckStore.Code.FAILED, it.message) }
+    }
+
+    /** 把原始响应写到外部私有目录，便于 `adb pull` 出来对形状（不参与云备份）。 */
+    private fun dumpForDiagnosis(name: String, json: JsonElement) {
+        runCatching {
+            File(appContext.getExternalFilesDir(null), name).writeText(json.toString())
+        }
     }
 
     override suspend fun syncAndDiff(force: Boolean): List<ScoreEntry> = withContext(Dispatchers.IO) {

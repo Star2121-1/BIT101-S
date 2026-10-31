@@ -42,4 +42,20 @@ interface ScoreQueryApiService : ApiService {
         @Body body: ScoreQueryModel.Body,
         @Header("Authorization") authorization: String,
     ): Response<GetScoreDataModel.Response>
+
+    /**
+     * **全部学期**的成绩（`Get all scores`）。
+     *
+     * 存在的意义：`/api/jwb/bit101/score` 不带 `kksj` 时很可能只回**当前学期**
+     * （2026-10-31 实测该账号回空数组 ⇒ 要么没出分、要么只查了当前学期，无法区分）。
+     * 这个接口一次拿全部，是「查历史成绩」最直接的兜底。
+     *
+     * ⚠️ 返回格式**未实测**，理论上与 [fetch] 同构（同一套解析链）；
+     * 解析不出来时 `ScoreTable.parse` 会返回 null，页面报「格式变了」而不是崩。
+     */
+    @POST("/api/jwb/all_score")
+    suspend fun allScore(
+        @Body body: ScoreQueryModel.AllScoreBody,
+        @Header("Authorization") authorization: String,
+    ): Response<GetScoreDataModel.Response>
 }
