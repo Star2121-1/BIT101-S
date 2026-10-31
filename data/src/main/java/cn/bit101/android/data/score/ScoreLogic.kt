@@ -89,7 +89,7 @@ object ScoreLogic {
      * 直接 `contains("课程")` 取第一个会命中**课程编号**（拿到 `09000410` 当课名）。
      * 所以先试「课程名」，再退回「课程」并排除编号/代码。
      */
-    private fun findColumn(header: List<String>, keywords: List<String>, exclude: List<String> = emptyList()): Int {
+    internal fun findColumn(header: List<String>, keywords: List<String>, exclude: List<String> = emptyList()): Int {
         for (keyword in keywords) {
             val index = header.indexOfFirst { cell ->
                 cell.contains(keyword) && exclude.none { cell.contains(it) }
@@ -99,7 +99,7 @@ object ScoreLogic {
         return -1
     }
 
-    private fun rowsOf(root: JsonElement?): List<List<String>> {
+    internal fun rowsOf(root: JsonElement?): List<List<String>> {
         val arr = root as? JsonArray ?: return emptyList()
         if (arr.size() == 0) return emptyList()
         return arr.map { row ->
@@ -114,7 +114,7 @@ object ScoreLogic {
         }
     }
 
-    private fun isHeaderCell(cell: String): Boolean =
+    internal fun isHeaderCell(cell: String): Boolean =
         (COURSE_KEYWORDS + SCORE_KEYWORDS + TERM_KEYWORDS).any { cell.contains(it) }
 
     // ------------------------------------------------------------ 差分

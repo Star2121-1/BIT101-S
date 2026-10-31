@@ -15,6 +15,61 @@ interface ScoreRepo {
     suspend fun fetchTable(): JsonElement?
 
     /**
+     * 成绩页的一次加载结果。
+     *
+     * ⚠️ 与 [fetchTable] 的区别：那个只为「提醒」服务，失败给 null 就够；成绩页要
+     * 把**失败原因**说清楚（未登录 / 要短信 / 密码错 / 网络），否则用户只能干瞪眼。
+     *
+     * ⚠️ 这里回的是**已解析的** [cn.bit101.android.data.score.ScoreTable.Table]，
+     * 不是 `JsonElement` —— UI 层不该因为「我要显示成绩」而背上 Gson 依赖。
+     */
+    sealed interface Load {
+        /** 真的从网上拉到了。 */
+        data class Fresh(val table: cn.bit101.android.data.score.ScoreTable.Table) : Load
+
+        /**
+         * 没拉到网，但有上次的缓存 —— 页面照常显示，顶部提示「可能是旧数据」。
+         *
+         * @param reason 为什么这次没拉成（null 表示「还没到该刷的时候」）
+         */
+        data class Cached(
+            val table: cn.bit101.android.data.score.ScoreTable.Table,
+            val cachedAtMillis: Long,
+            val reason: cn.bit101.android.data.score.ScoreCheckStore.Code? = null,
+            val detail: String? = null,
+        ) : Load
+
+        /**
+         * 什么都没有（首次使用就失败）。[code] 决定页面给什么动作：
+         * [cn.bit101.android.data.score.ScoreCheckStore.Code.NOT_LOGGED_IN] ⇒ 去登录；
+         * `AUTH_FAILED` ⇒ 去改密码；`NEED_SMS` ⇒ 只能等/去网页；`FAILED` ⇒ 重试。
+         */
+        data class Failed(
+            val code: cn.bit101.android.data.score.ScoreCheckStore.Code,
+            val detail: String? = null,
+        ) : Load
+
+        /**
+         * 数据拿到了，但**表认不出**（找不到「课程名称 / 成绩」这些列）。
+         *
+         * 与 [Failed] 分开：这不是网络问题，重试也没用 —— 是教务换了表格格式，
+         * 页面该引导用户去网页版看，而不是让他一直点重试。
+         */
+        data class Malformed(val detail: String? = null) : Load
+    }
+
+    /**
+     * 成绩页用的加载：优先缓存，必要时才真的走一次学校 SSO。
+     *
+     * @param force 用户主动下拉刷新 / 点「重新获取」时传 true，跳过新鲜度判断。
+     *
+     * ⚠️ 缓存不只是性能：每次取数都要用学号密码走一遍学校统一身份认证，
+     * 频繁登录会被风控要求短信二次验证（2026-09-26 实测）。所以**默认必须吃缓存**，
+     * 只有明确刷新或缓存过期才打网。
+     */
+    suspend fun load(force: Boolean = false): Load
+
+    /**
      * 同步并差分。
      *
      * @param force 跳过 12h 限频（用户点「立即检查一次」时用）。⚠️ 每次检查都要走一遍学校登录，别在自动路径上用。

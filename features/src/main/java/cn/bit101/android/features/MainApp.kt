@@ -18,7 +18,6 @@ import cn.bit101.android.features.common.component.image.ImageHost
 import cn.bit101.android.features.common.component.image.rememberImageHostState
 import cn.bit101.android.features.common.component.snackbar.SnackbarHost
 import cn.bit101.android.features.common.component.snackbar.rememberSnackbarState
-import cn.bit101.android.features.common.helper.ScoreUrl
 import cn.bit101.android.features.common.helper.getAppVersion
 import cn.bit101.android.features.common.nav.NavAnimation
 import cn.bit101.android.features.common.nav.NavDestConfig
@@ -50,6 +49,7 @@ import cn.bit101.android.features.report.ReportScreen
 import cn.bit101.android.features.setting.SettingScreen
 import cn.bit101.android.features.common.GotoRequest
 import cn.bit101.android.features.user.MyFollowListScreen
+import cn.bit101.android.features.user.ScoreScreen
 import cn.bit101.android.features.user.CampusServiceScreen
 import cn.bit101.android.features.user.StudySpotDetailScreen
 import cn.bit101.android.features.user.UserScreen
@@ -194,10 +194,13 @@ internal fun MainApp() {
             }
         }
 
-        // 成绩页：出分通知经 AppRoutes.SCORE 走顶层兜底落到这里，
-        // 直接打开成绩查询页（WebScreen 在 /score 上会自动填学号密码）。
+        // 成绩页：出分通知经 AppRoutes.SCORE 走顶层兜底落到这里。
+        // 2026-10-31 起是**原生页**（列表 + 加权 GPA + 筛选 + 详情），
+        // 网页版（ScoreUrl）降级为页内右上角的兜底入口 —— 教务加了新列时它还能看到。
         composableScore(navAnim, navController) {
-            WebScreen(mainController, url = ScoreUrl)
+            Box(modifier = Modifier.navigationBarsPadding()) {
+                ScoreScreen(mainController)
+            }
         }
 
         composableMessage(navAnim, navController) {

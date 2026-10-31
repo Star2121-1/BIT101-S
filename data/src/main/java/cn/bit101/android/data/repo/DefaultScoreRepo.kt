@@ -6,6 +6,7 @@ import cn.bit101.android.data.score.ScoreCheckStore
 import cn.bit101.android.data.score.ScoreLogic
 import cn.bit101.android.data.score.ScoreLogic.ScoreEntry
 import cn.bit101.android.data.score.ScoreQueryLogic
+import cn.bit101.android.data.score.ScoreTable
 import cn.bit101.api.model.http.bit101.ScoreQueryModel
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
@@ -50,8 +51,75 @@ internal class DefaultScoreRepo @Inject constructor(
     private val loginStatus: cn.bit101.android.config.user.base.LoginStatus,
 ) : ScoreRepo {
 
+    /** 成绩表缓存的新鲜期：30 分钟内不重复登录取数（每取一次都是一次学校 SSO）。 */
+    private val TABLE_CACHE_FRESH_MS = 30 * 60 * 1000L
+
+    /** 成绩表缓存文件名（`filesDir/` 下，格式 `毫秒\n<JSON>`）。 */
+    private val TABLE_CACHE_FILE = "score_table_cache.txt"
+
     override suspend fun fetchTable(): JsonElement? = withContext(Dispatchers.IO) {
         (query() as? Query.Ok)?.table
+    }
+
+    /**
+     * 成绩页的加载：**先吃缓存，必要时才真的登录取数**。
+     *
+     * 缓存新鲜期 [TABLE_CACHE_FRESH_MS]：成绩一天也不见得变一次，而每取一次都要用
+     * 学号密码走学校 SSO（频繁登录会被要求短信二次验证）。所以「打开页面」这条路
+     * 不能每次都打网 —— 只有用户主动刷新、或缓存过期才拉。
+     *
+     * 拉失败但手里有旧缓存时**照样给数据**（[ScoreRepo.Load.Cached]），页面顶部提示
+     * 「这是 X 时的数据 + 为什么没更新」—— 比整页空白有用得多。
+     */
+    override suspend fun load(force: Boolean): ScoreRepo.Load = withContext(Dispatchers.IO) {
+        val cached = readTableCache()
+        if (!force && cached != null &&
+            System.currentTimeMillis() - cached.second < TABLE_CACHE_FRESH_MS
+        ) {
+            return@withContext ScoreRepo.Load.Cached(cached.first, cached.second)
+        }
+        when (val q = query()) {
+            is Query.Ok -> {
+                val parsed = ScoreTable.parse(q.table)
+                if (parsed == null) {
+                    // 拿到数据却认不出表头 —— 把原文落盘一份，便于 `adb pull` 出来对形状
+                    // （外部私有目录，不参与云备份；只在出问题时写这一个文件）
+                    runCatching {
+                        java.io.File(appContext.getExternalFilesDir(null), "score_debug.json")
+                            .writeText(q.table.toString())
+                    }
+                    // 有缓存就先顶上，别让页面空着
+                    cached?.let { ScoreRepo.Load.Cached(it.first, it.second, null, "教务的表格格式变了，这份是旧的") }
+                        ?: ScoreRepo.Load.Malformed(q.table.toString().take(600))
+                } else {
+                    writeTableCache(q.table)
+                    ScoreRepo.Load.Fresh(parsed)
+                }
+            }
+
+            is Query.Err -> cached?.let {
+                ScoreRepo.Load.Cached(it.first, it.second, q.code, q.detail)
+            } ?: ScoreRepo.Load.Failed(q.code, q.detail)
+        }
+    }
+
+    /** 缓存格式：`毫秒\n<JSON>`（与仓库其它 Store 一样，`cat` 出来能直接看）。 */
+    private fun readTableCache(): Pair<ScoreTable.Table, Long>? {
+        val text = cn.bit101.android.data.common.TextFileCache.read(appContext, TABLE_CACHE_FILE) ?: return null
+        val nl = text.indexOf('\n')
+        if (nl <= 0) return null
+        val at = text.substring(0, nl).toLongOrNull() ?: return null
+        val json = runCatching { JsonParser.parseString(text.substring(nl + 1)) }.getOrNull() ?: return null
+        // 缓存也走同一套解析：解析不出来就当没有缓存（宁可重新拉一次）
+        return ScoreTable.parse(json)?.let { it to at }
+    }
+
+    private fun writeTableCache(table: JsonElement) {
+        cn.bit101.android.data.common.TextFileCache.write(
+            appContext,
+            TABLE_CACHE_FILE,
+            "${System.currentTimeMillis()}\n$table",
+        )
     }
 
     override suspend fun lastCheck(): ScoreCheckStore.Status? = withContext(Dispatchers.IO) {

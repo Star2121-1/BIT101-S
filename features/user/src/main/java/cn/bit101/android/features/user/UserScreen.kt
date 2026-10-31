@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Grade
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
@@ -101,6 +102,7 @@ private fun UserScreenContent(    mainController: MainController,
     onHide: () -> Unit,
     onRefresh: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenScore: () -> Unit,
     onOpenMessage: () -> Unit,
     onOpenFollowerPage: () -> Unit,
     onOpenFollowingPage: () -> Unit,
@@ -198,6 +200,11 @@ private fun UserScreenContent(    mainController: MainController,
                     if (data.own) {
                         IconButton(onClick = onRefresh) {
                             Icon(imageVector = Icons.Outlined.Refresh, contentDescription = "刷新")
+                        }
+                        // 成绩入口。2026-10-31 前成绩页只挂在「出分通知 / NFC 标签」上，
+                        // 用户想主动看一眼成绩是没地方点的 —— 这里补一个常规入口。
+                        IconButton(onClick = onOpenScore) {
+                            Icon(imageVector = Icons.Outlined.Grade, contentDescription = "成绩")
                         }
                         Box {
                             IconButton(onClick = onOpenMessage) {
@@ -353,6 +360,7 @@ fun UserScreen(
             onHide = { vm.hide(id) },
             onRefresh = { vm.refreshUserInfo(id) },
             onOpenSettings = { mainController.navigate(NavDest.Setting()) },
+            onOpenScore = { mainController.navigate(NavDest.Score) },
             onOpenMessage = { mainController.navigate(NavDest.Message) },
             onOpenFollowerPage = { mainController.navigate(NavDest.FollowList(NavDest.FollowList.FOLLOWER)) },
             onOpenFollowingPage = { mainController.navigate(NavDest.FollowList(NavDest.FollowList.FOLLOWING)) },
