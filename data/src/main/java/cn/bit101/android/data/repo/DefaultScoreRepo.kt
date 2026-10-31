@@ -2,6 +2,7 @@ package cn.bit101.android.data.repo
 
 import android.content.Context
 import cn.bit101.android.data.repo.base.ScoreRepo
+import cn.bit101.android.data.score.ScoreCachePolicy
 import cn.bit101.android.data.score.ScoreCheckStore
 import cn.bit101.android.data.score.ScoreLogic
 import cn.bit101.android.data.score.ScoreLogic.ScoreEntry
@@ -51,9 +52,6 @@ internal class DefaultScoreRepo @Inject constructor(
     private val loginStatus: cn.bit101.android.config.user.base.LoginStatus,
 ) : ScoreRepo {
 
-    /** 成绩表缓存的新鲜期：30 分钟内不重复登录取数（每取一次都是一次学校 SSO）。 */
-    private val TABLE_CACHE_FRESH_MS = 30 * 60 * 1000L
-
     /** 成绩表缓存文件名（`filesDir/` 下，格式 `毫秒\n<JSON>`）。 */
     private val TABLE_CACHE_FILE = "score_table_cache.txt"
 
@@ -64,19 +62,22 @@ internal class DefaultScoreRepo @Inject constructor(
     /**
      * 成绩页的加载：**先吃缓存，必要时才真的登录取数**。
      *
-     * 缓存新鲜期 [TABLE_CACHE_FRESH_MS]：成绩一天也不见得变一次，而每取一次都要用
+     * 缓存新鲜期 [ScoreCachePolicy.FRESH_MS]：成绩一天也不见得变一次，而每取一次都要用
      * 学号密码走学校 SSO（频繁登录会被要求短信二次验证）。所以「打开页面」这条路
      * 不能每次都打网 —— 只有用户主动刷新、或缓存过期才拉。
      *
      * 拉失败但手里有旧缓存时**照样给数据**（[ScoreRepo.Load.Cached]），页面顶部提示
      * 「这是 X 时的数据 + 为什么没更新」—— 比整页空白有用得多。
+     *
+     * ⚠️ 拉到了**空表**也走 [ScoreRepo.Load.Cached]（见 [ScoreCachePolicy.merge]）：
+     * 没评教时认证主机回 `[]`，照单全收会把用户已有的成绩从页面上抹掉。
      */
     override suspend fun load(force: Boolean): ScoreRepo.Load = withContext(Dispatchers.IO) {
         val cached = readTableCache()
-        if (!force && cached != null &&
-            System.currentTimeMillis() - cached.second < TABLE_CACHE_FRESH_MS
-        ) {
-            return@withContext ScoreRepo.Load.Cached(cached.first, cached.second)
+        if (!ScoreCachePolicy.shouldFetch(force, cached, System.currentTimeMillis())) {
+            // shouldFetch 为 false 的前提就是 cached 非空
+            val hit = cached ?: return@withContext ScoreRepo.Load.Failed(ScoreCheckStore.Code.FAILED)
+            return@withContext ScoreRepo.Load.Cached(hit.first, hit.second)
         }
         when (val q = query()) {
             is Query.Ok -> {
@@ -92,8 +93,18 @@ internal class DefaultScoreRepo @Inject constructor(
                     cached?.let { ScoreRepo.Load.Cached(it.first, it.second, null, "教务的表格格式变了，这份是旧的") }
                         ?: ScoreRepo.Load.Malformed(q.table.toString().take(600))
                 } else {
-                    writeTableCache(q.table)
-                    ScoreRepo.Load.Fresh(parsed)
+                    when (val merged = ScoreCachePolicy.merge(parsed, cached)) {
+                        is ScoreCachePolicy.Merge.UseFresh -> {
+                            if (merged.persist) writeTableCache(q.table)
+                            ScoreRepo.Load.Fresh(merged.table)
+                        }
+
+                        is ScoreCachePolicy.Merge.KeepCached -> {
+                            // merge 判 KeepCached 的前提就是 cached 非空且非空表
+                            val hit = cached ?: return@withContext ScoreRepo.Load.Fresh(parsed)
+                            ScoreRepo.Load.Cached(hit.first, hit.second, null, merged.note)
+                        }
+                    }
                 }
             }
 

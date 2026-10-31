@@ -135,6 +135,43 @@ class ScoreTableTest {
         assertEquals("缓考 + 0 学分共两条被跳过", 2, s.skipped)
     }
 
+    /**
+     * 0 分 / 不及格按官方口径**不进入**加权绩点。
+     *
+     * 口径来源：线上 bundle `Score-92da5cfc.js` 的 `N()` 里 `if(B(成绩)==0) continue`，
+     * 而 `B()` 对「不及格」返回 0。若我们照着「数学上更正确」的算进去，
+     * 用户拿 App 的绩点跟网页版一对就对不上。
+     */
+    @Test
+    fun 统计_不及格不计入绩点但要说出来() {
+        val json = table(
+            listOf("1", "2025-2026-2", "A1", "课程A", "90", "80", "4", "必修", "", ""),
+            listOf("2", "2025-2026-2", "B2", "课程B", "不及格", "70", "3", "必修", "", ""),
+            listOf("3", "2025-2026-2", "C3", "课程C", "0", "60", "2", "必修", "", ""),
+        )
+        val s = ScoreTable.summarize(ScoreTable.parse(JsonParser.parseString(json))!!.rows)
+
+        assertEquals("只有课程A进绩点", 1, s.courseCount)
+        assertEquals(4.0, s.totalCredit, 1e-9)
+        assertEquals(90.0, s.weightedScore!!, 1e-9)
+        assertEquals("不及格 + 0 分两门被排除", 2, s.zeroSkipped)
+        assertEquals("排除不是「算不出来」，不该混进 skipped", 0, s.skipped)
+    }
+
+    /** 原考不及格、补考及格 ⇒ 取最高分那条，算作有效课程。 */
+    @Test
+    fun 统计_补考及格按最高分计入且不算排除() {
+        val json = table(
+            listOf("1", "2025-2026-1", "D4", "线性代数", "40", "70", "3", "必修", "", ""),
+            listOf("2", "2025-2026-2", "D4", "线性代数", "60", "70", "3", "必修", "", ""),
+        )
+        val s = ScoreTable.summarize(ScoreTable.parse(JsonParser.parseString(json))!!.rows)
+
+        assertEquals(1, s.courseCount)
+        assertEquals(60.0, s.weightedScore!!, 1e-9)
+        assertEquals("最高分那条有效 ⇒ 0 分排除数为 0", 0, s.zeroSkipped)
+    }
+
     @Test
     fun 解析_脏数据一律返回null() {
         assertNull("null", ScoreTable.parse(null))

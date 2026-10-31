@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -171,12 +172,17 @@ internal fun ScorePage(
                         // 两种「空」要分开说：一是教务那边真的还没出分（含没评教被卡），
                         // 二是筛选把结果筛空了。前者的下一步是去网页版确认，后者是清筛选。
                         if (table == null || table.rows.isEmpty()) {
+                            // ⚠️ 这里必须给「去网页版」这个出口而不是只写一句话：
+                            // 认证主机在「没完成评教」时回的是空数组，跟「还没出分」
+                            // 长得一模一样，App 这边**分辨不出来**。能分辨的是教务处
+                            // 的网页（它会直接写「请先完成评教」），所以把用户送过去。
                             ErrorBlock(
                                 title = "还没有成绩",
-                                detail = "教务现在一门成绩都没给。如果确认已经出分，多半是" +
-                                    "还没评教被卡住了 —— 点右上角用网页版看一眼就知道了。",
-                                action = null,
-                                onAction = {},
+                                detail = "教务这次一门成绩都没返回。可能是本学期还没出分，" +
+                                    "也可能是评教没做完被卡住了 —— 这两种在 App 这边长得一样，" +
+                                    "去网页版看一眼它怎么说的就知道了。",
+                                action = "去网页版看看",
+                                onAction = onOpenWeb,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         } else {
@@ -248,6 +254,15 @@ private fun SummaryCard(summary: ScoreTable.Summary) {
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
+            // 0 分/不及格是按官方口径**主动排除**的，不是算不出来 —— 必须说出来，
+            // 否则用户会疑惑「我那门挂科的怎么没影响绩点」，或者反过来怀疑我们美化数据。
+            if (summary.zeroSkipped > 0) {
+                Spacer(Modifier.height(if (summary.skipped > 0) 2.dp else 8.dp))
+                Text(
+                    text = "另有 ${summary.zeroSkipped} 门 0 分 / 不及格，按官方口径不计入绩点",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
         }
     }
 }
@@ -288,33 +303,64 @@ private fun FilterBar(
             modifier = Modifier.fillMaxWidth(),
         )
         if (terms.size > 1 || types.size > 1 || hasFilter) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                terms.forEach { term ->
-                    FilterChip(
-                        selected = selectedTerms.isEmpty() || term in selectedTerms,
-                        onClick = { onToggleTerm(term) },
-                        label = { Text(term) },
-                    )
+            // ⚠️ 学期和性质**必须分成两行并带标签**。
+            // 早先是一条横向滚动带把两类 chip 混在一起，找「其他学期」时看到的是
+            // 一长条分不出是什么的标签 —— 用户会直接判定「没有按学期查询这功能」。
+            // 而按学期查恰恰是这里最常用的操作（成绩一学期才出一次）。
+            if (terms.size > 1 || selectedTerms.isNotEmpty()) {
+                FilterGroup(label = "学期") {
+                    terms.forEach { term ->
+                        FilterChip(
+                            selected = selectedTerms.isEmpty() || term in selectedTerms,
+                            onClick = { onToggleTerm(term) },
+                            label = { Text(term) },
+                        )
+                    }
                 }
-                types.forEach { type ->
-                    FilterChip(
-                        selected = selectedTypes.isEmpty() || type in selectedTypes,
-                        onClick = { onToggleType(type) },
-                        label = { Text(type) },
-                    )
+            }
+            if (types.size > 1 || selectedTypes.isNotEmpty()) {
+                FilterGroup(label = "性质") {
+                    types.forEach { type ->
+                        FilterChip(
+                            selected = selectedTypes.isEmpty() || type in selectedTypes,
+                            onClick = { onToggleType(type) },
+                            label = { Text(type) },
+                        )
+                    }
                 }
-                if (hasFilter) {
-                    TextButton(onClick = onClear) { Text("清空") }
+            }
+            if (hasFilter) {
+                TextButton(onClick = onClear, modifier = Modifier.align(Alignment.End)) {
+                    Text("清空筛选")
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/** 一组带标签的横向可滚动筛选 chip。 */
+@Composable
+private fun FilterGroup(label: String, content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 6.dp),
+        )
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
     }
 }
 

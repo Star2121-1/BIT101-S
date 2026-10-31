@@ -203,22 +203,36 @@ object ScoreTable {
         val weightedScore: Double?,
         val weightedGpa: Double?,
         val skipped: Int,
+        /**
+         * 成绩为 **0 分 / 不及格**、按官方口径**不计入**加权绩点的门数。
+         *
+         * ⚠️ 这不是「算不出来」，是**主动排除**：官方网页版默认不把
+         * `B(成绩)==0` 的课程放进绩点计算（成绩清单里照样列出来，可以手动勾回去）。
+         * 我们要跟它对得上数，就必须同样排除 —— 但要把门数说出来，
+         * 否则用户看到绩点比预想高，会以为我们算错了。
+         */
+        val zeroSkipped: Int = 0,
     ) {
         companion object {
-            val EMPTY = Summary(0, 0.0, null, null, 0)
+            val EMPTY = Summary(0, 0.0, null, null, 0, 0)
         }
     }
 
     /**
      * 加权统计。
      *
-     * 去重口径：同一 `课程编号` 多条记录时**取成绩最高的那条**（重修覆盖），
-     * 没有编号的行不参与去重、各自计入。
+     * 三条口径都对齐官方网页版（2026-10-31 对照线上 bundle `Score-92da5cfc.js`
+     * 的 `N()` / `A()` / `B()` / `U()`）：
+     *
+     * 1. 同一 `课程编号` 多条记录时**取成绩最高的那条**（重修覆盖），没有编号的行各自计入；
+     * 2. 成绩为 0 分 / 不及格的行**不进绩点**（记入 [Summary.zeroSkipped]）；
+     * 3. 缓考 / 缺考 / 免修 / 认不出的成绩、以及 0 学分的行**跳过**（记入 [Summary.skipped]）。
      */
     fun summarize(rows: List<Row>): Summary {
         if (rows.isEmpty()) return Summary.EMPTY
 
         var skipped = 0
+        var zeroSkipped = 0
         val bestByCourse = LinkedHashMap<String, Row>()
         val noNumber = ArrayList<Row>()
 
@@ -227,6 +241,13 @@ object ScoreTable {
             val credit = row.credit
             if (score == null || credit == null || credit <= 0) {
                 skipped++
+                return@forEach
+            }
+            // 官方口径：0 分 / 不及格不进绩点。⚠️ 放在按课程编号去重**之前**，
+            // 与官方一致 —— 否则「原考 40 + 补考 60」会先被去重成 60 而放过一条
+            // 本该排除的记录，两端口径就分叉了。
+            if (score <= 0.0) {
+                zeroSkipped++
                 return@forEach
             }
             val key = row.courseNumber.filterNot { it.isWhitespace() }.lowercase()
@@ -253,13 +274,14 @@ object ScoreTable {
             gpaSum += gpa * credit
             count++
         }
-        if (creditSum <= 0) return Summary(0, 0.0, null, null, skipped)
+        if (creditSum <= 0) return Summary(0, 0.0, null, null, skipped, zeroSkipped)
         return Summary(
             courseCount = count,
             totalCredit = creditSum,
             weightedScore = scoreSum / creditSum,
             weightedGpa = gpaSum / creditSum,
             skipped = skipped,
+            zeroSkipped = zeroSkipped,
         )
     }
 }
