@@ -81,19 +81,24 @@ internal fun ScorePage(
 ) {
     val table = state.table
 
-    // 筛选后的行 + 统计。几十门课，重算一次是几微秒，没必要缓存进 ViewModel
-    val rows = remember(table, state.selectedTerms, state.selectedTypes, state.keyword) {
-        table?.rows.orEmpty().filter { row ->
-            (state.selectedTerms.isEmpty() || row.term in state.selectedTerms) &&
-                (state.selectedTypes.isEmpty() || row.courseType in state.selectedTypes) &&
-                (
-                    state.keyword.isBlank() ||
-                        row.courseName.contains(state.keyword, ignoreCase = true) ||
-                        row.courseNumber.contains(state.keyword, ignoreCase = true)
-                    )
-        }
+    // 列表显示**全部**行（包括被重修覆盖掉的旧记录），但统计只算「每门课最高分那条」。
+    // ⚠️ 去重必须在**全量**上做再筛学期，不能先筛后去重 —— 否则切到挂科那个学期时，
+    // 那门课只剩挂科记录，会被当成最终成绩再算一次（见 ScoreTable.Table.bestRows）。
+    val filterOf: (ScoreTable.Row) -> Boolean = { row ->
+        (state.selectedTerms.isEmpty() || row.term in state.selectedTerms) &&
+            (state.selectedTypes.isEmpty() || row.courseType in state.selectedTypes) &&
+            (
+                state.keyword.isBlank() ||
+                    row.courseName.contains(state.keyword, ignoreCase = true) ||
+                    row.courseNumber.contains(state.keyword, ignoreCase = true)
+                )
     }
-    val summary = remember(rows) { ScoreTable.summarize(rows) }
+    val rows = remember(table, state.selectedTerms, state.selectedTypes, state.keyword) {
+        table?.rows.orEmpty().filter(filterOf)
+    }
+    val summary = remember(table, state.selectedTerms, state.selectedTypes, state.keyword) {
+        ScoreTable.summarize(table?.bestRows.orEmpty().filter(filterOf))
+    }
 
     var detailRow by remember { mutableStateOf<ScoreTable.Row?>(null) }
 
@@ -150,14 +155,23 @@ internal fun ScorePage(
                 )
 
                 else -> {
-                    // 一门都没有时不画统计卡和筛选条 —— 一屏「— / 0 / 0」加一个空搜索框，
-                    // 比什么都不显示更像「界面坏了」
+                    // 统计卡与筛选条**分开判**。早先两者绑在同一个 `if (courseCount > 0)`
+                    // 里，于是筛选后只剩缓考/校公选不及格（rows 非空、可计入 0 门）时
+                    // 筛选条一起消失 —— 连「清空筛选」都没了，用户退不出那个筛选状态。
                     if (summary.courseCount > 0) {
-                        SummaryCard(summary)
+                        SummaryCard(summary, recordCount = rows.size)
+                    }
 
+                    val terms = table?.terms.orEmpty()
+                    val types = table?.courseTypes.orEmpty()
+                    val hasFilter = state.selectedTerms.isNotEmpty() ||
+                        state.selectedTypes.isNotEmpty() ||
+                        state.keyword.isNotBlank()
+                    // 一个学期/性质都不够成选项、也没在筛的时候不画（空搜索框看着像界面坏了）
+                    if (hasFilter || terms.size > 1 || types.size > 1) {
                         FilterBar(
-                            terms = table?.terms.orEmpty(),
-                            types = table?.courseTypes.orEmpty(),
+                            terms = terms,
+                            types = types,
                             selectedTerms = state.selectedTerms,
                             selectedTypes = state.selectedTypes,
                             keyword = state.keyword,
@@ -215,9 +229,17 @@ internal fun ScorePage(
     }
 }
 
-/** 顶部统计：加权 GPA / 加权均分 / 总学分 / 门数。 */
+/**
+ * 顶部统计：加权 GPA / 加权均分 / 已获学分 / 计入门数。
+ *
+ * ⚠️ 三个学分门数字段**必须分开叫**（早先混成一个「总学分」）：
+ * - 加权 GPA 与加权均分是**两个不同指标**：前者是 4 分制平均学分绩点（保研/评奖用），
+ *   后者是百分制加权平均分。用户不知道这四个字是两个东西，所以标签要直白。
+ * - 「已获学分」才是用户心里的「总学分」（及格才拿得到）；
+ *   「计入门数」是进了绩点计算的门数，跟列表行数不同（重修只算一门、缓考不算）。
+ */
 @Composable
-private fun SummaryCard(summary: ScoreTable.Summary) {
+private fun SummaryCard(summary: ScoreTable.Summary, recordCount: Int) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -236,34 +258,57 @@ private fun SummaryCard(summary: ScoreTable.Summary) {
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = "加权 GPA",
+                    text = "平均学分绩点",
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
             }
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 MiniStat("加权均分", summary.weightedScore?.let { format2(it) } ?: "—")
-                MiniStat("总学分", formatCredit(summary.totalCredit))
-                MiniStat("门数", summary.courseCount.toString())
+                MiniStat("已获学分", formatCredit(summary.earnedCredit))
+                MiniStat("计入门数", summary.courseCount.toString())
             }
-            if (summary.skipped > 0) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "另有 ${summary.skipped} 门没计入（缓考 / 缺考 / 无学分）",
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
-            // 0 分/不及格是按官方口径**主动排除**的，不是算不出来 —— 必须说出来，
-            // 否则用户会疑惑「我那门挂科的怎么没影响绩点」，或者反过来怀疑我们美化数据。
-            if (summary.zeroSkipped > 0) {
-                Spacer(Modifier.height(if (summary.skipped > 0) 2.dp else 8.dp))
-                Text(
-                    text = "另有 ${summary.zeroSkipped} 门 0 分 / 不及格，按官方口径不计入绩点",
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
+            SummaryNotes(summary, recordCount)
         }
+    }
+}
+
+/**
+ * 统计卡下面那几行说明。
+ *
+ * ⚠️ 抽出来是因为它**不能只在统计卡里显示**：筛选后只剩缓考/校公选不及格时
+ * `courseCount == 0`、统计卡整体不画，而「为什么一门都没算」恰恰是这时候最该说的。
+ * 那种情况下这几行由页面在筛选条下方单独渲染。
+ */
+@Composable
+private fun SummaryNotes(summary: ScoreTable.Summary, recordCount: Int) {
+    // 「列表 5 条记录 / 计入 4 门」这种差异必须写出来：跨学期去重（重修只算最高分）
+    // 会让列表条数多于计入门数，用户很容易以为哪门课被吞了。
+    if (recordCount > summary.courseCount) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "统计按课程去重：列表 $recordCount 条记录 → 计入 ${summary.courseCount} 门" +
+                "（同一门课重修取最高分那条）",
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+    if (summary.skipped > 0) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            // 缺考/旷考已经按 0 分计入了（学校规定），所以这里不能再写「缺考」
+            text = "另有 ${summary.skipped} 门没有可用成绩（缓考 / 免修 / 学分不明），没计入",
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+    // 校公选课不及格是**规定**不计入，不是我们算不出来 —— 必须说出来，
+    // 否则用户会疑惑「我那门挂科的怎么没影响绩点」，或者反过来怀疑我们美化数据。
+    if (summary.electiveFailed > 0) {
+        Spacer(Modifier.height(if (summary.skipped > 0) 2.dp else 8.dp))
+        Text(
+            text = "另有 ${summary.electiveFailed} 门校公选课不及格，按学校规定不计入绩点",
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
 }
 

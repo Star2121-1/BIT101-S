@@ -86,18 +86,36 @@ class ScoreCachePolicyTest {
         assertEquals(ScoreCachePolicy.EMPTY_TABLE_NOTE, (m as ScoreCachePolicy.Merge.KeepCached).note)
     }
 
+    /**
+     * 空表且没有旧缓存 ⇒ **必须写盘**。
+     *
+     * 早先这里是 `persist = false`，理由是「空表会污染下次判断」。那个理由站不住
+     * （守旧缓存的条件是 `rows.isNotEmpty()`，空缓存不会被误当成有数据可守），
+     * 而代价极大：没出分/没评教的用户每次进成绩页都要走一遍学校 SSO 登录。
+     */
     @Test
-    fun 合并_空表且没有缓存时用空表但不写缓存() {
+    fun 合并_空表且没有缓存时也要写盘以压住重复登录() {
         val m = ScoreCachePolicy.merge(emptyTable(), cached = null) as ScoreCachePolicy.Merge.UseFresh
         assertTrue(m.table.rows.isEmpty())
-        assertFalse("空表进缓存会污染下次判断", m.persist)
+        assertTrue("空表必须落盘，否则每次打开页面都重新登录一次学校", m.persist)
+    }
+
+    /** 空表落盘之后，30 分钟内再打开就不该再打网。 */
+    @Test
+    fun 合并_空表落盘后新鲜期内不再打网() {
+        val empty = emptyTable()
+        val at = 1_000L
+        assertFalse(
+            "空结果也有新鲜期，否则每次进页面都重新登录",
+            ScoreCachePolicy.shouldFetch(force = false, cached = empty to at, nowMillis = at + 60_000L),
+        )
     }
 
     @Test
-    fun 合并_缓存本身也是空表时仍按空表处理() {
+    fun 合并_缓存本身也是空表时仍按空表处理并刷新时间戳() {
         val m = ScoreCachePolicy.merge(emptyTable(), emptyTable() to 1_000L)
             as ScoreCachePolicy.Merge.UseFresh
-        assertFalse(m.persist)
+        assertTrue("仍然是空，但时间戳要更新，才算「刚查过」", m.persist)
     }
 
     @Test

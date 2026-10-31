@@ -18,8 +18,9 @@ package cn.bit101.android.data.score
  * 拉到 `[]` → 当成「最新事实」写进缓存 → **50 门成绩从页面上消失**，而且下次
  * 还是空。用户看到的是「我的成绩没了」，实际什么都没坏。
  *
- * ⇒ 空表**不能覆盖**非空缓存，而且**自己也不进缓存**（进了会让下次判断把「空」
- * 当基线，污染得更彻底）。
+ * ⇒ 空表**不能覆盖**非空缓存。但空表**本身要落盘**（带时间戳），否则
+ * 「30 分钟内别重复登录」这条对「还没出分」的用户完全不生效 —— 他们每进一次
+ * 页面就打一次学校 SSO。详见 [merge]。
  */
 internal object ScoreCachePolicy {
 
@@ -47,8 +48,7 @@ internal object ScoreCachePolicy {
         /**
          * 用新表。
          *
-         * @param persist 要不要写进缓存。[false] 只发生在「新表是空的、手里也没有
-         *   非空旧表」时 —— 空表不进缓存。
+         * @param persist 要不要写进缓存。目前**恒为 true** —— 见 [merge] 的说明。
          */
         data class UseFresh(val table: ScoreTable.Table, val persist: Boolean) : Merge
 
@@ -60,14 +60,28 @@ internal object ScoreCachePolicy {
         data class KeepCached(val note: String) : Merge
     }
 
+    /**
+     * ⚠️ **空表也必须落盘。**
+     *
+     * 早先这里对「两边都空」返回 `persist = false`，理由是「空表进缓存会污染下次判断」。
+     * 那个理由站不住，而且造成了一个比污染严重得多的问题：
+     * `shouldFetch` 在 `cached == null` 时恒为 true ⇒ 本学期还没出分（或没评教）的用户
+     * **每进一次成绩页就打一次学校 SSO**。而每次取数都是一次账密登录，正是文件里
+     * 反复强调会撞风控、被要求短信二次验证的场景 —— 我们为了躲一个假想的污染，
+     * 天天往风控上撞。
+     *
+     * 空表落盘不会污染判断：[merge] 守旧缓存的条件是
+     * `cachedTable.rows.isNotEmpty()`，空缓存不会被误当成「有数据可守」。
+     * 而且有了时间戳，「30 分钟内别重复登录」这条才会对空结果同样生效。
+     */
     fun merge(fresh: ScoreTable.Table, cached: Pair<ScoreTable.Table, Long>?): Merge {
         if (fresh.rows.isNotEmpty()) return Merge.UseFresh(fresh, persist = true)
-        // 新表为空：手里有非空的旧表就守住它
+        // 新表为空：手里有非空的旧表就守住它（这才是真正要防的「成绩被抹掉」）
         val cachedTable = cached?.first
         if (cachedTable != null && cachedTable.rows.isNotEmpty()) {
             return Merge.KeepCached(EMPTY_TABLE_NOTE)
         }
-        // 都没有 ⇒ 就是空的，但别把空表写进缓存
-        return Merge.UseFresh(fresh, persist = false)
+        // 两边都空 ⇒ 就是「还没出分」，写盘以便 30 分钟内不再重复登录
+        return Merge.UseFresh(fresh, persist = true)
     }
 }
